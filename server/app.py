@@ -5,15 +5,16 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any, Awaitable
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import protocol
+from . import health, protocol
 from .store import Store, activity_summary, hr_stats
 from .watch import NotConnected, Watch, load_config
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+HEALTH_SERIES = ("pai", "resting_hr", "max_hr", "manual_hr", "temperature", "sleep_respiratory_rate", "hrv")
 
 
 class Hub:
@@ -131,6 +132,61 @@ def create_app(watch: Any = None, store: Store | None = None, hub: Hub | None = 
     @app.post("/api/vibrate")
     async def vibrate():
         return await call(watch.vibrate())
+
+    # ---- stored health data and watch controls ------------------------------
+
+    @app.post("/api/health/sync")
+    async def health_sync():
+        return await call(watch.health_sync())
+
+    @app.get("/api/health")
+    async def health_data(days: float = 7):
+        since = time.time() - days * 86400
+
+        def merged(*kinds: str) -> list[dict]:
+            rows = [{**r, "source": k} for k in kinds for r in store.health_since(k, since)]
+            return sorted(rows, key=lambda r: r["ts"])
+
+        series = {
+            "spo2": merged("spo2", "spo2_sleep"),
+            "stress": merged("stress", "stress_manual"),
+            **{k: store.health_since(k, since) for k in HEALTH_SERIES},
+        }
+        workouts = [
+            {"start": w["start"], "end": w["end"], "type": w["type"], "duration_s": w["duration_s"],
+             "avg_hr": w.get("avg_hr"), "max_hr": w.get("max_hr"), "calories": w.get("calories"),
+             "steps": w.get("steps"), "distance_m": w.get("distance_m"), "active_s": w.get("active_s"),
+             "track": w["track"]}
+            for w in store.workouts_since(since)
+        ]
+        last_sync = store.get_meta("health_last_sync")
+        return {"series": series, "sleep_sessions": [], "workouts": workouts,
+                "last_sync": float(last_sync) if last_sync else None}
+
+    @app.get("/api/settings")
+    async def get_settings():
+        return {"settings": watch.settings()}
+
+    @app.post("/api/settings")
+    async def set_setting(body: dict = Body(...)):
+        if "key" not in body or "value" not in body:
+            return JSONResponse({"error": "Send {\"key\": ..., \"value\": ...}"}, status_code=400)
+        try:
+            value = health.validate_setting(body["key"], body["value"])
+        except (KeyError, ValueError, TypeError) as e:
+            return JSONResponse({"error": str(e).strip("'")}, status_code=400)
+        return await call(watch.set_setting(body["key"], value))
+
+    @app.post("/api/notify")
+    async def notify(body: dict = Body(...)):
+        kind = body.get("kind", "message")
+        if kind not in ("message", "call", "generic"):
+            return JSONResponse({"error": "kind must be message, call or generic"}, status_code=400)
+        return await call(watch.notify(str(body.get("title", "")), str(body.get("body", "")), kind))
+
+    @app.post("/api/time/sync")
+    async def time_sync():
+        return await call(watch.time_sync())
 
     @app.get("/api/events")
     async def events(limit: int = 100):

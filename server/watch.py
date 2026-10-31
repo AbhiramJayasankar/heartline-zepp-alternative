@@ -10,6 +10,7 @@ from typing import Callable
 
 from bleak import BleakClient, BleakScanner
 
+from . import health as h
 from . import protocol as p
 from .store import Store
 
@@ -67,6 +68,7 @@ class Watch:
         self._raw_accel: list[list[float]] = []
         self._raw_flush_task: asyncio.Task | None = None
         self._syncing = False
+        self.steps: dict | None = None
 
     # ---- state ---------------------------------------------------------------
 
@@ -85,6 +87,7 @@ class Watch:
                 "streaming": self.raw_streaming,
                 "file": self._raw_file.relative_to(ROOT).as_posix() if self._raw_file else None,
             },
+            "steps": self.steps,
         }
 
     def _set(self, connection: str, error: str | None = None) -> None:
@@ -176,6 +179,7 @@ class Watch:
             await self.read_battery()
         except Exception as e:
             self._event("warn", f"Battery read failed: {e}")
+        await self._start_live(client)
         if self._want_hr:
             await self.hr_start()
         if self._want_raw:
@@ -514,3 +518,205 @@ class Watch:
             await client.write_gatt_char(p.ALERT_LEVEL, p.ALERT_OFF, response=False)
         self._event("info", "Sent find-watch vibration")
         return {"ok": True}
+
+    # ---- stored health data --------------------------------------------------
+
+    async def _fetch_blob(self, client: BleakClient, code: int, since: datetime) -> tuple[bytes, float | None, bytes]:
+        """One fetch of any HuamiFetchDataType. Returns (start reply, start ts, data). Never sends the 0x03 ack."""
+        ctrl: asyncio.Queue[bytes] = asyncio.Queue()
+        buf = bytearray()
+
+        def on_data(_, d):
+            buf.extend(bytes(d)[1:])  # first byte is a packet counter
+
+        async with self._lock:
+            await client.start_notify(p.ACT_CTRL, lambda _, d: ctrl.put_nowait(bytes(d)))
+            await client.start_notify(p.ACT_DATA, on_data)
+            await client.write_gatt_char(p.ACT_CTRL, p.fetch_command(code, since), response=False)
+        try:
+            reply = await asyncio.wait_for(ctrl.get(), 10)
+            if reply[:3] != b"\x10\x01\x01":
+                return reply, None, b""
+            count, start = p.parse_fetch_start(reply)
+            if not count:
+                return reply, None, b""
+            async with self._lock:
+                await client.write_gatt_char(p.ACT_CTRL, p.FETCH_GO, response=False)
+            done = await asyncio.wait_for(ctrl.get(), 180)
+            if done[:3] != b"\x10\x02\x01":
+                raise RuntimeError(f"Transfer ended with {done.hex()}")
+            return reply, start, bytes(buf)
+        finally:
+            async with self._lock:
+                await client.stop_notify(p.ACT_DATA)
+                await client.stop_notify(p.ACT_CTRL)
+
+    @staticmethod
+    def _parse_health(kind: str, data: bytes, start: float | None, fetched_at: float) -> list[dict]:
+        if kind == "manual_hr":
+            return h.parse_manual_hr(data)
+        if kind == "pai":
+            return h.parse_pai(data)
+        if kind == "stress":
+            return h.parse_stress(data, start) if start else []
+        if kind == "stress_manual":
+            return h.parse_stress_manual(data)
+        if kind in ("spo2", "spo2_sleep"):
+            return h.parse_spo2(data)
+        if kind == "temperature":
+            return h.parse_temperature(data, start, fetched_at)
+        return []  # statistics (protobuf) and types this watch doesn't fill: kept in raw_fetches only
+
+    async def health_sync(self) -> dict:
+        """Fetch every stored data type since the last sync (or 7 days). Nothing is ever acked/deleted."""
+        client = self._require()
+        if self._syncing:
+            raise RuntimeError("A history sync is already running")
+        self._syncing = True
+        try:
+            now = datetime.now().astimezone()
+            first = now - timedelta(days=SYNC_FIRST_DAYS)
+            results = {}
+            for kind, code in h.FETCH_TYPES.items():
+                try:
+                    if kind == "workouts":
+                        results[kind] = await self._sync_workouts(client, first)
+                    else:
+                        results[kind] = await self._sync_health_type(client, kind, code, first)
+                except NotConnected:
+                    raise
+                except Exception as e:
+                    results[kind] = {"added": 0, "supported": False, "note": f"error: {e}"}
+            self._store.set_meta("health_last_sync", str(time.time()))
+            got = [f"{r['added']} {k}" for k, r in results.items() if r["added"]]
+            self._event("info", "Health sync done: " + (", ".join(got) or "nothing new"))
+            return {"types": results}
+        finally:
+            self._syncing = False
+
+    async def _sync_health_type(self, client: BleakClient, kind: str, code: int, first: datetime) -> dict:
+        last = self._store.health_last_ts(kind)
+        since = datetime.fromtimestamp(last + 60).astimezone() if last else first
+        added, note, supported = 0, "", True
+        for _ in range(5):
+            reply, start, data = await self._fetch_blob(client, code, since)
+            if reply[:3] != b"\x10\x01\x01":
+                supported, note = False, f"watch replied {reply.hex()}"
+                break
+            if not data:
+                note = note or "no new data on the watch"
+                break
+            fetched_at = time.time()
+            self._store.add_raw_fetch(fetched_at, kind, start, reply, data)
+            rows = self._parse_health(kind, data, start, fetched_at)
+            if not rows:
+                note = f"{len(data)} bytes stored raw (format not decoded)"
+                break
+            added += self._store.upsert_health(kind, rows)
+            note = ""
+            if kind in h.CONSUMED_ON_TRANSFER:
+                break
+            nxt = rows[-1]["ts"] + 60
+            if nxt <= since.timestamp():
+                break
+            since = datetime.fromtimestamp(nxt).astimezone()
+        return {"added": added, "supported": supported, "note": note}
+
+    async def _sync_workouts(self, client: BleakClient, first: datetime) -> dict:
+        last = self._store.workout_last_start()
+        since = datetime.fromtimestamp(last + 60).astimezone() if last else first
+        added = 0
+        for _ in range(SYNC_MAX_ROUNDS):
+            reply, start, data = await self._fetch_blob(client, h.FETCH_TYPES["workouts"], since)
+            if reply[:3] != b"\x10\x01\x01":
+                return {"added": added, "supported": False, "note": f"watch replied {reply.hex()}"}
+            summary = h.parse_workout_summary(data) if data else None
+            if summary is None:
+                break
+            self._store.add_raw_fetch(time.time(), "workouts", start, reply, data)
+            wstart = datetime.fromtimestamp(summary["start"]).astimezone()
+            dreply, dstart, details = await self._fetch_blob(client, h.FETCH_SPORTS_DETAILS, wstart)
+            track = None
+            if details:
+                self._store.add_raw_fetch(time.time(), "workout_details", dstart, dreply, details)
+                track = h.parse_workout_details(details)
+            added += self._store.upsert_workout(summary, track)
+            nxt = datetime.fromtimestamp(summary["start"] + 60).astimezone()
+            if nxt <= since:
+                break
+            since = nxt
+        return {"added": added, "supported": True, "note": "" if added else "no new workouts"}
+
+    # ---- live steps and watch events ----------------------------------------
+
+    async def _start_live(self, client: BleakClient) -> None:
+        try:
+            steps = h.parse_realtime_steps(bytes(await client.read_gatt_char(h.REALTIME_STEPS)))
+            if steps:
+                self.steps = {**steps, "ts": time.time()}
+            await client.start_notify(h.REALTIME_STEPS, self._on_steps)
+            await client.start_notify(h.DEVICE_EVENT, self._on_device_event)
+        except Exception as e:
+            self._event("warn", f"Live steps/events unavailable: {e}")
+
+    def _on_steps(self, _, data: bytearray) -> None:
+        steps = h.parse_realtime_steps(bytes(data))
+        if steps:
+            self.steps = {**steps, "ts": time.time()}
+            self._emit({"type": "steps", **self.steps})
+
+    def _on_device_event(self, _, data: bytearray) -> None:
+        name, ts = h.parse_device_event(bytes(data)), time.time()
+        self._emit({"type": "device_event", "ts": ts, "name": name, "raw": bytes(data).hex()})
+        self._event("info", f"Watch event: {name.replace('_', ' ')}")
+
+    # ---- controls ------------------------------------------------------------
+
+    def _setting_values(self) -> dict:
+        return json.loads(self._store.get_meta("watch_settings") or "{}")
+
+    def settings(self) -> list[dict]:
+        values = self._setting_values()
+        return [{"key": s["key"], "label": s["label"], "type": s["type"], "value": values.get(s["key"]),
+                 "options": s.get("options"), "min": s.get("min"), "max": s.get("max")} for s in h.SETTINGS]
+
+    async def set_setting(self, key: str, value) -> dict:
+        client = self._require()
+        value = h.validate_setting(key, value)
+        values = self._setting_values()
+        target, cmd = h.setting_command(key, value, values)
+        async with self._lock:
+            if target == "hr":
+                await client.write_gatt_char(p.HR_CONTROL, cmd, response=True)
+            else:
+                replies: asyncio.Queue[bytes] = asyncio.Queue()
+                await client.start_notify(h.CONFIG, lambda _, d: replies.put_nowait(bytes(d)))
+                try:
+                    await client.write_gatt_char(h.CONFIG, cmd, response=False)
+                    reply = await asyncio.wait_for(replies.get(), 3)
+                finally:
+                    await client.stop_notify(h.CONFIG)
+                if reply[:1] != b"\x10" or reply[1:2] != cmd[:1]:
+                    raise RuntimeError(f"Watch did not accept {key} ({reply.hex()})")
+        values[key] = value
+        self._store.set_meta("watch_settings", json.dumps(values))
+        self._event("info", f"Set {key} to {value}")
+        return {"ok": True}
+
+    async def notify(self, title: str, body: str, kind: str = "message") -> dict:
+        client = self._require()
+        payload = h.notification_payload(title, body, kind)
+        async with self._lock:
+            for chunk in h.chunked_writes(payload, h.CHUNK_MTU):
+                await client.write_gatt_char(h.CHUNKED, chunk, response=False)
+        self._event("info", f"Sent notification: {title}")
+        return {"ok": True}
+
+    async def time_sync(self) -> dict:
+        client = self._require()
+        now = datetime.now().astimezone()
+        async with self._lock:
+            await client.write_gatt_char(h.CURRENT_TIME, h.current_time_bytes(now), response=True)
+            watch_time = h.parse_current_time(bytes(await client.read_gatt_char(h.CURRENT_TIME)))
+        self._event("info", f"Set the watch clock to {now:%H:%M:%S}")
+        return {"ok": True, "time": watch_time or now.isoformat()}
