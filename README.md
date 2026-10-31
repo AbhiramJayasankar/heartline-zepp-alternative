@@ -19,10 +19,9 @@ Talks to the watch directly over Bluetooth LE from Windows, with a local web das
 - Raw sensors: optical PPG (u16, ~25 Hz) and accelerometer (int16 x/y/z, 4100 = 1 g, ~25 Hz) on `0x0002`,
   started with `01 03 19`, `01 03 00 00 00 19`, `02` on `0x0001` (stop `03`). Every sample is recorded to `data/raw/*.csv`.
 - Activity history: one 8-byte record per minute (kind, intensity, steps, HR, ?, sleep, deep, rem) via `0x0004`/`0x0005`.
-  The `03` ack is never sent, because it deletes the fetched data from the watch; Zepp still gets everything.
+  The `03` ack is never sent, because it deletes the fetched data from the watch; Zepp still gets the activity history.
 - Vibrate (find device): `03` to Alert Level `0x2A06`.
 - Full GATT table.
-
 - Health data (`POST /api/health/sync`): manual HR, workouts with per-second HR tracks, PAI, automatic stress,
   sleep SpO2, skin temperature (one sample a minute), and a statistics blob (stored raw, not decoded).
   The watch accepts but returns nothing for normal SpO2, manual stress, sleep sessions, resting/max HR, sleep breathing and HRV.
