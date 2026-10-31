@@ -16,11 +16,17 @@ Talks to the watch directly over Bluetooth LE from Windows, with a local web das
 - Battery level, charging state, charge timestamps.
 - Device info: serial, hardware and software revision.
 - Live heart rate (continuous mode, a reading every 1–5 s once locked), stored in `data/watch.db`.
+- Raw sensors: optical PPG (u16, ~25 Hz) and accelerometer (int16 x/y/z, 4100 = 1 g, ~25 Hz) on `0x0002`,
+  started with `01 03 19`, `01 03 00 00 00 19`, `02` on `0x0001` (stop `03`). Every sample is recorded to `data/raw/*.csv`.
+- Activity history: one 8-byte record per minute (kind, intensity, steps, HR, ?, sleep, deep, rem) via `0x0004`/`0x0005`.
+  The `03` ack is never sent, because it deletes the fetched data from the watch; Zepp still gets everything.
+- Vibrate (find device): `03` to Alert Level `0x2A06`.
 - Full GATT table.
 
-## What does not (yet)
+## Not verified yet
 
-- Raw accelerometer / PPG stream: control char `0x0001` answers `10 01 03 04` to every start command and sends no data.
+- The activity kind to state mapping follows Gadgetbridge's MiBand2 provider; REM and "active" minutes are approximations.
+- SpO2, stress, PAI, sleep sessions, workouts: Gadgetbridge has fetch types for them (`HuamiFetchDataType`), not tried here yet.
 
 ## Layout
 
