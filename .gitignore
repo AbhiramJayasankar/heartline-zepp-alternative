@@ -4,3 +4,4 @@ watch.json
 data/
 __pycache__/
 *.log
+discovery/

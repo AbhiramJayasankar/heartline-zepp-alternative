@@ -1,4 +1,5 @@
 """SQLite storage for heart-rate samples and the event log."""
+import json
 import pathlib
 import sqlite3
 import threading
@@ -20,6 +21,11 @@ class Store:
                     ts INTEGER PRIMARY KEY, kind INTEGER, intensity INTEGER, steps INTEGER, hr INTEGER,
                     unknown1 INTEGER, sleep INTEGER, deep INTEGER, rem INTEGER);
                 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+                CREATE TABLE IF NOT EXISTS health (
+                    type TEXT NOT NULL, ts INTEGER NOT NULL, value REAL, extra TEXT, PRIMARY KEY (type, ts));
+                CREATE TABLE IF NOT EXISTS workouts (start INTEGER PRIMARY KEY, data TEXT NOT NULL, track TEXT);
+                CREATE TABLE IF NOT EXISTS raw_fetches (
+                    ts REAL NOT NULL, type TEXT NOT NULL, start REAL, reply TEXT, data BLOB);
                 """
             )
 
@@ -83,6 +89,60 @@ class Store:
                 (before,),
             ).fetchone()
         return row[0] if row else None
+
+    # ---- stored health data (SpO2, stress, PAI, temperature, workouts...) -----------------------------------
+
+    def add_raw_fetch(self, ts: float, kind: str, start: float | None, reply: bytes, data: bytes) -> None:
+        """Keep every transferred blob: some buffers are handed over only once, so this is the only copy."""
+        with self._lock:
+            self._db.execute("INSERT INTO raw_fetches VALUES (?, ?, ?, ?, ?)", (ts, kind, start, reply.hex(), data))
+            self._db.commit()
+
+    def upsert_health(self, kind: str, rows: list[dict]) -> int:
+        """rows: {"ts", "value", ...extras}. Returns how many (type, ts) points were new."""
+        with self._lock:
+            before = self._db.execute("SELECT COUNT(*) FROM health WHERE type = ?", (kind,)).fetchone()[0]
+            self._db.executemany(
+                "INSERT INTO health VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(type, ts) DO UPDATE SET value = excluded.value, extra = excluded.extra",
+                [(kind, int(r["ts"]), r["value"],
+                  json.dumps({k: v for k, v in r.items() if k not in ("ts", "value")})) for r in rows],
+            )
+            self._db.commit()
+            return self._db.execute("SELECT COUNT(*) FROM health WHERE type = ?", (kind,)).fetchone()[0] - before
+
+    def health_since(self, kind: str, since: float) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT ts, value, extra FROM health WHERE type = ? AND ts >= ? ORDER BY ts", (kind, since)
+            ).fetchall()
+        return [{"ts": ts, "value": value, **(json.loads(extra) if extra else {})} for ts, value, extra in rows]
+
+    def health_last_ts(self, kind: str) -> int | None:
+        with self._lock:
+            return self._db.execute("SELECT MAX(ts) FROM health WHERE type = ?", (kind,)).fetchone()[0]
+
+    def upsert_workout(self, summary: dict, track: list[dict] | None) -> bool:
+        with self._lock:
+            new = self._db.execute("SELECT 1 FROM workouts WHERE start = ?", (summary["start"],)).fetchone() is None
+            self._db.execute(
+                "INSERT INTO workouts VALUES (?, ?, ?) ON CONFLICT(start) DO UPDATE SET data = excluded.data, "
+                "track = COALESCE(excluded.track, workouts.track)",
+                (summary["start"], json.dumps(summary), json.dumps(track) if track is not None else None),
+            )
+            self._db.commit()
+            return new
+
+    def workouts_since(self, since: float) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT data, track FROM workouts WHERE start >= ? ORDER BY start", (since,)
+            ).fetchall()
+        return [{**json.loads(d), "track": json.loads(t) if t else []} for d, t in rows]
+
+    def workout_last_start(self) -> int | None:
+        with self._lock:
+            return self._db.execute("SELECT MAX(start) FROM workouts").fetchone()[0]
 
     def set_meta(self, key: str, value: str) -> None:
         with self._lock:

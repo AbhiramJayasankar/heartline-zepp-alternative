@@ -297,8 +297,8 @@ def test_daily_endpoint_empty_and_with_health(api):
     assert set(body) == {"days", "today", "trends", "alerts"}
     # A health table from the watch-data module is picked up when present.
     with store._lock:
-        store._db.execute("CREATE TABLE health (type TEXT, ts REAL, value REAL)")
-        store._db.execute("INSERT INTO health VALUES ('spo2', ?, 96)", (datetime.now().timestamp(),))
+        store._db.execute("CREATE TABLE IF NOT EXISTS health (type TEXT, ts REAL, value REAL)")
+        store._db.execute("INSERT INTO health (type, ts, value) VALUES ('spo2', ?, 96)", (int(datetime.now().timestamp()),))
         store._db.commit()
     body = client.get("/api/insights/daily?days=7").json()
     assert body["days"][-1]["spo2_avg"] == 96
