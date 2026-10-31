@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import protocol
+from .insights import make_router
 from .store import Store, activity_summary, hr_stats
 from .watch import NotConnected, Watch, load_config
 
@@ -156,6 +157,9 @@ def create_app(watch: Any = None, store: Store | None = None, hub: Hub | None = 
         finally:
             send_task.cancel()
             hub.queues.discard(queue)
+
+    # Insights and profile (server/insights.py); must come before the static mount at "/".
+    app.include_router(make_router(store, watch, hub.publish, ROOT / "data" / "raw"))
 
     web = ROOT / "web"
     web.mkdir(exist_ok=True)
