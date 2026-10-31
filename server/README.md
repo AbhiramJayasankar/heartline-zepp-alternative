@@ -43,3 +43,13 @@ WebSocket `/ws` sends `{"type": "status", ...}` on connect and on every change, 
 every heart-rate notification (including 0 while the sensor locks on), and `{"type": "event", "ts", "level", "msg"}`.
 
 If the link drops while connected, the server keeps reconnecting every 10 s and resumes live heart rate if it was on.
+
+## Insights (server/insights.py, server/analytics/)
+
+Wellness estimates from raw recordings and the stored history; see `server/analytics/METHODS.md`.
+
+- `GET/POST /api/profile` age, sex, weight_kg, height_cm, max_hr, resting_hr (unlocks zones, strain, VO2max, calories)
+- `GET /api/insights/recordings` raw CSVs in `data/raw/`, newest first
+- `GET /api/insights/session?file=latest` beats, HRV, rhythm screen, breathing rate, preview signal (cached per file)
+- `POST /api/insights/measure` `{"seconds": 60|120|300}` records raw sensors for that long, then analyzes
+- `GET /api/insights/daily?days=14` per-day sleep/RHR/strain/readiness, today, trends, alerts
