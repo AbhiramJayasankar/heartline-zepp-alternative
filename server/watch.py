@@ -29,6 +29,10 @@ class NotConnected(Exception):
     pass
 
 
+class Busy(RuntimeError):
+    """Another sync is already using the watch."""
+
+
 def load_config() -> dict:
     env = os.environ.get("WATCH_CONFIG")
     local = pathlib.Path(__file__).resolve().parent.parent / "watch.json"
@@ -472,7 +476,7 @@ class Watch:
     async def activity_sync(self) -> dict:
         client = self._require()
         if self._syncing:
-            raise RuntimeError("A history sync is already running")
+            raise Busy("A history sync is already running")
         self._syncing = True
         try:
             now = datetime.now().astimezone()
@@ -571,7 +575,7 @@ class Watch:
         """Fetch every stored data type since the last sync (or 7 days). Nothing is ever acked/deleted."""
         client = self._require()
         if self._syncing:
-            raise RuntimeError("A history sync is already running")
+            raise Busy("A history sync is already running")
         self._syncing = True
         try:
             now = datetime.now().astimezone()

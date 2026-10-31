@@ -23,10 +23,26 @@ Talks to the watch directly over Bluetooth LE from Windows, with a local web das
 - Vibrate (find device): `03` to Alert Level `0x2A06`.
 - Full GATT table.
 
+- Health data (`POST /api/health/sync`): manual HR, workouts with per-second HR tracks, PAI, automatic stress,
+  sleep SpO2, skin temperature (one sample a minute), and a statistics blob (stored raw, not decoded).
+  The watch accepts but returns nothing for normal SpO2, manual stress, sleep sessions, resting/max HR, sleep breathing and HRV.
+- Live steps (`0x0007`), device events (`0x0010`), watch settings (write-only: the page shows the last value written),
+  text notifications (chunked at 20 bytes; bigger writes drop the link), clock sync.
+- Insights (`server/analytics/`, methods and their limits in `server/analytics/METHODS.md`): beat detection from the raw PPG,
+  HRV, rhythm screening (not a diagnosis), daily readiness, strain, sleep score, body battery, VO2max and fitness age.
+
+## Careful
+
+- Temperature, automatic stress, sleep SpO2 and statistics are handed over once: after a fetch the watch moves past them
+  even without the `03` ack, so Zepp no longer gets those readings. The first fetch (2026-11-01) pulled 40 days of
+  temperature; the copy lives in `data/watch.db` and `data/discovery/`. Back up `data/`.
+- Activity, manual HR, PAI and workouts honour the start time and stay on the watch.
+
 ## Not verified yet
 
-- The activity kind to state mapping follows Gadgetbridge's MiBand2 provider; REM and "active" minutes are approximations.
-- SpO2, stress, PAI, sleep sessions, workouts: Gadgetbridge has fetch types for them (`HuamiFetchDataType`), not tried here yet.
+- Activity kind to state mapping (REM and "active" minutes are approximations); AF screening thresholds;
+  PPG breathing rate (reads 7-9/min, probably Mayer waves rather than breathing).
+- Device event `0x13`, the statistics protobuf.
 
 ## Layout
 

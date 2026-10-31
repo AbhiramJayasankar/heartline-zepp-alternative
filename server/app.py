@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from . import health, protocol
 from .insights import make_router
 from .store import Store, activity_summary, hr_stats
-from .watch import NotConnected, Watch, load_config
+from .watch import Busy, NotConnected, Watch, load_config
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 HEALTH_SERIES = ("pai", "resting_hr", "max_hr", "manual_hr", "temperature", "sleep_respiratory_rate", "hrv")
@@ -45,7 +45,7 @@ def create_app(watch: Any = None, store: Store | None = None, hub: Hub | None = 
     async def call(work: Awaitable | Any) -> Any:
         try:
             result = await work if asyncio.iscoroutine(work) else work
-        except NotConnected as e:
+        except (NotConnected, Busy) as e:
             return JSONResponse({"error": str(e)}, status_code=409)
         except Exception as e:
             return JSONResponse({"error": str(e) or type(e).__name__}, status_code=500)

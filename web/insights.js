@@ -111,14 +111,19 @@ function renderToday() {
   const days = ins.daily?.days || [];
   const latest = days[days.length - 1] || {};
 
-  const ready = t.readiness;
+  // Before tonight's sleep is finished, show the last readiness rather than a blank.
+  const last = t.readiness == null ? t.last_readiness : null;
+  const ready = t.readiness ?? last?.value;
   $("t-readiness").textContent = fmt.int(ready);
   $("t-readiness").parentElement.dataset.band = ready == null ? "" : ready >= 70 ? "high" : ready >= 45 ? "mid" : "low";
+  $("t-readiness").parentElement.querySelector(".score-label").textContent = last
+    ? `Readiness, ${new Date(`${last.date}T12:00:00`).toLocaleDateString([], { day: "numeric", month: "short" })}`
+    : "Readiness";
   $("t-strain").textContent = fmt.one(t.strain);
   $("t-sleep").textContent = fmt.int(t.sleep_score);
   $("t-battery").textContent = fmt.int(t.body_battery);
   $("t-rhr").textContent = fmt.int(latest.resting_hr ?? ins.daily?.trends?.resting_hr_7d);
-  $("t-rec").textContent = t.recommendation || "Sync activity and take a heart check to get today's readiness.";
+  $("t-rec").textContent = t.recommendation || t.note || "Sync activity and take a heart check to get today's readiness.";
 
   const factors = t.readiness_factors || [];
   $("t-factors").innerHTML = factors.length
