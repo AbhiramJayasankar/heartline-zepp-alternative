@@ -49,6 +49,8 @@ function handleMessage(msg) {
     applyStatus(status);
   } else if (msg.type === "hr") {
     onHeartRate(msg.ts, msg.bpm);
+  } else if (msg.type === "raw") {
+    onRaw(msg);
   } else if (msg.type === "event") {
     state.events.unshift({ ts: msg.ts, level: msg.level, msg: msg.msg });
     state.events.length = Math.min(state.events.length, 200);
@@ -68,6 +70,10 @@ function applyStatus(status) {
   if (nowConnected && !wasConnected) {
     loadDeviceInfo();
     loadGatt();
+    if (!state.autoSynced) {
+      state.autoSynced = true;
+      syncActivity();
+    }
   }
 }
 
@@ -96,12 +102,21 @@ function renderStatus() {
     state.connNotice = false;
   }
 
-  for (const id of ["refresh-btn", "probe-btn", "gatt-btn"]) $(id).disabled = !connected;
+  for (const id of ["refresh-btn", "vibrate-btn", "gatt-btn"]) $(id).disabled = !connected;
+  $("sync-btn").disabled = !connected || state.syncing;
 
   const hrBtn = $("hr-btn");
   hrBtn.disabled = !connected;
   hrBtn.setAttribute("aria-pressed", String(!!s.hr?.streaming));
   hrBtn.textContent = s.hr?.streaming ? "Stop live heart rate" : "Start live heart rate";
+
+  const rawOn = !!s.raw?.streaming;
+  const rawBtn = $("raw-btn");
+  rawBtn.disabled = !connected;
+  rawBtn.setAttribute("aria-pressed", String(rawOn));
+  rawBtn.textContent = rawOn ? "Stop raw sensors" : "Start raw sensors";
+  $("wave-file").hidden = !(rawOn && s.raw?.file);
+  if (rawOn && s.raw?.file) $("wave-file").textContent = `Recording every sample to ${s.raw.file}`;
 
   renderReadout();
   renderBattery();
@@ -268,29 +283,274 @@ async function loadGatt() {
   }
 }
 
-async function runProbe() {
-  const btn = $("probe-btn");
-  const out = $("probe");
+async function vibrate() {
+  const btn = $("vibrate-btn");
   btn.disabled = true;
-  btn.textContent = "Probing for 5 seconds…";
   try {
-    const r = await api("/api/raw/probe", "POST");
-    out.hidden = false;
-    out.innerHTML = `
-      <p class="probe-verdict" data-ok="${r.supported}">${r.supported ? `Streaming works: ${r.packets} packets received.` : "Refused by the watch."}</p>
-      <dl>
-        <dt>Start reply</dt><dd class="hex">${esc(r.replies?.start || "–")}</dd>
-        <dt>Go reply</dt><dd class="hex">${esc(r.replies?.go || "–")}</dd>
-        <dt>Stop reply</dt><dd class="hex">${esc(r.replies?.stop || "–")}</dd>
-        <dt>Data packets</dt><dd>${r.packets}</dd>
-      </dl>
-      ${r.note ? `<p class="panel-copy" style="margin:12px 0 0">${esc(r.note)}</p>` : ""}`;
+    await api("/api/vibrate", "POST");
+    btn.textContent = "Vibrated";
+    setTimeout(() => { btn.textContent = "Vibrate watch"; }, 2000);
   } catch (e) {
-    out.hidden = false;
-    out.innerHTML = `<p class="probe-verdict" data-ok="false">Probe failed: ${esc(e.message)}</p>`;
-  } finally {
-    btn.textContent = "Run probe again";
-    btn.disabled = state.status?.connection !== "connected";
+    log("error", `Vibrate: ${e.message}`);
+  }
+  btn.disabled = state.status?.connection !== "connected";
+}
+
+// ---------- Raw sensors: live PPG + accelerometer ----------
+
+const WAVE_SECONDS = 8;
+const RATE = 25;
+const wave = { ppg: [], accel: [], dirty: false };
+
+function onRaw(msg) {
+  const cap = WAVE_SECONDS * RATE * 2;
+  if (msg.ppg?.length) wave.ppg.push(...msg.ppg);
+  if (msg.accel?.length) wave.accel.push(...msg.accel);
+  if (wave.ppg.length > cap) wave.ppg.splice(0, wave.ppg.length - cap);
+  if (wave.accel.length > cap) wave.accel.splice(0, wave.accel.length - cap);
+  if (!wave.dirty) {
+    wave.dirty = true;
+    requestAnimationFrame(drawWave);
+  }
+}
+
+// The PPG drifts slowly with pressure and ambient light; subtract a 1 s moving
+// average and flip it so each heartbeat points up, like a pulse trace.
+function detrend(values) {
+  const out = [];
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) {
+    sum += values[i];
+    if (i >= RATE) sum -= values[i - RATE];
+    const n = Math.min(i + 1, RATE);
+    out.push(sum / n - values[i]);
+  }
+  return out.slice(Math.min(RATE, Math.floor(out.length / 2)));
+}
+
+function estimateBpm(signal) {
+  if (signal.length < RATE * 4) return null;
+  const s = signal.slice(-RATE * WAVE_SECONDS);
+  const mean = s.reduce((a, b) => a + b, 0) / s.length;
+  const sd = Math.sqrt(s.reduce((a, b) => a + (b - mean) ** 2, 0) / s.length);
+  const peaks = [];
+  for (let i = 2; i < s.length - 2; i++) {
+    const v = s[i];
+    if (v > mean + 0.3 * sd && v >= s[i - 1] && v >= s[i - 2] && v > s[i + 1] && v > s[i + 2]
+        && (!peaks.length || i - peaks[peaks.length - 1] >= RATE * 0.33)) peaks.push(i);
+  }
+  if (peaks.length < 3) return null;
+  const gaps = peaks.slice(1).map((p, i) => p - peaks[i]).sort((a, b) => a - b);
+  const median = gaps[Math.floor(gaps.length / 2)];
+  const bpm = Math.round((60 * RATE) / median);
+  return bpm >= 35 && bpm <= 200 ? bpm : null;
+}
+
+function sizeCanvas(canvas) {
+  const r = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, r.width, r.height);
+  return { ctx, w: r.width, h: r.height };
+}
+
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function plotLine(ctx, values, w, h, lo, hi, color, width, top = 26, bottom = 10) {
+  if (values.length < 2) return;
+  const n = WAVE_SECONDS * RATE;
+  const start = Math.max(0, values.length - n);
+  const span = hi - lo || 1;
+  ctx.beginPath();
+  for (let i = start; i < values.length; i++) {
+    const x = w - ((values.length - 1 - i) / (n - 1)) * w;
+    const y = top + (1 - (values[i] - lo) / span) * (h - top - bottom);
+    i === start ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.lineJoin = "round";
+  ctx.stroke();
+}
+
+function drawWave() {
+  wave.dirty = false;
+  const ppg = detrend(wave.ppg);
+  $("ppg-empty").hidden = wave.ppg.length > 0;
+
+  {
+    const { ctx, w, h } = sizeCanvas($("ppg-canvas"));
+    const recent = ppg.slice(-WAVE_SECONDS * RATE);
+    if (recent.length > 1) {
+      const lo = Math.min(...recent), hi = Math.max(...recent);
+      const pad = (hi - lo) * 0.12;
+      plotLine(ctx, recent, w, h, lo - pad, hi + pad, cssVar("--ink"), 2.25);
+    }
+  }
+  {
+    const { ctx, w, h } = sizeCanvas($("accel-canvas"));
+    const recent = wave.accel.slice(-WAVE_SECONDS * RATE);
+    if (recent.length > 1) {
+      const all = recent.flat();
+      const lo = Math.min(...all), hi = Math.max(...all);
+      const pad = Math.max(0.05, (hi - lo) * 0.1);
+      ["--ink", "--pulse", "--sleep-light"].forEach((c, axis) =>
+        plotLine(ctx, recent.map((v) => v[axis]), w, h, lo - pad, hi + pad, cssVar(c), 1.5, 24, 8));
+    }
+  }
+
+  const bpm = estimateBpm(ppg);
+  $("wave-bpm").textContent = bpm ?? "–";
+  const acc = wave.accel.slice(-RATE * 2);
+  if (acc.length > 4) {
+    const mags = acc.map(([x, y, z]) => Math.hypot(x, y, z));
+    const mean = mags.reduce((a, b) => a + b, 0) / mags.length;
+    const sd = Math.sqrt(mags.reduce((a, b) => a + (b - mean) ** 2, 0) / mags.length);
+    $("wave-motion").textContent = sd < 0.02 ? "Still" : sd < 0.08 ? "Light" : "Moving";
+  }
+}
+
+async function toggleRaw() {
+  const on = !!state.status?.raw?.streaming;
+  const btn = $("raw-btn");
+  btn.disabled = true;
+  try {
+    const { streaming } = await api(on ? "/api/raw/stop" : "/api/raw/start", "POST");
+    state.status.raw = { ...(state.status.raw || {}), streaming };
+    if (streaming) { wave.ppg = []; wave.accel = []; }
+  } catch (e) {
+    log("error", `Raw sensors: ${e.message}`);
+  }
+  renderStatus();
+}
+
+// ---------- Activity history ----------
+
+const act = { hours: 24, data: null };
+
+async function loadActivity() {
+  try {
+    act.data = await api(`/api/activity?hours=${act.hours}`);
+  } catch {
+    act.data = null;
+  }
+  renderActivity();
+}
+
+async function syncActivity() {
+  if (state.syncing) return;
+  state.syncing = true;
+  const btn = $("sync-btn");
+  btn.disabled = true;
+  btn.textContent = "Syncing…";
+  try {
+    const r = await api("/api/activity/sync", "POST");
+    log("info", r.minutes_added ? `Synced ${r.minutes_added} minutes of activity` : "Activity already up to date");
+  } catch (e) {
+    log("error", `Activity sync: ${e.message}`);
+  }
+  state.syncing = false;
+  btn.textContent = "Sync from watch";
+  btn.disabled = state.status?.connection !== "connected";
+  loadActivity();
+}
+
+function hm(minutes) {
+  const h = Math.floor(minutes / 60), m = minutes % 60;
+  return h ? `${h}<small>h</small> ${m}<small>m</small>` : `${m}<small>m</small>`;
+}
+
+function renderActivity() {
+  const d = act.data;
+  const samples = d?.samples || [];
+  const s = d?.summary;
+  $("act-empty").hidden = samples.length > 0;
+  $("a-steps").textContent = s ? s.steps.toLocaleString() : "–";
+  $("a-active").innerHTML = s ? hm(s.active_minutes) : "–";
+  $("a-sleep").innerHTML = s ? hm(s.sleep_minutes) : "–";
+  $("a-worn").innerHTML = s ? hm(s.worn_minutes) : "–";
+  $("a-hr").innerHTML = s && s.hr_min != null ? `${s.hr_min}–${s.hr_max}<small> avg ${Math.round(s.hr_avg)}</small>` : "–";
+  $("act-sync-text").textContent = d?.last_sync
+    ? `Last synced ${ago(d.last_sync)}. Syncing reads the watch's history without deleting anything, so Zepp still gets it later.`
+    : "Minute-by-minute history stored on the watch. Syncing reads it without deleting anything, so Zepp still gets it later.";
+
+  const { ctx, w, h } = sizeCanvas($("act-canvas"));
+  const now = Date.now() / 1000;
+  const t0 = now - act.hours * 3600;
+  const pad = { l: 10, r: 40, t: 10, b: 24 };
+  const band = 26;
+  const plotTop = pad.t + band + 10;
+  const plotH = h - plotTop - pad.b;
+  const x = (t) => pad.l + ((t - t0) / (now - t0)) * (w - pad.l - pad.r);
+  const minuteW = Math.max(1, (w - pad.l - pad.r) / (act.hours * 60));
+  const color = {
+    sleep_deep: cssVar("--sleep-deep"), sleep_light: cssVar("--sleep-light"), sleep_rem: cssVar("--sleep-rem"),
+    active: cssVar("--pulse"), idle: cssVar("--idle"), charging: cssVar("--warn"),
+  };
+  const soft = cssVar("--ink-soft"), line = cssVar("--line");
+
+  // Axis: hour ticks
+  ctx.font = `500 11px ${cssVar("--text")}`;
+  ctx.fillStyle = soft;
+  const pxPerHour = (w - pad.l - pad.r) / act.hours;
+  const tickEvery = [1, 3, 6, 12, 24, 48].find((n) => n * pxPerHour >= 64) || 48;
+  const first = new Date(t0 * 1000); first.setMinutes(0, 0, 0);
+  for (let t = first.getTime() / 1000 + 3600; t < now; t += 3600) {
+    const hour = new Date(t * 1000).getHours();
+    // Every 48 h means midnight on every other day.
+    if (tickEvery <= 24 ? hour % tickEvery : (hour || Math.floor(t / 86400) % 2)) continue;
+    const px = x(t);
+    ctx.fillStyle = line; ctx.fillRect(px, pad.t, 1, h - pad.t - pad.b);
+    ctx.fillStyle = soft;
+    const label = hour === 0 && tickEvery >= 12
+      ? new Date(t * 1000).toLocaleDateString([], { weekday: "short" })
+      : `${String(hour).padStart(2, "0")}:00`;
+    ctx.fillText(label, px + 3, h - 7);
+  }
+
+  if (!samples.length) return;
+
+  // State band
+  for (const p of samples) {
+    const c = color[p.state];
+    if (!c) continue;
+    ctx.fillStyle = c;
+    ctx.fillRect(x(p.ts), pad.t, minuteW + 0.5, band);
+  }
+
+  // Steps as bars (per minute, max ~200)
+  const maxSteps = Math.max(30, ...samples.map((p) => p.steps));
+  ctx.fillStyle = color.active;
+  ctx.globalAlpha = 0.55;
+  for (const p of samples) {
+    if (!p.steps) continue;
+    const bh = (p.steps / maxSteps) * plotH * 0.9;
+    ctx.fillRect(x(p.ts), plotTop + plotH - bh, minuteW + 0.5, bh);
+  }
+  ctx.globalAlpha = 1;
+
+  // Heart rate line, breaking over gaps
+  const hrs = samples.filter((p) => p.hr);
+  if (hrs.length) {
+    const lo = Math.max(30, Math.min(...hrs.map((p) => p.hr)) - 5);
+    const hi = Math.max(...hrs.map((p) => p.hr)) + 5;
+    const y = (v) => plotTop + (1 - (v - lo) / (hi - lo)) * plotH;
+    ctx.beginPath();
+    hrs.forEach((p, i) => {
+      const gap = i === 0 || p.ts - hrs[i - 1].ts > 600;
+      gap ? ctx.moveTo(x(p.ts), y(p.hr)) : ctx.lineTo(x(p.ts), y(p.hr));
+    });
+    ctx.strokeStyle = cssVar("--ink");
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = "round";
+    ctx.stroke();
+    ctx.fillStyle = soft;
+    for (const v of [lo, Math.round((lo + hi) / 2), hi]) ctx.fillText(String(Math.round(v)), w - pad.r + 6, y(v) + 4);
   }
 }
 
@@ -372,15 +632,25 @@ $("hr-btn").addEventListener("click", async () => {
 
 $("refresh-btn").addEventListener("click", loadDeviceInfo);
 $("gatt-btn").addEventListener("click", loadGatt);
-$("probe-btn").addEventListener("click", runProbe);
+$("vibrate-btn").addEventListener("click", vibrate);
+$("raw-btn").addEventListener("click", toggleRaw);
+$("sync-btn").addEventListener("click", syncActivity);
 
-document.querySelectorAll(".ranges button").forEach((b) => b.addEventListener("click", () => {
-  document.querySelectorAll(".ranges button").forEach((o) => o.setAttribute("aria-selected", String(o === b)));
+document.querySelectorAll("#act-ranges button").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll("#act-ranges button").forEach((o) => o.setAttribute("aria-selected", String(o === b)));
+  act.hours = Number(b.dataset.hours);
+  loadActivity();
+}));
+
+document.querySelectorAll("#hr-ranges button").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll("#hr-ranges button").forEach((o) => o.setAttribute("aria-selected", String(o === b)));
   state.minutes = Number(b.dataset.minutes);
   loadHistory();
 }));
 
 new ResizeObserver(() => renderChart()).observe($("chart"));
+new ResizeObserver(() => renderActivity()).observe($("timeline"));
+new ResizeObserver(() => drawWave()).observe($("ppg-canvas").parentElement);
 setInterval(() => { renderStatus(); renderChart(); }, 5000);
 
 async function init() {
@@ -394,6 +664,7 @@ async function init() {
     setNotice(`Cannot reach the dashboard server: ${e.message}`, "error");
   }
   loadHistory();
+  loadActivity();
   connectSocket();
 }
 
@@ -411,8 +682,10 @@ function demoApi(path, method) {
     demo = {
       status: { connection: "connected", error: null, model: "Amazfit GTR 2e", mac: "C1:0B:05:00:0A:46", firmware: "V1.7.3.1",
         battery: { level: 68, charging: false, last_charge_a: "2026-10-24T10:50:35", last_charge_b: "2026-10-31T04:10:58", raw: "", read_at: now },
-        hr: { streaming: true, last_bpm: 83, last_ts: now - 4 }, connected_since: now - 754, rssi: -54 },
+        hr: { streaming: true, last_bpm: 83, last_ts: now - 4 }, raw: { streaming: true, file: "data/raw/20261101-021500.csv" },
+        connected_since: now - 754, rssi: -54 },
       history,
+      activity: demoActivity(now),
     };
     setNotice("Demo data: not connected to a real watch.");
   }
@@ -435,10 +708,45 @@ function demoApi(path, method) {
       { uuid: "0000fee0-0000-1000-8000-00805f9b34fb", name: "Anhui Huami Information Technology Co.", characteristics: [
         { uuid: "00000001-0000-3512-2118-0009af100700", properties: ["notify", "write-without-response"] },
         { uuid: "00000006-0000-3512-2118-0009af100700", properties: ["read", "notify"] }] }] }),
-    "/api/raw/probe": () => ({ supported: false, replies: { start: "10010304", go: "100204", stop: "100301" }, packets: 0, note: "Every start command is answered with status 0x03." }),
+    "/api/activity": () => {
+      const hours = Number(new URLSearchParams(path.split("?")[1]).get("hours")) || 24;
+      const samples = demo.activity.filter((p) => p.ts > now - hours * 3600);
+      const hrs = samples.filter((p) => p.hr).map((p) => p.hr);
+      return { samples, last_sync: now - 300, summary: {
+        steps: samples.reduce((a, p) => a + p.steps, 0),
+        hr_min: Math.min(...hrs), hr_max: Math.max(...hrs), hr_avg: hrs.reduce((a, b) => a + b, 0) / hrs.length,
+        active_minutes: samples.filter((p) => p.state === "active").length,
+        worn_minutes: samples.filter((p) => p.state !== "not_worn").length,
+        sleep_minutes: samples.filter((p) => p.state.startsWith("sleep")).length } };
+    },
+    "/api/activity/sync": () => ({ minutes_added: 0, from: null, to: null }),
+    "/api/raw/start": () => ({ streaming: true }),
+    "/api/raw/stop": () => ({ streaming: false }),
+    "/api/vibrate": () => ({ ok: true }),
   };
   const key = path.split("?")[0];
-  return new Promise((resolve) => setTimeout(() => resolve((routes[key] || (() => ({})))()), key === "/api/raw/probe" ? 1200 : 80));
+  return new Promise((resolve) => setTimeout(() => resolve((routes[key] || (() => ({})))()), 80));
+}
+function demoActivity(now) {
+  const out = [];
+  const end = Math.floor(now / 60) * 60;
+  for (let t = end - 7 * 86400; t < end; t += 60) {
+    const h = new Date(t * 1000).getHours() + new Date(t * 1000).getMinutes() / 60;
+    let state = "idle", steps = 0, hr = 62 + Math.round(Math.random() * 10);
+    if (h >= 0.5 && h < 7) {
+      const cycle = ((h - 0.5) * 60) % 90;
+      state = cycle < 20 ? "sleep_light" : cycle < 50 ? "sleep_deep" : cycle < 70 ? "sleep_light" : "sleep_rem";
+      hr = 52 + Math.round(Math.random() * 6);
+    } else if ((h > 8 && h < 8.6) || (h > 18 && h < 19.2) || (h > 13 && h < 13.3)) {
+      state = "active"; steps = 70 + Math.round(Math.random() * 50); hr = 95 + Math.round(Math.random() * 25);
+    } else if (h > 22.5 && h < 23.2) {
+      state = "not_worn"; hr = null;
+    } else if (Math.random() < 0.08) {
+      steps = Math.round(Math.random() * 30);
+    }
+    out.push({ ts: t, kind: 0, state, intensity: steps, steps, hr, sleep: 0, deep: 0, rem: 0 });
+  }
+  return out;
 }
 function demoSocket() {
   setInterval(() => {
@@ -447,6 +755,18 @@ function demoSocket() {
     demo.history.push({ ts, bpm });
     handleMessage({ type: "hr", ts, bpm });
   }, 6000);
+  // Synthetic pulse: a sharp systolic rise, slower fall and a small dicrotic notch, on a drifting baseline.
+  let n = 0;
+  setInterval(() => {
+    const ppg = [], accel = [];
+    for (let i = 0; i < 5; i++, n++) {
+      const t = n / RATE, phase = (t * 1.3) % 1;
+      const beat = phase < 0.15 ? phase / 0.15 : Math.exp(-(phase - 0.15) * 4) + 0.15 * Math.exp(-((phase - 0.45) ** 2) / 0.003);
+      ppg.push(Math.round(41000 + 600 * Math.sin(t / 6) - 160 * beat + (Math.random() - 0.5) * 12));
+      accel.push([-0.76 + (Math.random() - 0.5) * 0.01, -0.17 + (Math.random() - 0.5) * 0.01, -0.63 + (Math.random() - 0.5) * 0.01]);
+    }
+    handleMessage({ type: "raw", ts: Date.now() / 1000, ppg, accel });
+  }, 200);
 }
 
 init();

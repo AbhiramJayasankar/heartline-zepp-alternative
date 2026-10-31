@@ -46,7 +46,7 @@
 
       <div class="chart-area">
         <div class="chart-head">
-          <div class="ranges" role="tablist" aria-label="Time range">
+          <div class="ranges" role="tablist" aria-label="Time range" id="hr-ranges">
             <button role="tab" type="button" data-minutes="10" aria-selected="true">10 min</button>
             <button role="tab" type="button" data-minutes="60" aria-selected="false">1 hour</button>
             <button role="tab" type="button" data-minutes="1440" aria-selected="false">24 hours</button>
@@ -65,11 +65,77 @@
       </div>
     </section>
 
+    <section class="strip strip-wave" aria-labelledby="wave-title">
+      <div class="readout">
+        <h2 class="strip-title" id="wave-title">Pulse waveform</h2>
+        <p class="bpm-meta" id="wave-meta">The raw light signal from the optical sensor under the watch, 25 times a second. Each bump is one heartbeat.</p>
+        <dl class="wave-stats">
+          <div><dt>From the waveform</dt><dd><span id="wave-bpm">–</span> <small>bpm</small></dd></div>
+          <div><dt>Movement</dt><dd id="wave-motion">–</dd></div>
+        </dl>
+        <div class="readout-actions">
+          <button class="btn btn-pulse" id="raw-btn" type="button" disabled>Start raw sensors</button>
+        </div>
+        <p class="wave-file" id="wave-file" hidden></p>
+      </div>
+      <div class="wave-area">
+        <div class="wave-box">
+          <span class="wave-label">Optical (PPG)</span>
+          <canvas id="ppg-canvas" aria-label="Live optical pulse waveform"></canvas>
+          <p class="chart-empty" id="ppg-empty">Start raw sensors to draw your pulse here.</p>
+        </div>
+        <div class="wave-box wave-box-accel">
+          <span class="wave-label">Accelerometer <span class="axis-key"><i class="k-x"></i>x <i class="k-y"></i>y <i class="k-z"></i>z</span></span>
+          <canvas id="accel-canvas" aria-label="Live accelerometer"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <section class="activity" aria-labelledby="act-title">
+      <div class="activity-head">
+        <div>
+          <h2 id="act-title">Activity</h2>
+          <p class="panel-copy" id="act-sync-text">Minute-by-minute history stored on the watch. Syncing reads it without deleting anything, so Zepp still gets it later.</p>
+        </div>
+        <div class="activity-actions">
+          <div class="ranges" role="tablist" aria-label="Activity range" id="act-ranges">
+            <button role="tab" type="button" data-hours="24" aria-selected="true">24 hours</button>
+            <button role="tab" type="button" data-hours="72" aria-selected="false">3 days</button>
+            <button role="tab" type="button" data-hours="168" aria-selected="false">7 days</button>
+          </div>
+          <button class="btn btn-primary" id="sync-btn" type="button" disabled>Sync from watch</button>
+        </div>
+      </div>
+      <dl class="act-summary">
+        <div><dt>Steps</dt><dd id="a-steps">–</dd></div>
+        <div><dt>Active</dt><dd id="a-active">–</dd></div>
+        <div><dt>Sleep</dt><dd id="a-sleep">–</dd></div>
+        <div><dt>Heart rate</dt><dd id="a-hr">–</dd></div>
+        <div><dt>Worn</dt><dd id="a-worn">–</dd></div>
+      </dl>
+      <div class="timeline" id="timeline">
+        <canvas id="act-canvas" aria-label="Activity timeline"></canvas>
+        <p class="chart-empty" id="act-empty">No activity history here yet. Connect and press Sync from watch.</p>
+      </div>
+      <ul class="legend">
+        <li><i class="st-sleep_deep"></i>Deep sleep</li>
+        <li><i class="st-sleep_light"></i>Light sleep</li>
+        <li><i class="st-sleep_rem"></i>REM</li>
+        <li><i class="st-active"></i>Active</li>
+        <li><i class="st-idle"></i>Awake, still</li>
+        <li><i class="st-not_worn"></i>Not worn</li>
+        <li><i class="st-hr"></i>Heart rate</li>
+      </ul>
+    </section>
+
     <div class="lower">
       <section class="panel" aria-labelledby="watch-title">
         <div class="panel-head">
           <h2 id="watch-title">Watch</h2>
-          <button class="btn btn-quiet" id="refresh-btn" type="button" disabled>Refresh</button>
+          <div class="panel-actions">
+            <button class="btn btn-quiet" id="vibrate-btn" type="button" disabled>Vibrate watch</button>
+            <button class="btn btn-quiet" id="refresh-btn" type="button" disabled>Refresh</button>
+          </div>
         </div>
         <dl class="facts" id="facts">
           <div><dt>Model</dt><dd id="f-model">–</dd></div>
@@ -81,16 +147,6 @@
           <div><dt>Hardware</dt><dd id="f-hardware">–</dd></div>
           <div><dt>Connected for</dt><dd id="f-uptime">–</dd></div>
         </dl>
-      </section>
-
-      <section class="panel panel-lab" aria-labelledby="lab-title">
-        <div class="panel-head">
-          <h2 id="lab-title">Raw sensor stream</h2>
-          <span class="tag">Experimental</span>
-        </div>
-        <p class="panel-copy">Asks the watch to stream raw accelerometer and optical sensor samples. So far this firmware has refused it every time.</p>
-        <button class="btn btn-quiet" id="probe-btn" type="button" disabled>Run probe</button>
-        <div class="probe" id="probe" hidden></div>
       </section>
 
       <section class="panel panel-log" aria-labelledby="log-title">
