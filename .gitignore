@@ -1,0 +1,6 @@
+.venv/
+huami-token/
+watch.json
+data/
+__pycache__/
+*.log
