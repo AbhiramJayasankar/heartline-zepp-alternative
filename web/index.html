@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GTR 2e Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700;800&family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">GTR 2e</span>
+    </div>
+    <div class="link" id="link" data-state="disconnected">
+      <span class="link-dot" aria-hidden="true"></span>
+      <span class="link-text" id="link-text">Not connected</span>
+    </div>
+    <div class="bar-end">
+      <div class="battery" id="battery" title="Watch battery" hidden>
+        <span class="battery-shell" aria-hidden="true"><span class="battery-fill" id="battery-fill"></span></span>
+        <span id="battery-text">–</span>
+      </div>
+      <button class="btn btn-primary" id="connect-btn" type="button">Connect</button>
+    </div>
+  </header>
+
+  <p class="notice" id="notice" role="status" hidden></p>
+
+  <main>
+    <section class="strip" aria-labelledby="hr-title">
+      <div class="readout">
+        <h1 class="visually-hidden" id="hr-title">Heart rate</h1>
+        <div class="bpm" id="bpm-wrap" data-live="false">
+          <span class="bpm-value" id="bpm">–</span>
+          <span class="bpm-unit">bpm</span>
+        </div>
+        <p class="bpm-meta" id="bpm-meta">Connect to the watch to see your heart rate.</p>
+        <div class="readout-actions">
+          <button class="btn btn-pulse" id="hr-btn" type="button" disabled>Start live heart rate</button>
+        </div>
+      </div>
+
+      <div class="chart-area">
+        <div class="chart-head">
+          <div class="ranges" role="tablist" aria-label="Time range">
+            <button role="tab" type="button" data-minutes="10" aria-selected="true">10 min</button>
+            <button role="tab" type="button" data-minutes="60" aria-selected="false">1 hour</button>
+            <button role="tab" type="button" data-minutes="1440" aria-selected="false">24 hours</button>
+          </div>
+          <dl class="stats">
+            <div><dt>Low</dt><dd id="stat-min">–</dd></div>
+            <div><dt>Average</dt><dd id="stat-avg">–</dd></div>
+            <div><dt>High</dt><dd id="stat-max">–</dd></div>
+            <div><dt>Readings</dt><dd id="stat-count">0</dd></div>
+          </dl>
+        </div>
+        <div class="chart" id="chart">
+          <svg id="chart-svg" role="img" aria-label="Heart rate over time" preserveAspectRatio="none"></svg>
+          <p class="chart-empty" id="chart-empty">No readings in this range yet. Start live heart rate and they will be drawn here.</p>
+        </div>
+      </div>
+    </section>
+
+    <div class="lower">
+      <section class="panel" aria-labelledby="watch-title">
+        <div class="panel-head">
+          <h2 id="watch-title">Watch</h2>
+          <button class="btn btn-quiet" id="refresh-btn" type="button" disabled>Refresh</button>
+        </div>
+        <dl class="facts" id="facts">
+          <div><dt>Model</dt><dd id="f-model">–</dd></div>
+          <div><dt>Bluetooth address</dt><dd id="f-mac">–</dd></div>
+          <div><dt>Firmware</dt><dd id="f-firmware">–</dd></div>
+          <div><dt>Battery</dt><dd id="f-battery">–</dd></div>
+          <div><dt>Last charged</dt><dd id="f-charged">–</dd></div>
+          <div><dt>Serial number</dt><dd id="f-serial">–</dd></div>
+          <div><dt>Hardware</dt><dd id="f-hardware">–</dd></div>
+          <div><dt>Connected for</dt><dd id="f-uptime">–</dd></div>
+        </dl>
+      </section>
+
+      <section class="panel panel-lab" aria-labelledby="lab-title">
+        <div class="panel-head">
+          <h2 id="lab-title">Raw sensor stream</h2>
+          <span class="tag">Experimental</span>
+        </div>
+        <p class="panel-copy">Asks the watch to stream raw accelerometer and optical sensor samples. So far this firmware has refused it every time.</p>
+        <button class="btn btn-quiet" id="probe-btn" type="button" disabled>Run probe</button>
+        <div class="probe" id="probe" hidden></div>
+      </section>
+
+      <section class="panel panel-log" aria-labelledby="log-title">
+        <div class="panel-head">
+          <h2 id="log-title">Activity log</h2>
+        </div>
+        <ol class="log" id="log"></ol>
+      </section>
+
+      <section class="panel panel-gatt" aria-labelledby="gatt-title">
+        <div class="panel-head">
+          <h2 id="gatt-title">Bluetooth services</h2>
+          <button class="btn btn-quiet" id="gatt-btn" type="button" disabled>Load</button>
+        </div>
+        <p class="panel-copy" id="gatt-copy">Every service and characteristic the watch exposes. New features usually start here.</p>
+        <div class="gatt" id="gatt"></div>
+      </section>
+    </div>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
