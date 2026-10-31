@@ -55,6 +55,8 @@ function handleMessage(msg) {
     state.events.unshift({ ts: msg.ts, level: msg.level, msg: msg.msg });
     state.events.length = Math.min(state.events.length, 200);
     renderLog();
+    // A sync may be started by another open page, so refresh whenever the server reports one finished.
+    if (msg.msg.startsWith("Activity sync done")) loadActivity();
   }
 }
 
@@ -452,7 +454,7 @@ async function syncActivity() {
     const r = await api("/api/activity/sync", "POST");
     log("info", r.minutes_added ? `Synced ${r.minutes_added} minutes of activity` : "Activity already up to date");
   } catch (e) {
-    log("error", `Activity sync: ${e.message}`);
+    if (!/already running/.test(e.message)) log("error", `Activity sync: ${e.message}`);
   }
   state.syncing = false;
   btn.textContent = "Sync from watch";
@@ -515,9 +517,16 @@ function renderActivity() {
 
   if (!samples.length) return;
 
-  // State band
+  // State band; not-worn minutes get a hatch so they read as "no data" rather than blank
+  const hatch = document.createElement("canvas");
+  hatch.width = hatch.height = 6;
+  const hctx = hatch.getContext("2d");
+  hctx.strokeStyle = line;
+  hctx.lineWidth = 1.5;
+  hctx.beginPath(); hctx.moveTo(0, 6); hctx.lineTo(6, 0); hctx.stroke();
+  const hatchFill = ctx.createPattern(hatch, "repeat");
   for (const p of samples) {
-    const c = color[p.state];
+    const c = p.state === "not_worn" ? hatchFill : color[p.state];
     if (!c) continue;
     ctx.fillStyle = c;
     ctx.fillRect(x(p.ts), pad.t, minuteW + 0.5, band);

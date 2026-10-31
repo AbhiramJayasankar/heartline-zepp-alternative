@@ -313,6 +313,7 @@ button { font: inherit; color: inherit; }
 .st-sleep_rem { background: var(--sleep-rem); }
 .st-active { background: var(--pulse); }
 .st-idle { background: var(--idle); }
+.st-charging { background: var(--warn); }
 .st-not_worn { background: repeating-linear-gradient(135deg, var(--line) 0 2px, transparent 2px 5px); border: 1px solid var(--line); }
 .legend .st-hr { height: 2px; border-radius: 0; background: var(--ink); vertical-align: 3px; }
 
