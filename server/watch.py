@@ -1,9 +1,11 @@
 """Owns the single BLE connection to the watch: connect, auth, HR streaming, reads."""
 import asyncio
+import csv
 import json
 import os
 import pathlib
 import time
+from datetime import datetime, timedelta
 from typing import Callable
 
 from bleak import BleakClient, BleakScanner
@@ -15,6 +17,11 @@ DEFAULT_CONFIG = pathlib.Path(r"C:\Users\abhir\Desktop\projects\amazfit-gtr2e\wa
 HR_PING_EVERY = 10.0
 CONNECT_ATTEMPTS = 3
 RECONNECT_DELAY = 10.0
+RAW_FLUSH_EVERY = 0.2  # seconds between raw WS messages (<= 5/s)
+SYNC_OVERLAP = 5 * 60  # re-fetch the last minutes: the newest one may still have been filling up
+SYNC_MAX_ROUNDS = 20
+SYNC_FIRST_DAYS = 7
+ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
 class NotConnected(Exception):
@@ -51,6 +58,15 @@ class Watch:
         self.connected_since: float | None = None
         self.rssi: int | None = None
         self._gatt_cache: list[dict] | None = None
+        self._want_raw = False
+        self.raw_streaming = False
+        self._raw_file: pathlib.Path | None = None
+        self._raw_fh = None
+        self._raw_csv = None
+        self._raw_ppg: list[int] = []
+        self._raw_accel: list[list[float]] = []
+        self._raw_flush_task: asyncio.Task | None = None
+        self._syncing = False
 
     # ---- state ---------------------------------------------------------------
 
@@ -65,6 +81,10 @@ class Watch:
             "hr": {"streaming": self.streaming, "last_bpm": self.last_bpm, "last_ts": self.last_ts},
             "connected_since": self.connected_since,
             "rssi": self.rssi,
+            "raw": {
+                "streaming": self.raw_streaming,
+                "file": self._raw_file.relative_to(ROOT).as_posix() if self._raw_file else None,
+            },
         }
 
     def _set(self, connection: str, error: str | None = None) -> None:
@@ -158,6 +178,8 @@ class Watch:
             self._event("warn", f"Battery read failed: {e}")
         if self._want_hr:
             await self.hr_start()
+        if self._want_raw:
+            await self.raw_start()
 
     def _on_disconnect(self, client: BleakClient) -> None:
         if client is not self._client:
@@ -165,6 +187,7 @@ class Watch:
         self._client = None
         self._stop_ping()
         self.streaming = False
+        self._close_raw()
         self.connected_since = None
         self._set("disconnected")
         if self._want_connected:
@@ -191,6 +214,13 @@ class Watch:
                 await self.hr_stop()
             except Exception:
                 pass
+        if self.raw_streaming:
+            try:
+                await self.raw_stop()
+            except Exception:
+                pass
+        self._want_raw = False
+        self._close_raw()
         self._stop_ping()
         self.streaming = False
         await self._drop_client()
@@ -293,43 +323,194 @@ class Watch:
             self._event("info", "Live heart rate stopped")
         return False
 
-    # ---- experiments ---------------------------------------------------------
+    # ---- raw sensor stream ---------------------------------------------------
+
+    async def _raw_begin(self, client: BleakClient, on_data, on_ctrl) -> None:
+        """Enable notifications and send Gadgetbridge's 3-step start."""
+        await client.start_notify(p.RAW_DATA, on_data)
+        await client.start_notify(p.RAW_CTRL, on_ctrl)
+        for cmd in p.RAW_START:
+            await client.write_gatt_char(p.RAW_CTRL, cmd, response=False)
+            await asyncio.sleep(0.4)
+
+    async def raw_start(self) -> bool:
+        client = self._require()
+        self._want_raw = True
+        if self.raw_streaming:
+            return True
+        self._open_raw_file()
+        async with self._lock:
+            await self._raw_begin(client, self._on_raw, lambda _, d: None)
+        self.raw_streaming = True
+        self._raw_flush_task = asyncio.create_task(self._raw_flush_loop())
+        self._push_status()
+        self._event("info", f"Raw sensor stream started, recording to {self.status()['raw']['file']}")
+        return True
+
+    async def raw_stop(self) -> bool:
+        self._want_raw = False
+        client = self._require()
+        if self.raw_streaming:
+            async with self._lock:
+                await client.write_gatt_char(p.RAW_CTRL, p.RAW_STOP, response=False)
+                await client.stop_notify(p.RAW_CTRL)
+                await client.stop_notify(p.RAW_DATA)
+            self._close_raw()
+            self._push_status()
+            self._event("info", "Raw sensor stream stopped")
+        return False
+
+    def _open_raw_file(self) -> None:
+        folder = ROOT / "data" / "raw"
+        folder.mkdir(parents=True, exist_ok=True)
+        self._raw_file = folder / f"{datetime.now():%Y%m%d-%H%M%S}.csv"
+        self._raw_fh = self._raw_file.open("w", newline="")
+        self._raw_csv = csv.writer(self._raw_fh)
+        self._raw_csv.writerow(["ts", "kind", "ppg", "ax", "ay", "az"])
+
+    def _close_raw(self) -> None:
+        self.raw_streaming = False
+        if self._raw_flush_task and not self._raw_flush_task.done():
+            self._raw_flush_task.cancel()
+        self._raw_flush_task = None
+        if self._raw_fh is not None:
+            self._raw_fh.close()
+        self._raw_fh = self._raw_csv = None
+        self._raw_ppg, self._raw_accel = [], []
+
+    def _on_raw(self, _, data: bytearray) -> None:
+        kind, samples = p.parse_raw(bytes(data))
+        if not samples or self._raw_csv is None:
+            return
+        now, n = time.time(), len(samples)
+        # Samples in a packet are ~1/25 s apart and the packet arrives after the last one.
+        for i, v in enumerate(samples):
+            ts = round(now - (n - 1 - i) / p.RAW_RATE_HZ, 3)
+            if kind == "ppg":
+                self._raw_csv.writerow([ts, "ppg", v, "", "", ""])
+            else:
+                self._raw_csv.writerow([ts, "accel", "", *v])
+        if kind == "ppg":
+            self._raw_ppg.extend(samples)
+        else:
+            self._raw_accel.extend(list(v) for v in samples)
+
+    async def _raw_flush_loop(self) -> None:
+        while True:
+            await asyncio.sleep(RAW_FLUSH_EVERY)
+            if self._raw_ppg or self._raw_accel:
+                msg = {"type": "raw", "ts": time.time(), "ppg": self._raw_ppg, "accel": self._raw_accel}
+                self._raw_ppg, self._raw_accel = [], []
+                self._emit(msg)
+                if self._raw_fh is not None:
+                    self._raw_fh.flush()
 
     async def raw_probe(self, seconds: float = 5.0) -> dict:
-        """Try to start the Huami raw-sensor stream and report what the watch answers."""
+        """Run the 3-step raw-sensor start for a few seconds and report what the watch answers."""
         client = self._require()
-        replies: asyncio.Queue[bytes] = asyncio.Queue()
+        if self.raw_streaming:
+            raise RuntimeError("Stop the raw sensor stream before running the probe")
+        replies: list[str] = []
         packets = 0
 
         def on_data(_, d):
             nonlocal packets
             packets += 1
 
-        async def send(cmd: bytes) -> str:
-            await client.write_gatt_char(p.RAW_CTRL, cmd, response=False)
-            try:
-                return (await asyncio.wait_for(replies.get(), 3)).hex()
-            except asyncio.TimeoutError:
-                return ""
-
         async with self._lock:
-            await client.start_notify(p.RAW_DATA, on_data)
-            await client.start_notify(p.RAW_CTRL, lambda _, d: replies.put_nowait(bytes(d)))
             try:
-                start = await send(bytes([0x01, 0x01, 0x19]))
-                go = await send(bytes([0x02]))
+                await self._raw_begin(client, on_data, lambda _, d: replies.append(bytes(d).hex()))
                 await asyncio.sleep(seconds)
-                stop = await send(bytes([0x03]))
+                await client.write_gatt_char(p.RAW_CTRL, p.RAW_STOP, response=False)
+                await asyncio.sleep(0.5)
             finally:
                 await client.stop_notify(p.RAW_CTRL)
                 await client.stop_notify(p.RAW_DATA)
 
+        # One reply per command, in order: start step 1, start step 2, go (02), stop (03).
+        start, _, go, stop = (replies + ["", "", "", ""])[:4]
         supported = packets > 0
-        note = (
-            f"Raw sensor stream sent {packets} packets."
-            if supported
-            else f"The watch rejected the raw-sensor start command (reply {start or 'none'}) and sent no data."
-        )
+        note = (f"Raw sensor stream sent {packets} packets in {seconds:.0f} s." if supported
+                else f"The watch sent no raw data (start reply {start or 'none'}).")
         self._event("info" if supported else "warn", f"Raw sensor probe: {note}")
         return {"supported": supported, "replies": {"start": start, "go": go, "stop": stop},
                 "packets": packets, "note": note}
+
+    # ---- activity history ----------------------------------------------------
+
+    async def _fetch_once(self, client: BleakClient, kind: int, since: datetime) -> tuple[float | None, bytes]:
+        """One fetch round. Never sends the 0x03 ack, so the data stays on the watch."""
+        ctrl: asyncio.Queue[bytes] = asyncio.Queue()
+        buf = bytearray()
+
+        def on_data(_, d):
+            buf.extend(bytes(d)[1:])  # first byte is a packet counter
+
+        async with self._lock:
+            await client.start_notify(p.ACT_CTRL, lambda _, d: ctrl.put_nowait(bytes(d)))
+            await client.start_notify(p.ACT_DATA, on_data)
+            await client.write_gatt_char(p.ACT_CTRL, p.fetch_command(kind, since), response=False)
+        try:
+            count, start = p.parse_fetch_start(await asyncio.wait_for(ctrl.get(), 10))
+            if not count:
+                return None, b""
+            async with self._lock:
+                await client.write_gatt_char(p.ACT_CTRL, p.FETCH_GO, response=False)
+            done = await asyncio.wait_for(ctrl.get(), 120)
+            if done[:3] != b"\x10\x02\x01":
+                raise RuntimeError(f"History transfer ended with {done.hex()}")
+            return start, bytes(buf)
+        finally:
+            async with self._lock:
+                await client.stop_notify(p.ACT_DATA)
+                await client.stop_notify(p.ACT_CTRL)
+
+    async def activity_sync(self) -> dict:
+        client = self._require()
+        if self._syncing:
+            raise RuntimeError("A history sync is already running")
+        self._syncing = True
+        try:
+            now = datetime.now().astimezone()
+            last = self._store.activity_last_ts()
+            since = (datetime.fromtimestamp(last - SYNC_OVERLAP + 60).astimezone() if last
+                     else now - timedelta(days=SYNC_FIRST_DAYS))
+            self._event("info", f"Syncing activity history from {since:%d %b %H:%M}")
+            added, first_ts, last_ts = 0, None, None
+            for _ in range(SYNC_MAX_ROUNDS):
+                if since > now:
+                    break
+                start, data = await self._fetch_once(client, p.FETCH_ACTIVITY, since)
+                rows = p.parse_activity(data, start) if start is not None else []
+                if not rows:
+                    break
+                added += self._store.upsert_activity(rows)
+                first_ts = first_ts or rows[0]["ts"]
+                last_ts = rows[-1]["ts"]
+                self._event("info", f"Fetched {len(rows)} minutes from {datetime.fromtimestamp(rows[0]['ts']):%d %b %H:%M}")
+                nxt = datetime.fromtimestamp(last_ts + 60).astimezone()
+                if nxt <= since:
+                    break
+                since = nxt
+            self._store.set_meta("activity_last_sync", str(time.time()))
+            self._event("info", f"Activity sync done: {added} new minutes")
+
+            def iso(ts):
+                return datetime.fromtimestamp(ts).astimezone().isoformat() if ts else None
+
+            return {"minutes_added": added, "from": iso(first_ts), "to": iso(last_ts)}
+        finally:
+            self._syncing = False
+
+    # ---- find device ---------------------------------------------------------
+
+    async def vibrate(self, seconds: float = 3.0) -> dict:
+        """Gadgetbridge's find-device: alert level 3 on 0x2A06, then 0 to stop."""
+        client = self._require()
+        async with self._lock:
+            await client.write_gatt_char(p.ALERT_LEVEL, p.ALERT_FIND, response=False)
+        await asyncio.sleep(seconds)
+        async with self._lock:
+            await client.write_gatt_char(p.ALERT_LEVEL, p.ALERT_OFF, response=False)
+        self._event("info", "Sent find-watch vibration")
+        return {"ok": True}
