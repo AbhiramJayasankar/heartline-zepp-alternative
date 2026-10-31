@@ -69,3 +69,107 @@ def decode_info(data: bytes) -> str:
     if text and all(32 <= c < 127 for c in text):
         return text.decode()
     return data.hex()
+
+
+# ---- raw sensor stream (Gadgetbridge Huami2021Service.CMD_RAW_SENSOR_*) ----
+
+RAW_START = (bytes([0x01, 0x03, 0x19]), bytes([0x01, 0x03, 0x00, 0x00, 0x00, 0x19]), bytes([0x02]))
+RAW_STOP = bytes([0x03])
+ACCEL_ONE_G = 4100  # raw accelerometer units per g
+RAW_RATE_HZ = 25.0
+
+
+def parse_raw(data: bytes) -> tuple[str, list]:
+    """Decode one raw-sensor packet: ("accel", [(x, y, z) in g]), ("ppg", [u16]) or ("other", [])."""
+    if len(data) < 2:
+        return "other", []
+    body = data[2:]
+    if data[0] == 0x00:
+        n = len(body) // 6
+        return "accel", [
+            tuple(round(int.from_bytes(body[i + k:i + k + 2], "little", signed=True) / ACCEL_ONE_G, 3) for k in (0, 2, 4))
+            for i in range(0, n * 6, 6)
+        ]
+    if data[0] == 0x01:
+        return "ppg", [int.from_bytes(body[i:i + 2], "little") for i in range(0, len(body) - 1, 2)]
+    return "other", []
+
+
+# ---- activity history fetch (Gadgetbridge AbstractFetchOperation / FetchActivityOperation) ----
+
+ACT_CTRL = "00000004-0000-3512-2118-0009af100700"
+ACT_DATA = "00000005-0000-3512-2118-0009af100700"
+FETCH_ACTIVITY = 0x01
+FETCH_GO = bytes([0x02])
+# 0x03 is the ack that deletes fetched data from the watch: deliberately never sent.
+ACTIVITY_SAMPLE_SIZE = 8  # AmazfitGTR2Support.getActivitySampleSize()
+
+
+def activity_time_bytes(t: datetime) -> bytes:
+    """year u16 LE, month, day, hour, minute, 0x00, tz in quarter hours (t must be timezone-aware)."""
+    tz_q = int(t.utcoffset().total_seconds() // 900)
+    return t.year.to_bytes(2, "little") + bytes([t.month, t.day, t.hour, t.minute, 0x00, tz_q & 0xFF])
+
+
+def fetch_command(kind: int, since: datetime) -> bytes:
+    return bytes([0x01, kind]) + activity_time_bytes(since)
+
+
+def parse_fetch_start(reply: bytes) -> tuple[int, float | None]:
+    """`10 01 01` + u32 sample count + 8-byte start time -> (count, start as unix seconds)."""
+    if reply[:3] != b"\x10\x01\x01":
+        raise RuntimeError(f"Watch refused the history fetch ({reply.hex()})")
+    count = int.from_bytes(reply[3:7], "little")
+    start = _parse_time(reply[7:15])
+    return count, (datetime.fromisoformat(start).timestamp() if start and count else None)
+
+
+def parse_activity(data: bytes, start_ts: float) -> list[dict]:
+    """8 bytes per minute: kind, intensity, steps, hr, unknown1, sleep, deep, rem."""
+    base = int(start_ts) // 60 * 60
+    rows = []
+    for i in range(0, len(data) - ACTIVITY_SAMPLE_SIZE + 1, ACTIVITY_SAMPLE_SIZE):
+        s = data[i:i + ACTIVITY_SAMPLE_SIZE]
+        rows.append({
+            "ts": base + 60 * (i // ACTIVITY_SAMPLE_SIZE), "kind": s[0], "intensity": s[1], "steps": s[2],
+            "hr": s[3], "unknown1": s[4], "sleep": s[5], "deep": s[6], "rem": s[7],
+        })
+    return rows
+
+
+# Raw kinds from Gadgetbridge devices/huami/HuamiConst.java (TYPE_*), applied after `kind & 0x0f` as in
+# devices/miband/MiBand2SampleProvider.postprocess(), which is the provider HuamiCoordinator uses for the GTR 2e.
+# 0 (NO_CHANGE) and 10 (IGNORE) repeat the previous minute's kind.
+KIND_STATE = {1: "active", 2: "active", 3: "not_worn", 4: "active", 6: "charging", 9: "sleep_light",
+              11: "sleep_deep", 12: "active"}
+KIND_REPEAT = {0, 10}
+REM_THRESHOLD = 55  # HuamiExtendedSampleProvider fallback: rem & 127 > 55 counts as REM
+
+
+def activity_states(rows: list[dict], prev_kind: int | None = None) -> list[str]:
+    """Map each minute to a state. prev_kind is the last valid (masked) kind before rows[0]."""
+    states, last = [], prev_kind
+    for r in rows:
+        k = r["kind"] & 0x0F
+        if k in KIND_REPEAT:
+            k = last
+        else:
+            last = k
+        state = KIND_STATE.get(k) if k is not None else None
+        if state == "sleep_light" and (r["rem"] & 127) > REM_THRESHOLD:
+            state = "sleep_rem"
+        if state is None:
+            state = "idle" if valid_hr(r["hr"]) else "unknown"
+        states.append(state)
+    return states
+
+
+def valid_hr(hr: int) -> bool:
+    return 0 < hr < 255
+
+
+# ---- find device (Gadgetbridge HuamiSupport.sendFindDeviceCommand) ----
+
+ALERT_LEVEL = "00002a06-0000-1000-8000-00805f9b34fb"
+ALERT_FIND = bytes([0x03])
+ALERT_OFF = bytes([0x00])

@@ -9,7 +9,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .store import Store, hr_stats
+from . import protocol
+from .store import Store, activity_summary, hr_stats
 from .watch import NotConnected, Watch, load_config
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -99,6 +100,37 @@ def create_app(watch: Any = None, store: Store | None = None, hub: Hub | None = 
     @app.post("/api/raw/probe")
     async def raw_probe():
         return await call(watch.raw_probe())
+
+    @app.post("/api/raw/start")
+    async def raw_start():
+        return await call(_streaming(watch.raw_start()))
+
+    @app.post("/api/raw/stop")
+    async def raw_stop():
+        return await call(_streaming(watch.raw_stop()))
+
+    @app.post("/api/activity/sync")
+    async def activity_sync():
+        return await call(watch.activity_sync())
+
+    @app.get("/api/activity")
+    async def activity(hours: float = 24):
+        since = time.time() - hours * 3600
+        rows = store.activity_since(since)
+        states = protocol.activity_states(rows, store.activity_prev_kind(since))
+        samples = [
+            {"ts": r["ts"], "kind": r["kind"], "state": st, "intensity": r["intensity"], "steps": r["steps"],
+             "hr": r["hr"] if protocol.valid_hr(r["hr"]) else None,
+             "sleep": r["sleep"], "deep": r["deep"], "rem": r["rem"]}
+            for r, st in zip(rows, states)
+        ]
+        last_sync = store.get_meta("activity_last_sync")
+        return {"samples": samples, "summary": activity_summary(samples),
+                "last_sync": float(last_sync) if last_sync else None}
+
+    @app.post("/api/vibrate")
+    async def vibrate():
+        return await call(watch.vibrate())
 
     @app.get("/api/events")
     async def events(limit: int = 100):

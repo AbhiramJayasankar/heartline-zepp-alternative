@@ -16,6 +16,10 @@ class Store:
                 CREATE TABLE IF NOT EXISTS hr_samples (ts REAL NOT NULL, bpm INTEGER NOT NULL);
                 CREATE INDEX IF NOT EXISTS hr_ts ON hr_samples (ts);
                 CREATE TABLE IF NOT EXISTS events (ts REAL NOT NULL, level TEXT NOT NULL, msg TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS activity (
+                    ts INTEGER PRIMARY KEY, kind INTEGER, intensity INTEGER, steps INTEGER, hr INTEGER,
+                    unknown1 INTEGER, sleep INTEGER, deep INTEGER, rem INTEGER);
+                CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
                 """
             )
 
@@ -43,9 +47,73 @@ class Store:
             ).fetchall()
         return [{"ts": ts, "level": level, "msg": msg} for ts, level, msg in rows]
 
+    # ---- activity history ----------------------------------------------------
+
+    ACTIVITY_COLS = ("ts", "kind", "intensity", "steps", "hr", "unknown1", "sleep", "deep", "rem")
+
+    def upsert_activity(self, rows: list[dict]) -> int:
+        """Insert or replace per-minute rows; returns how many minutes were new."""
+        cols = self.ACTIVITY_COLS
+        with self._lock:
+            before = self._db.execute("SELECT COUNT(*) FROM activity").fetchone()[0]
+            self._db.executemany(
+                f"INSERT INTO activity ({','.join(cols)}) VALUES ({','.join('?' * len(cols))}) "
+                f"ON CONFLICT(ts) DO UPDATE SET {','.join(f'{c}=excluded.{c}' for c in cols[1:])}",
+                [tuple(r[c] for c in cols) for r in rows],
+            )
+            self._db.commit()
+            return self._db.execute("SELECT COUNT(*) FROM activity").fetchone()[0] - before
+
+    def activity_since(self, since: float) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute(
+                f"SELECT {','.join(self.ACTIVITY_COLS)} FROM activity WHERE ts >= ? ORDER BY ts", (since,)
+            ).fetchall()
+        return [dict(zip(self.ACTIVITY_COLS, r)) for r in rows]
+
+    def activity_last_ts(self) -> int | None:
+        with self._lock:
+            return self._db.execute("SELECT MAX(ts) FROM activity").fetchone()[0]
+
+    def activity_prev_kind(self, before: float) -> int | None:
+        """Last masked kind before `before` that isn't a repeat marker (0 / 10)."""
+        with self._lock:
+            row = self._db.execute(
+                "SELECT kind & 15 FROM activity WHERE ts < ? AND (kind & 15) NOT IN (0, 10) ORDER BY ts DESC LIMIT 1",
+                (before,),
+            ).fetchone()
+        return row[0] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        with self._lock:
+            self._db.execute("INSERT OR REPLACE INTO meta VALUES (?, ?)", (key, value))
+            self._db.commit()
+
+    def get_meta(self, key: str) -> str | None:
+        with self._lock:
+            row = self._db.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None
+
 
 def hr_stats(samples: list[dict]) -> dict:
     bpms = [s["bpm"] for s in samples]
     if not bpms:
         return {"min": None, "max": None, "avg": None, "count": 0}
     return {"min": min(bpms), "max": max(bpms), "avg": round(sum(bpms) / len(bpms), 1), "count": len(bpms)}
+
+
+SLEEP_STATES = {"sleep_light", "sleep_deep", "sleep_rem"}
+
+
+def activity_summary(samples: list[dict]) -> dict:
+    """Totals over per-minute samples that already carry `state` and `hr` (None when not measured)."""
+    hrs = [s["hr"] for s in samples if s["hr"] is not None]
+    return {
+        "steps": sum(s["steps"] for s in samples),
+        "hr_min": min(hrs) if hrs else None,
+        "hr_avg": round(sum(hrs) / len(hrs), 1) if hrs else None,
+        "hr_max": max(hrs) if hrs else None,
+        "active_minutes": sum(1 for s in samples if s["steps"] > 0 or s["state"] == "active"),
+        "worn_minutes": sum(1 for s in samples if s["state"] not in ("not_worn", "charging", "unknown")),
+        "sleep_minutes": sum(1 for s in samples if s["state"] in SLEEP_STATES),
+    }
