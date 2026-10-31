@@ -12,6 +12,9 @@ const state = {
   events: [],
 };
 
+// Later modules (insights.js) register here to react to status, socket messages and connecting.
+const hooks = { status: [], message: [], connected: [] };
+
 const CONNECTING = new Set(["scanning", "connecting", "authenticating"]);
 const LINK_TEXT = {
   disconnected: "Not connected",
@@ -24,9 +27,14 @@ const LINK_TEXT = {
 
 // ---------- API ----------
 
-async function api(path, method = "GET") {
+async function api(path, method = "GET", payload) {
   if (DEMO) return demoApi(path, method);
-  const res = await fetch(path, { method });
+  const opts = { method };
+  if (payload !== undefined) {
+    opts.body = JSON.stringify(payload);
+    opts.headers = { "Content-Type": "application/json" };
+  }
+  const res = await fetch(path, opts);
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || `${res.status} ${res.statusText}`);
   return body;
@@ -58,6 +66,7 @@ function handleMessage(msg) {
     // A sync may be started by another open page, so refresh whenever the server reports one finished.
     if (msg.msg.startsWith("Activity sync done")) loadActivity();
   }
+  for (const fn of hooks.message) fn(msg);
 }
 
 // ---------- Status ----------
@@ -76,6 +85,7 @@ function applyStatus(status) {
       state.autoSynced = true;
       syncActivity();
     }
+    for (const fn of hooks.connected) fn();
   }
 }
 
@@ -123,6 +133,7 @@ function renderStatus() {
   renderReadout();
   renderBattery();
   renderFacts();
+  for (const fn of hooks.status) fn(s, connected);
 }
 
 function renderReadout() {
@@ -734,7 +745,8 @@ function demoApi(path, method) {
     "/api/vibrate": () => ({ ok: true }),
   };
   const key = path.split("?")[0];
-  return new Promise((resolve) => setTimeout(() => resolve((routes[key] || (() => ({})))()), 80));
+  const route = routes[key] || window.extraDemoRoutes?.[key] || (() => ({}));
+  return new Promise((resolve) => setTimeout(() => resolve(route(path, method)), key.endsWith("/measure") ? 3000 : 80));
 }
 function demoActivity(now) {
   const out = [];
@@ -778,4 +790,5 @@ function demoSocket() {
   }, 200);
 }
 
-init();
+// Wait for every script (insights.js too) so their hooks exist before the first status arrives.
+document.addEventListener("DOMContentLoaded", init);

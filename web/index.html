@@ -20,6 +20,9 @@
       <span class="link-text" id="link-text">Not connected</span>
     </div>
     <div class="bar-end">
+      <div class="live-steps" id="live-steps" title="Steps today, live from the watch" hidden>
+        <span id="live-steps-value">–</span> steps
+      </div>
       <div class="battery" id="battery" title="Watch battery" hidden>
         <span class="battery-shell" aria-hidden="true"><span class="battery-fill" id="battery-fill"></span></span>
         <span id="battery-text">–</span>
@@ -28,10 +31,46 @@
     </div>
   </header>
 
+  <nav class="jump" aria-label="Sections">
+    <a href="#today">Today</a>
+    <a href="#live">Live</a>
+    <a href="#check">Heart check</a>
+    <a href="#activity">Activity</a>
+    <a href="#trends">Trends</a>
+    <a href="#sessions">Sleep and workouts</a>
+    <a href="#watch">Watch</a>
+  </nav>
+
   <p class="notice" id="notice" role="status" hidden></p>
 
   <main>
-    <section class="strip" aria-labelledby="hr-title">
+    <section class="today" id="today" aria-labelledby="today-title">
+      <h2 class="visually-hidden" id="today-title">Today</h2>
+      <div class="today-lead">
+        <div class="score score-main">
+          <span class="score-label">Readiness</span>
+          <span class="score-value" id="t-readiness">–</span>
+          <span class="score-scale">of 100</span>
+        </div>
+        <p class="today-rec" id="t-rec">Sync activity and take a heart check to get today's readiness.</p>
+      </div>
+      <div class="today-scores">
+        <div class="score"><span class="score-label">Strain</span><span class="score-value" id="t-strain">–</span><span class="score-scale">of 21</span></div>
+        <div class="score"><span class="score-label">Sleep score</span><span class="score-value" id="t-sleep">–</span><span class="score-scale">of 100</span></div>
+        <div class="score"><span class="score-label">Body battery</span><span class="score-value" id="t-battery">–</span><span class="score-scale">of 100</span></div>
+        <div class="score"><span class="score-label">Resting heart rate</span><span class="score-value" id="t-rhr">–</span><span class="score-scale">bpm</span></div>
+      </div>
+      <div class="today-why">
+        <h3>What shaped today</h3>
+        <ul class="factors" id="t-factors"><li class="muted">Nothing yet.</li></ul>
+      </div>
+      <div class="today-alerts" id="t-alerts" hidden>
+        <h3>Worth a look</h3>
+        <ul class="alerts" id="t-alert-list"></ul>
+      </div>
+    </section>
+
+    <section class="strip" id="live" aria-labelledby="hr-title">
       <div class="readout">
         <h1 class="visually-hidden" id="hr-title">Heart rate</h1>
         <div class="bpm" id="bpm-wrap" data-live="false">
@@ -91,7 +130,67 @@
       </div>
     </section>
 
-    <section class="activity" aria-labelledby="act-title">
+    <section class="check" id="check" aria-labelledby="check-title">
+      <div class="check-head">
+        <div>
+          <h2 id="check-title">Heart check</h2>
+          <p class="panel-copy">Sit still with the watch snug. The page records your raw pulse, finds every beat and measures heart rate variability, rhythm regularity and breathing rate.</p>
+        </div>
+        <div class="check-actions">
+          <div class="ranges" role="radiogroup" aria-label="Measurement length" id="check-len">
+            <button role="radio" type="button" data-seconds="60" aria-checked="true">1 min</button>
+            <button role="radio" type="button" data-seconds="120" aria-checked="false">2 min</button>
+            <button role="radio" type="button" data-seconds="300" aria-checked="false">5 min</button>
+          </div>
+          <button class="btn btn-pulse" id="check-btn" type="button" disabled>Start heart check</button>
+        </div>
+      </div>
+      <div class="check-progress" id="check-progress" hidden>
+        <div class="check-bar"><span id="check-bar-fill"></span></div>
+        <span id="check-countdown">Measuring…</span>
+      </div>
+      <div class="check-body">
+        <div class="check-results">
+          <div class="rhythm" id="rhythm" data-status="none">
+            <span class="rhythm-label">Rhythm</span>
+            <span class="rhythm-value" id="rhythm-value">No check yet</span>
+            <p class="rhythm-notes" id="rhythm-notes">A wellness estimate from your wrist pulse, not a medical diagnosis. If you have symptoms, see a doctor.</p>
+          </div>
+          <dl class="hrv-grid">
+            <div><dt>Heart rate</dt><dd id="c-hr">–</dd></div>
+            <div><dt>HRV (RMSSD)</dt><dd id="c-rmssd">–</dd></div>
+            <div><dt>SDNN</dt><dd id="c-sdnn">–</dd></div>
+            <div><dt>pNN50</dt><dd id="c-pnn50">–</dd></div>
+            <div><dt>Stress index</dt><dd id="c-stress">–</dd></div>
+            <div><dt>Breathing</dt><dd id="c-resp">–</dd></div>
+            <div><dt>LF/HF balance</dt><dd id="c-lfhf">–</dd></div>
+            <div><dt>Extra beats</dt><dd id="c-ectopic">–</dd></div>
+            <div><dt>Signal quality</dt><dd id="c-sqi">–</dd></div>
+          </dl>
+          <label class="field field-inline">
+            <span>Recording</span>
+            <select id="check-file"><option value="">No recordings yet</option></select>
+          </label>
+        </div>
+        <div class="check-plots">
+          <figure class="plot plot-tacho">
+            <figcaption>Beat-to-beat intervals</figcaption>
+            <svg id="tacho-svg" role="img" aria-label="Beat-to-beat interval chart"></svg>
+          </figure>
+          <figure class="plot plot-poincare">
+            <figcaption>Poincaré plot</figcaption>
+            <svg id="poincare-svg" role="img" aria-label="Poincaré plot of successive beat intervals"></svg>
+            <p class="plot-note">Each dot pairs one beat interval with the next. A tight cigar shape is a steady rhythm; a scattered cloud means the rhythm is irregular.</p>
+          </figure>
+          <figure class="plot plot-beats">
+            <figcaption>Detected beats</figcaption>
+            <svg id="beats-svg" role="img" aria-label="Filtered pulse with detected beats"></svg>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="activity" id="activity" aria-labelledby="act-title">
       <div class="activity-head">
         <div>
           <h2 id="act-title">Activity</h2>
@@ -129,7 +228,39 @@
       </ul>
     </section>
 
-    <div class="lower">
+    <section class="trends" id="trends" aria-labelledby="trends-title">
+      <div class="activity-head">
+        <div>
+          <h2 id="trends-title">Trends</h2>
+          <p class="panel-copy">Two weeks of your numbers. Dotted lines are your 28-day baseline.</p>
+        </div>
+        <div class="activity-actions">
+          <button class="btn btn-quiet" id="health-sync-btn" type="button" disabled>Sync health data</button>
+        </div>
+      </div>
+      <dl class="trend-stats">
+        <div><dt>VO2max estimate</dt><dd id="tr-vo2">–</dd></div>
+        <div><dt>Fitness age</dt><dd id="tr-age">–</dd></div>
+        <div><dt>Sleep regularity</dt><dd id="tr-sri">–</dd></div>
+        <div><dt>Training load, 7 days</dt><dd id="tr-load">–</dd></div>
+        <div><dt>Acute : chronic load</dt><dd id="tr-acwr">–</dd></div>
+      </dl>
+      <div class="multiples" id="multiples"></div>
+    </section>
+
+    <section class="sessions" id="sessions" aria-labelledby="sessions-title">
+      <h2 class="visually-hidden" id="sessions-title">Sleep and workouts</h2>
+      <div class="sessions-col">
+        <h3>Sleep sessions</h3>
+        <ol class="session-list" id="sleep-list"><li class="muted">No sleep sessions synced yet.</li></ol>
+      </div>
+      <div class="sessions-col">
+        <h3>Workouts</h3>
+        <ol class="session-list" id="workout-list"><li class="muted">No workouts synced yet.</li></ol>
+      </div>
+    </section>
+
+    <div class="lower" id="watch">
       <section class="panel" aria-labelledby="watch-title">
         <div class="panel-head">
           <h2 id="watch-title">Watch</h2>
@@ -148,6 +279,49 @@
           <div><dt>Hardware</dt><dd id="f-hardware">–</dd></div>
           <div><dt>Connected for</dt><dd id="f-uptime">–</dd></div>
         </dl>
+      </section>
+
+      <section class="panel panel-send" aria-labelledby="send-title">
+        <div class="panel-head">
+          <h2 id="send-title">Send to watch</h2>
+          <button class="btn btn-quiet" id="time-btn" type="button" disabled>Set watch clock</button>
+        </div>
+        <form class="send-form" id="notify-form">
+          <label class="field"><span>Title</span><input id="n-title" maxlength="40" value="From my PC" required></label>
+          <label class="field"><span>Message</span><textarea id="n-body" rows="3" maxlength="240" required>Time to stand up and stretch.</textarea></label>
+          <div class="send-row">
+            <label class="field field-inline"><span>Style</span>
+              <select id="n-kind"><option value="message">Message</option><option value="call">Incoming call</option><option value="generic">Plain alert</option></select>
+            </label>
+            <button class="btn btn-primary" id="notify-btn" type="submit" disabled>Send notification</button>
+          </div>
+          <p class="form-status" id="notify-status" role="status"></p>
+        </form>
+      </section>
+
+      <section class="panel panel-settings" aria-labelledby="settings-title">
+        <div class="panel-head">
+          <h2 id="settings-title">Watch settings</h2>
+        </div>
+        <p class="panel-copy">Changes go straight to the watch. Turning on all-day heart rate, stress and SpO2 tracking gives the trends more to work with.</p>
+        <div class="settings" id="settings"><p class="muted">Connect to load the settings the watch accepts.</p></div>
+      </section>
+
+      <section class="panel panel-profile" aria-labelledby="profile-title">
+        <div class="panel-head">
+          <h2 id="profile-title">Your profile</h2>
+        </div>
+        <p class="panel-copy">Used for heart rate zones, VO2max, fitness age and calories. Stays on this PC.</p>
+        <form class="profile-form" id="profile-form">
+          <label class="field"><span>Age</span><input id="p-age" type="number" min="10" max="100" inputmode="numeric"></label>
+          <label class="field"><span>Sex</span><select id="p-sex"><option value="">Not set</option><option value="male">Male</option><option value="female">Female</option></select></label>
+          <label class="field"><span>Weight, kg</span><input id="p-weight" type="number" min="25" max="250" step="0.1" inputmode="decimal"></label>
+          <label class="field"><span>Height, cm</span><input id="p-height" type="number" min="100" max="230" inputmode="numeric"></label>
+          <label class="field"><span>Max heart rate</span><input id="p-maxhr" type="number" min="120" max="230" placeholder="From age" inputmode="numeric"></label>
+          <label class="field"><span>Resting heart rate</span><input id="p-rhr" type="number" min="30" max="110" placeholder="From the watch" inputmode="numeric"></label>
+          <button class="btn btn-primary" type="submit">Save profile</button>
+          <p class="form-status" id="profile-status" role="status"></p>
+        </form>
       </section>
 
       <section class="panel panel-log" aria-labelledby="log-title">
@@ -169,5 +343,6 @@
   </main>
 
   <script src="app.js"></script>
+  <script src="insights.js"></script>
 </body>
 </html>
