@@ -70,6 +70,7 @@ import dev.heartline.ui.components.detrendPulse
 import dev.heartline.ui.components.paper
 import dev.heartline.ui.theme.HL
 import dev.heartline.ui.theme.ThemeMode
+import kotlin.math.roundToInt
 
 @Composable
 fun WatchScreen(controller: HeartlineController, nav: Navigator) {
@@ -204,8 +205,8 @@ fun SensorsScreen(controller: HeartlineController, nav: Navigator) {
                     CompassDial(s.headingDeg, Modifier.width(150.dp))
                     Spacer(Modifier.width(16.dp))
                     Column {
-                        Text(s.headingDeg?.let { "${it.toInt()}°" } ?: "–", style = HL.type.score, color = c.ink)
-                        MutedText(if (s.compassCalibration < 1) "Turn the watch slowly in a figure-eight to calibrate (${(s.compassCalibration * 100).toInt()}%)." else "Calibrated for this session.")
+                        Text(s.headingDeg?.let { "${it.roundToInt() % 360}°" } ?: "–", style = HL.type.score, color = c.ink)
+                        MutedText(if (s.compassCalibration < 1) "Turn the watch slowly in a figure-eight to calibrate (${(s.compassCalibration * 100).roundToInt()}%)." else "Calibrated for this session.")
                     }
                 }
             }
@@ -232,7 +233,7 @@ fun SensorsScreen(controller: HeartlineController, nav: Navigator) {
             Panel {
                 Text("Sound", style = HL.type.label, color = c.inkSoft)
                 val now = s.micDb.takeLast(10).maxOrNull()
-                Text(now?.let { "${it.toInt()} dB" } ?: "–", style = HL.type.score, color = c.ink)
+                Text(now?.let { "${it.roundToInt()} dB" } ?: "–", style = HL.type.score, color = c.ink)
                 Gap(6)
                 LevelBar(((now ?: -70f) + 70f) / 70f, (now ?: -70f) > -12f)
                 Gap(8)

@@ -69,6 +69,7 @@ import dev.heartline.ui.components.fmtOne
 import dev.heartline.ui.components.paper
 import dev.heartline.ui.theme.HL
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
 // ---------------- Today ----------------
 
@@ -260,8 +261,8 @@ fun HeartScreen(controller: HeartlineController, nav: Navigator) {
                         MutedText(rhythmText(ch.rhythm))
                     }
                     Column(horizontalAlignment = Alignment.End) {
-                        Text("${fmtInt(ch.rmssd?.toInt())} ms", style = HL.type.stat.copy(fontSize = 22.sp), color = c.ink)
-                        MutedText("${fmtInt(ch.hr?.toInt())} bpm")
+                        Text("${fmtInt(ch.rmssd?.roundToInt())} ms", style = HL.type.stat.copy(fontSize = 22.sp), color = c.ink)
+                        MutedText("${fmtInt(ch.hr?.roundToInt())} bpm")
                     }
                 }
                 HorizontalDivider(color = c.line)
@@ -344,11 +345,11 @@ fun CheckResultScreen(controller: HeartlineController, id: String, nav: Navigato
         }
         Gap(20)
         val grid = listOf(
-            Triple("Heart rate", fmtInt(s.hr?.toInt()), "bpm"), Triple("HRV (RMSSD)", fmtInt(s.rmssd?.toInt()), "ms"),
-            Triple("SDNN", fmtInt(s.sdnn?.toInt()), "ms"), Triple("pNN50", fmtInt(s.pnn50?.let { (if (it <= 1) it * 100 else it).toInt() }), "%"),
-            Triple("Stress index", fmtInt(s.stressIndex?.toInt()), null), Triple("Breathing", fmtOne(s.respiratoryRate), "/min"),
+            Triple("Heart rate", fmtInt(s.hr?.roundToInt()), "bpm"), Triple("HRV (RMSSD)", fmtInt(s.rmssd?.roundToInt()), "ms"),
+            Triple("SDNN", fmtInt(s.sdnn?.roundToInt()), "ms"), Triple("pNN50", fmtInt(s.pnn50?.let { (if (it <= 1) it * 100 else it).roundToInt() }), "%"),
+            Triple("Stress index", fmtInt(s.stressIndex?.roundToInt()), null), Triple("Breathing", fmtOne(s.respiratoryRate), "/min"),
             Triple("LF/HF", s.lfHf?.let { "%.2f".format(it) } ?: "–", null), Triple("Extra beats", s.ectopic.toString(), null),
-            Triple("Signal", fmtInt((s.signalQuality * 100).toInt()), "%"),
+            Triple("Signal", fmtInt((s.signalQuality * 100).roundToInt()), "%"),
         )
         grid.chunked(3).forEach { row ->
             Row(Modifier.fillMaxWidth().padding(vertical = 8.dp)) { row.forEach { (l, v, u) -> Stat(l, v, Modifier.weight(1f), unit = u) } }

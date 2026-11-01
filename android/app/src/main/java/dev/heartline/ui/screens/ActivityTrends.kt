@@ -52,6 +52,7 @@ import dev.heartline.ui.components.stateColor
 import dev.heartline.ui.theme.HL
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlin.math.roundToInt
 
 @Composable
 fun ActivityScreen(controller: HeartlineController, nav: Navigator) {
@@ -174,7 +175,7 @@ fun TrendsScreen(controller: HeartlineController) {
         }
         Gap(12)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
-            Stat("Load, 7 days", fmtInt(t?.load7d?.toInt())); Stat("Acute : chronic", t?.acwr?.let { "%.2f".format(it) } ?: "–")
+            Stat("Load, 7 days", fmtInt(t?.load7d?.roundToInt())); Stat("Acute : chronic", t?.acwr?.let { "%.2f".format(it) } ?: "–")
         }
         Gap(20)
         if (t == null) { MutedText("Trends appear after the first sync."); return@Screen }
@@ -188,7 +189,7 @@ fun TrendsScreen(controller: HeartlineController) {
                             when {
                                 last == null -> "–"
                                 s.key == "sleep" -> "%.1f".format(last)
-                                last >= 100 || last % 1.0 == 0.0 -> fmtInt(last.toInt())
+                                last >= 100 || last % 1.0 == 0.0 -> fmtInt(last.roundToInt())
                                 else -> fmtOne(last)
                             } + if (last != null && s.unit.isNotEmpty()) " ${s.unit}" else "",
                             style = HL.type.stat.copy(fontSize = 22.sp), color = c.ink,
