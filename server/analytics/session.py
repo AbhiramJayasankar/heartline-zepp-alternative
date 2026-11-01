@@ -9,7 +9,10 @@ def analyze(rec: ppg.Recording, name: str) -> dict:
     iv = hrv.intervals(beats.times, beats.good)
     keep = ~(iv.ectopic | iv.artifact)
     nn = iv.rr[keep]
-    hr = round(float(60 / nn.mean()), 1) if len(nn) >= 5 else None
+    # A handful of intervals, or a rate outside 35-200 bpm, almost always means missed or doubled beats.
+    hr = round(float(60 / nn.mean()), 1) if len(nn) >= 10 else None
+    if hr is not None and not 35 <= hr <= 200:
+        hr = None
     resp = respiration.breathing_rate(
         beats.times[beats.good], beats.baseline[beats.good], beats.amplitude[beats.good], iv.t[keep], nn)
     rhythm_out = rhythm.assess(iv, hr)

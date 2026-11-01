@@ -23,8 +23,9 @@ Talks to the watch directly over Bluetooth LE from Windows, with a local web das
 - More raw sensors: the second byte of the raw start command is a sensor bitmask (Gadgetbridge only sends 0x03):
   0x01 accel, 0x02 PPG, 0x08 GPS (NMEA text, packet type 0x03), 0x10 gyroscope (0x04), 0x40 magnetometer (0x06).
   0x20 is the microphone (0x05): length-prefixed Opus SILK narrowband frames (TOC 0x08, 20 ms), decoded with PyAV
-  to a 48 kHz WAV (`server/audio.py`). Verified with PC test tones. It is intermittent: some sessions stream the
-  whole time, some stop after a few seconds, some send nothing (seen during an activity sync, and also without one).
+  to a 48 kHz WAV (`server/audio.py`). Verified with PC test tones. The watch's offline voice control, when set to
+  wake with the screen, takes the microphone whenever the screen lights up and the stream does not come back by
+  itself; the server restarts it after 4 s of silence. With voice wake-up off the stream is unbroken.
   PPG runs at ~50 Hz instead of 25 when more sensors are on.
   GPS sentences are also saved to `data/raw/*.nmea`.
 - Vibrate (find device): `03` to Alert Level `0x2A06`.

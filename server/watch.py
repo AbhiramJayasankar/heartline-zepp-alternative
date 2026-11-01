@@ -21,6 +21,9 @@ HR_PING_EVERY = 10.0
 CONNECT_ATTEMPTS = 3
 RECONNECT_DELAY = 10.0
 RAW_FLUSH_EVERY = 0.2  # seconds between raw WS messages (<= 5/s)
+# The watch's offline voice control takes the microphone whenever the screen lights up and the raw stream
+# does not get it back on its own; re-sending the start sequence does (tested 2026-11-01).
+MIC_STALL_S = 4.0
 SYNC_OVERLAP = 5 * 60  # re-fetch the last minutes: the newest one may still have been filling up
 SYNC_MAX_ROUNDS = 20
 SYNC_FIRST_DAYS = 7
@@ -79,6 +82,9 @@ class Watch:
         self._nmea_fh = None
         self.gps: dict | None = None
         self._last_mic_stats: dict | None = None
+        self._mic_last = 0.0
+        self._mic_kicked = 0.0
+        self._mic_stalled = False
         self._mic: MicStream | None = None
         self._raw_mic: list[float] = []
         self._last_audio: pathlib.Path | None = None
@@ -401,6 +407,9 @@ class Watch:
             self._nmea_fh = self._raw_file.with_suffix(".nmea").open("w", newline="")
         if "mic" in self._raw_sensors:
             self._mic = MicStream(self._raw_file.with_suffix(".wav"))
+            self._mic.stats["restarts"] = 0
+            self._mic_last = self._mic_kicked = time.time()
+            self._mic_stalled = False
             self._last_audio = self._mic.path
 
     def _close_raw(self) -> None:
@@ -430,6 +439,10 @@ class Watch:
             return
         if kind == "mic":
             if self._mic is not None:
+                self._mic_last = time.time()
+                if self._mic_stalled:
+                    self._mic_stalled = False
+                    self._event("info", "Microphone is back")
                 self._raw_mic.extend(self._mic.feed_packet(samples[0]))
             return
         now, n = time.time(), len(samples)
@@ -459,6 +472,7 @@ class Watch:
     async def _raw_flush_loop(self) -> None:
         while True:
             await asyncio.sleep(RAW_FLUSH_EVERY)
+            await self._mic_watchdog()
             if self._raw_ppg or self._raw_accel or self._raw_gyro or self._raw_mag or self._raw_mic:
                 msg = {"type": "raw", "ts": time.time(), "ppg": self._raw_ppg, "accel": self._raw_accel,
                        "gyro": self._raw_gyro, "mag": self._raw_mag, "mic_db": self._raw_mic}
@@ -466,6 +480,26 @@ class Watch:
                 self._emit(msg)
                 if self._raw_fh is not None:
                     self._raw_fh.flush()
+
+    async def _mic_watchdog(self) -> None:
+        """Restart the raw stream when the microphone has gone quiet, so a recording gets gaps, not silence."""
+        now = time.time()
+        if self._mic is None or self._client is None or now - self._mic_last < MIC_STALL_S                 or now - self._mic_kicked < MIC_STALL_S:
+            return
+        self._mic_kicked = now
+        self._mic.stats["restarts"] += 1
+        if not self._mic_stalled:
+            self._mic_stalled = True
+            self._event("warn", "Microphone went quiet (the watch's voice control may have taken it); restarting it")
+        try:
+            async with self._lock:
+                await self._client.write_gatt_char(p.RAW_CTRL, p.RAW_STOP, response=False)
+                await asyncio.sleep(0.3)
+                for cmd in p.raw_start_cmds(p.raw_mask(self._raw_sensors)):
+                    await self._client.write_gatt_char(p.RAW_CTRL, cmd, response=False)
+                    await asyncio.sleep(0.4)
+        except Exception as e:
+            self._event("warn", f"Could not restart the microphone: {e}")
 
     async def raw_probe(self, seconds: float = 5.0) -> dict:
         """Run the 3-step raw-sensor start for a few seconds and report what the watch answers."""

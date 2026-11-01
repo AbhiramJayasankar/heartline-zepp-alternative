@@ -168,6 +168,7 @@
           <div class="sound-meter" aria-hidden="true"><span id="sound-fill"></span></div>
           <svg id="sound-svg" role="img" aria-label="Sound level over the last few seconds"></svg>
           <p class="plot-note" id="sound-note">Tick Microphone and start raw sensors. Levels are relative, not calibrated decibels.</p>
+          <p class="plot-note">If the watch's offline voice control is set to wake with the screen, it takes the microphone whenever the screen lights up. The dashboard restarts the recording when that happens, but turn voice wake-up off on the watch for unbroken audio.</p>
           <audio id="sound-player" controls preload="none" hidden></audio>
         </figure>
         <figure class="plot plot-gps">
@@ -403,6 +404,6 @@
 
   <script src="app.js?v=4"></script>
   <script src="insights.js?v=4"></script>
-  <script src="sensors.js?v=6"></script>
+  <script src="sensors.js?v=7"></script>
 </body>
 </html>
