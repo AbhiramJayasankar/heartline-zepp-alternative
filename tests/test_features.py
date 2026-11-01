@@ -102,3 +102,41 @@ def test_nmea_rejects_bad_checksum():
     n = Nmea()
     assert n.feed("$GPGGA,215503.00,2830.0,N,07700.0,E,1,07,1.2,215.0,M,,M,,*FF\r\n") is False
     assert n.state["sats_used"] == 0
+
+
+def test_mic_frames_split_across_packets():
+    from server.audio import split_frames
+    stream = bytes([10, 8]) + bytes(9) + bytes([9, 8]) + bytes(8) + bytes([12, 8])
+    frames, tail, skipped = split_frames(stream)
+    assert [len(f) for f in frames] == [10, 9] and tail == bytes([12, 8]) and skipped == 0
+    more, tail, _ = split_frames(tail + bytes(11))
+    assert [len(f) for f in more] == [12] and tail == b""
+
+
+def test_mic_resyncs_after_lost_packet():
+    from server.audio import MicStream, split_frames
+    good = (bytes([10, 8]) + bytes(9)) * 4
+    # Garbage where a lost packet cut a frame: the parser skips to the next [len][0x08] boundary.
+    frames, tail, skipped = split_frames(bytes([0x55, 0x99, 0x01]) + good)
+    assert len(frames) == 4 and skipped == 3
+
+
+def test_mic_decodes_real_tone(tmp_path):
+    import json, pathlib, wave
+    import numpy as np
+    from server import protocol as p
+    from server.audio import MicStream
+    fx = json.loads((pathlib.Path(__file__).parent / "fixtures" / "mic_2400hz.json").read_text())
+    payload = b"".join(bytes([len(bytes.fromhex(f))]) + bytes.fromhex(f) for f in fx["frames"])
+    assert p.parse_raw(b"\x05\x00" + payload[:10])[0] == "mic"
+    mic = MicStream(tmp_path / "t.wav")
+    levels = mic.feed(payload[:37]) + mic.feed(payload[37:])  # split mid-frame like real packets
+    mic.close()
+    assert mic.stats["errors"] == 0 and len(levels) == len(fx["frames"])
+    with wave.open(str(tmp_path / "t.wav")) as w:
+        x = np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(float)
+    seg = x[-int(0.5 * 48000):]
+    spec = np.abs(np.fft.rfft(seg * np.hanning(len(seg))))
+    freqs = np.fft.rfftfreq(len(seg), 1 / 48000)
+    band = (freqs > 300) & (freqs < 3800)
+    assert abs(freqs[band][np.argmax(spec[band])] - 2400) < 30

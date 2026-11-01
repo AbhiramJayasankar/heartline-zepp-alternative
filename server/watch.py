@@ -12,6 +12,7 @@ from bleak import BleakClient, BleakScanner
 
 from . import health as h
 from . import protocol as p
+from .audio import MicStream
 from .gps import Nmea
 from .store import Store
 
@@ -77,6 +78,10 @@ class Watch:
         self._nmea: Nmea | None = None
         self._nmea_fh = None
         self.gps: dict | None = None
+        self._last_mic_stats: dict | None = None
+        self._mic: MicStream | None = None
+        self._raw_mic: list[float] = []
+        self._last_audio: pathlib.Path | None = None
         self._raw_flush_task: asyncio.Task | None = None
         self._syncing = False
         self.steps: dict | None = None
@@ -98,6 +103,8 @@ class Watch:
                 "streaming": self.raw_streaming,
                 "file": self._raw_file.relative_to(ROOT).as_posix() if self._raw_file else None,
                 "sensors": self._raw_sensors,
+                "audio": self._last_audio.name if self._last_audio else None,
+                "mic_stats": self._mic.stats if self._mic else self._last_mic_stats,
             },
             "gps": self.gps,
             "steps": self.steps,
@@ -392,6 +399,9 @@ class Watch:
         if "gps" in self._raw_sensors:
             self._nmea = Nmea()
             self._nmea_fh = self._raw_file.with_suffix(".nmea").open("w", newline="")
+        if "mic" in self._raw_sensors:
+            self._mic = MicStream(self._raw_file.with_suffix(".wav"))
+            self._last_audio = self._mic.path
 
     def _close_raw(self) -> None:
         self.raw_streaming = False
@@ -404,6 +414,11 @@ class Watch:
         if self._nmea_fh is not None:
             self._nmea_fh.close()
         self._nmea_fh = self._nmea = None
+        if self._mic is not None:
+            self._mic.close()
+            self._last_mic_stats = self._mic.stats
+        self._mic = None
+        self._raw_mic = []
         self._raw_ppg, self._raw_accel, self._raw_gyro, self._raw_mag = [], [], [], []
 
     def _on_raw(self, _, data: bytearray) -> None:
@@ -412,6 +427,10 @@ class Watch:
             return
         if kind == "gps":
             self._on_gps(samples[0])
+            return
+        if kind == "mic":
+            if self._mic is not None:
+                self._raw_mic.extend(self._mic.feed_packet(samples[0]))
             return
         now, n = time.time(), len(samples)
         # Samples in a packet are ~1/25 s apart and the packet arrives after the last one.
@@ -440,10 +459,10 @@ class Watch:
     async def _raw_flush_loop(self) -> None:
         while True:
             await asyncio.sleep(RAW_FLUSH_EVERY)
-            if self._raw_ppg or self._raw_accel or self._raw_gyro or self._raw_mag:
+            if self._raw_ppg or self._raw_accel or self._raw_gyro or self._raw_mag or self._raw_mic:
                 msg = {"type": "raw", "ts": time.time(), "ppg": self._raw_ppg, "accel": self._raw_accel,
-                       "gyro": self._raw_gyro, "mag": self._raw_mag}
-                self._raw_ppg, self._raw_accel, self._raw_gyro, self._raw_mag = [], [], [], []
+                       "gyro": self._raw_gyro, "mag": self._raw_mag, "mic_db": self._raw_mic}
+                self._raw_ppg, self._raw_accel, self._raw_gyro, self._raw_mag, self._raw_mic = [], [], [], [], []
                 self._emit(msg)
                 if self._raw_fh is not None:
                     self._raw_fh.flush()

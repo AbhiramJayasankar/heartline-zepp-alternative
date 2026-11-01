@@ -1,12 +1,13 @@
 """FastAPI app: REST + WebSocket over a single Watch, plus the static dashboard."""
 import asyncio
 import pathlib
+import re
 import time
 from contextlib import asynccontextmanager
 from typing import Any, Awaitable
 
 from fastapi import Body, FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import health, protocol
@@ -122,6 +123,16 @@ def create_app(watch: Any = None, store: Store | None = None, hub: Hub | None = 
                 return JSONResponse({"error": str(e)}, status_code=400)
             return await call(_streaming(watch.raw_start(sensors)))
         return await call(_streaming(watch.raw_start()))
+
+    @app.get("/api/raw/audio")
+    async def raw_audio(file: str):
+        # Only plain recording names from data/raw, never a path.
+        if not re.fullmatch(r"\d{8}-\d{6}\.wav", file):
+            return JSONResponse({"error": "Unknown recording"}, status_code=404)
+        path = ROOT / "data" / "raw" / file
+        if not path.is_file():
+            return JSONResponse({"error": "Unknown recording"}, status_code=404)
+        return FileResponse(path, media_type="audio/wav")
 
     @app.post("/api/raw/stop")
     async def raw_stop():

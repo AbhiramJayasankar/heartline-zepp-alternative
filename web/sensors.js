@@ -8,6 +8,7 @@ const motion = {
   magMax: [-Infinity, -Infinity, -Infinity],
   gps: null,
   dirty: false,
+  micDb: [],
 };
 
 // Magnetometer units are undocumented; Earth's field reads ~3200 here, so a full turn spans roughly twice that.
@@ -17,6 +18,11 @@ window.selectedSensors = () => [...document.querySelectorAll("#sensor-picks inpu
 
 hooks.message.push((msg) => {
   if (msg.type === "raw") {
+    if (msg.mic_db?.length) {
+      motion.micDb.push(...msg.mic_db);
+      if (motion.micDb.length > 50 * WAVE_SECONDS) motion.micDb.splice(0, motion.micDb.length - 50 * WAVE_SECONDS);
+      drawSound();
+    }
     const cap = WAVE_SECONDS * RATE * 2;
     if (msg.gyro?.length) motion.gyro.push(...msg.gyro);
     if (msg.mag?.length) {
@@ -39,6 +45,21 @@ hooks.message.push((msg) => {
 });
 
 hooks.status.push((s) => {
+  const micOn = !!(s.raw?.streaming && s.raw.sensors?.includes("mic"));
+  $("mic-live").hidden = !micOn;
+  const player = $("sound-player");
+  if (!micOn && s.raw?.audio) {
+    const src = `/api/raw/audio?file=${encodeURIComponent(s.raw.audio)}`;
+    if (player.dataset.src !== src) {
+      player.dataset.src = src;
+      player.src = src;
+      $("sound-note").textContent = `Last recording: ${s.raw.audio}. Levels are relative, not calibrated decibels.`;
+    }
+    player.hidden = false;
+  } else if (micOn) {
+    player.hidden = true;
+    $("sound-note").textContent = "Recording. The audio is saved next to the sensor data and plays here when you stop.";
+  }
   if (s.raw?.streaming && Array.isArray(s.raw.sensors)) {
     for (const box of document.querySelectorAll("#sensor-picks input")) box.checked = s.raw.sensors.includes(box.value);
   }
@@ -180,10 +201,35 @@ if (DEMO) {
       const turn = t * 0.6;
       mag.push([Math.round(1500 * Math.cos(turn)), Math.round(1500 * Math.sin(turn)), -860]);
     }
-    handleMessage({ type: "raw", ts: Date.now() / 1000, ppg: [], accel: [], gyro, mag });
+    const mic_db = Array.from({ length: 10 }, (_, i) => -55 + 20 * Math.max(0, Math.sin((n + i * 2) / 40)) + Math.random() * 4);
+    handleMessage({ type: "raw", ts: Date.now() / 1000, ppg: [], accel: [], gyro, mag, mic_db });
   }, 200);
   const sats = [["05", 62, 40, 41], ["12", 28, 300, 33], ["18", 15, 120, 0], ["24", 45, 210, 22], ["29", 70, 160, 38], ["65", 35, 80, 19], ["72", 10, 250, 0]]
     .map(([id, elev, az, snr], i) => ({ id, system: i > 4 ? "GLONASS" : "GPS", elev, az, snr: snr || null }));
   setTimeout(() => handleMessage({ type: "gps", fix: true, quality: 1, lat: 51.50135, lon: -0.14189, alt_m: 24, speed_mps: 1.3,
     course: 90, hdop: 1.4, sats_used: 5, utc: new Date().toISOString(), satellites: sats }), 600);
+}
+
+// ---------- Microphone level ----------
+
+function drawSound() {
+  const recent = motion.micDb.slice(-10);
+  const now = recent.length ? Math.max(...recent) : null;
+  $("sound-db").textContent = now == null ? "–" : Math.round(now);
+  // Map -70..0 dBFS onto the meter; anything above -12 dBFS counts as loud.
+  const pct = now == null ? 0 : Math.max(0, Math.min(100, ((now + 70) / 70) * 100));
+  $("sound-fill").style.width = `${pct}%`;
+  $("sound-fill").dataset.loud = String(now != null && now > -12);
+  const svg = $("sound-svg");
+  const { w, h } = svgSize(svg);
+  const vals = motion.micDb;
+  if (vals.length < 2) { svg.innerHTML = ""; return; }
+  const n = 50 * WAVE_SECONDS;
+  const y = (v) => 4 + (1 - (Math.max(-70, Math.min(0, v)) + 70) / 70) * (h - 8);
+  let d = "";
+  vals.forEach((v, i) => {
+    const x = w - ((vals.length - 1 - i) / (n - 1)) * w;
+    d += `${i ? "L" : "M"}${x.toFixed(1)},${y(v).toFixed(1)}`;
+  });
+  svg.innerHTML = `<path class="s-line" d="${d}"/>`;
 }

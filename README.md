@@ -22,7 +22,10 @@ Talks to the watch directly over Bluetooth LE from Windows, with a local web das
   The `03` ack is never sent, because it deletes the fetched data from the watch; Zepp still gets the activity history.
 - More raw sensors: the second byte of the raw start command is a sensor bitmask (Gadgetbridge only sends 0x03):
   0x01 accel, 0x02 PPG, 0x08 GPS (NMEA text, packet type 0x03), 0x10 gyroscope (0x04), 0x40 magnetometer (0x06).
-  0x20 gives an undecoded compressed stream (0x05). PPG runs at ~50 Hz instead of 25 when more sensors are on.
+  0x20 is the microphone (0x05): length-prefixed Opus SILK narrowband frames (TOC 0x08, 20 ms), decoded with PyAV
+  to a 48 kHz WAV (`server/audio.py`). Verified with PC test tones. It is intermittent: some sessions stream the
+  whole time, some stop after a few seconds, some send nothing (seen during an activity sync, and also without one).
+  PPG runs at ~50 Hz instead of 25 when more sensors are on.
   GPS sentences are also saved to `data/raw/*.nmea`.
 - Vibrate (find device): `03` to Alert Level `0x2A06`.
 - Full GATT table.
@@ -53,3 +56,4 @@ Talks to the watch directly over Bluetooth LE from Windows, with a local web das
 - `web/` the dashboard (plain HTML/CSS/JS, no build step).
 - `*.py` at the top level: the original exploration scripts.
 - `tests/` run with `.venv\Scripts\python.exe -m pytest`.
+- Python packages in `.venv`: bleak, pycryptodome, fastapi, uvicorn, numpy, scipy, av (PyAV, for the microphone), pytest, httpx.

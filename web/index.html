@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700;800&family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=6">
   <script src="theme.js?v=4"></script>
 </head>
 <body>
@@ -22,6 +22,7 @@
     </div>
     <div class="bar-end">
       <button class="btn btn-quiet theme-btn" id="theme-btn" type="button" aria-label="Colour theme: follows your system">Auto</button>
+      <span class="mic-live" id="mic-live" hidden>Microphone on</span>
       <div class="live-steps" id="live-steps" title="Steps today, live from the watch" hidden>
         <span id="live-steps-value">â€“</span> steps
       </div>
@@ -36,7 +37,7 @@
   <nav class="jump" aria-label="Sections">
     <a href="#today">Today</a>
     <a href="#live">Live</a>
-    <a href="#motion">Motion and GPS</a>
+    <a href="#motion">Motion, sound, GPS</a>
     <a href="#check">Heart check</a>
     <a href="#activity">Activity</a>
     <a href="#trends">Trends</a>
@@ -126,6 +127,7 @@
           <label><input type="checkbox" value="gyro"> Gyroscope</label>
           <label><input type="checkbox" value="mag"> Compass</label>
           <label><input type="checkbox" value="gps"> GPS <small>uses more battery</small></label>
+          <label><input type="checkbox" value="mic"> Microphone <small>records sound around you</small></label>
         </fieldset>
       </div>
       <div class="wave-area">
@@ -145,7 +147,7 @@
       <div class="activity-head">
         <div>
           <h2 id="motion-title">Motion and position</h2>
-          <p class="panel-copy">Live from the gyroscope, compass and GPS inside the watch. Tick them under Pulse waveform and start raw sensors.</p>
+          <p class="panel-copy">Live from the gyroscope, compass, microphone and GPS inside the watch. Tick them under Pulse waveform and start raw sensors.</p>
         </div>
       </div>
       <div class="motion-grid">
@@ -157,21 +159,29 @@
         <figure class="plot plot-compass">
           <figcaption>Compass</figcaption>
           <svg id="compass-svg" viewBox="0 0 200 200" role="img" aria-label="Compass heading"></svg>
-          <p class="compass-readout" id="compass-heading">–</p>
+          <p class="compass-readout" id="compass-heading">â€“</p>
           <p class="plot-note" id="compass-note">Tick Compass and start raw sensors.</p>
+        </figure>
+        <figure class="plot plot-sound">
+          <figcaption>Sound</figcaption>
+          <div class="sound-now"><span id="sound-db">â€“</span> <small>dB below full scale</small></div>
+          <div class="sound-meter" aria-hidden="true"><span id="sound-fill"></span></div>
+          <svg id="sound-svg" role="img" aria-label="Sound level over the last few seconds"></svg>
+          <p class="plot-note" id="sound-note">Tick Microphone and start raw sensors. Levels are relative, not calibrated decibels.</p>
+          <audio id="sound-player" controls preload="none" hidden></audio>
         </figure>
         <figure class="plot plot-gps">
           <figcaption>GPS satellites</figcaption>
           <div class="gps-body">
             <svg id="sky-svg" viewBox="0 0 200 200" role="img" aria-label="Satellites in view by direction and height"></svg>
             <dl class="gps-facts">
-              <div><dt>Fix</dt><dd id="g-fix">–</dd></div>
-              <div><dt>Satellites</dt><dd id="g-sats">–</dd></div>
-              <div><dt>Position</dt><dd id="g-pos">–</dd></div>
-              <div><dt>Altitude</dt><dd id="g-alt">–</dd></div>
-              <div><dt>Speed</dt><dd id="g-speed">–</dd></div>
-              <div><dt>Accuracy (HDOP)</dt><dd id="g-hdop">–</dd></div>
-              <div><dt>GPS time</dt><dd id="g-time">–</dd></div>
+              <div><dt>Fix</dt><dd id="g-fix">â€“</dd></div>
+              <div><dt>Satellites</dt><dd id="g-sats">â€“</dd></div>
+              <div><dt>Position</dt><dd id="g-pos">â€“</dd></div>
+              <div><dt>Altitude</dt><dd id="g-alt">â€“</dd></div>
+              <div><dt>Speed</dt><dd id="g-speed">â€“</dd></div>
+              <div><dt>Accuracy (HDOP)</dt><dd id="g-hdop">â€“</dd></div>
+              <div><dt>GPS time</dt><dd id="g-time">â€“</dd></div>
             </dl>
           </div>
           <p class="plot-note">Dots are satellites the watch can see: centre is straight up, the edge is the horizon. Filled dots have a usable signal. Indoors, expect no fix.</p>
@@ -393,6 +403,6 @@
 
   <script src="app.js?v=4"></script>
   <script src="insights.js?v=4"></script>
-  <script src="sensors.js?v=4"></script>
+  <script src="sensors.js?v=6"></script>
 </body>
 </html>

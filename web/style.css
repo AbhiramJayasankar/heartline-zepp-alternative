@@ -506,7 +506,8 @@ main [id] { scroll-margin-top: 112px; }
 
 .motion { padding: clamp(24px, 4vw, 40px) clamp(16px, 4vw, 40px); border-bottom: 1px solid var(--line); }
 .motion h2 { margin: 0 0 6px; font: 700 34px/1 var(--display); letter-spacing: 0.01em; }
-.motion-grid { display: grid; grid-template-columns: 1.3fr 0.8fr 1.6fr; gap: 14px; margin-top: 12px; align-items: stretch; }
+.motion-grid { display: grid; grid-template-columns: 1.3fr 0.8fr 1fr; gap: 14px; margin-top: 12px; align-items: stretch; }
+.plot-gps { grid-column: 1 / -1; }
 .plot-gyro { position: relative; min-height: 240px; }
 .plot-gyro canvas { position: absolute; left: 12px; right: 12px; top: 34px; bottom: 12px; width: calc(100% - 24px); height: calc(100% - 46px); }
 .plot-gyro figcaption { display: flex; gap: 12px; align-items: center; }
@@ -538,3 +539,15 @@ main [id] { scroll-margin-top: 112px; }
   .motion-grid { grid-template-columns: 1fr; }
   .gps-body { grid-template-columns: 1fr; }
 }
+
+/* Microphone */
+.mic-live { font-size: 13px; font-weight: 600; color: var(--pulse); display: inline-flex; align-items: center; gap: 6px; }
+.mic-live::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--pulse); animation: blink 1s steps(2) infinite; }
+.sound-now { font: 800 34px/1 var(--display); font-variant-numeric: tabular-nums; margin-top: 4px; }
+.sound-now small { font: 600 12px var(--text); color: var(--ink-soft); }
+.sound-meter { height: 8px; border-radius: 4px; background: var(--grid-minor); overflow: hidden; margin: 10px 0 6px; }
+.sound-meter span { display: block; height: 100%; width: 0; background: var(--ok); transition: width 0.15s linear; }
+.sound-meter span[data-loud="true"] { background: var(--pulse); }
+.plot-sound svg { height: 90px; }
+.plot-sound .s-line { fill: none; stroke: var(--ink); stroke-width: 1.5; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.plot-sound audio { width: 100%; margin-top: 8px; }
