@@ -147,7 +147,8 @@ def test_real_recordings_sane(path):
     a = session.analyze(ppg.load_csv(path), path.name)
     assert 0 <= a["signal_quality"] <= 1
     assert a["hr_bpm"] is None or 40 <= a["hr_bpm"] <= 180
-    assert 20 <= ppg.load_csv(path).fs <= 30
+    # PPG streams at ~25 Hz, or ~50 Hz when more raw sensors are enabled alongside it.
+    assert 20 <= ppg.load_csv(path).fs <= 60
 
 
 # ---- daily scores --------------------------------------------------------------

@@ -90,7 +90,12 @@ def test_realtime_steps_device_events_and_time():
 
 def test_notification_payload_and_chunks():
     p = h.notification_payload("Hi", "there")
-    assert p == bytes([0xFA, 1, 11]) + b"Hi\0there\n\n\0Dashboard\0"
+    # GTS family (incl. GTR 2e): category, 4-byte extra header, 1, icon. Missing header rebooted the watch.
+    assert p == bytes([0xFA, 0, 0, 0, 0, 1, 11]) + b"Hi\0there\n\n\0Dashboard\0"
+    assert h.notification_payload("Hi", "there", "generic") == bytes([5, 0, 0, 0, 0, 1]) + b"Hi\0there\n\n\0 \0"
+    long = h.notification_payload("T", "é" * 400)
+    assert len(long) <= h.NOTIFICATION_MAX + len(b"\0Dashboard\0")
+    long[7:-len(b"\0Dashboard\0")].decode()  # never cuts a UTF-8 character in half
     chunks = h.chunked_writes(bytes(50), mtu=23)
     assert [c[:3] for c in chunks] == [bytes([0, 0, 0]), bytes([0, 0x40, 1]), bytes([0, 0x80, 2])]
     assert sum(len(c) - 3 for c in chunks) == 50

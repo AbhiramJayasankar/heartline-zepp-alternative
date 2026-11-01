@@ -64,3 +64,41 @@ def test_store_activity_upsert():
     assert s.activity_prev_kind(1000) == 1
     s.set_meta("k", "v")
     assert s.get_meta("k") == "v" and s.get_meta("x") is None
+
+
+def test_raw_mask_and_new_packet_types():
+    from server import protocol as p
+    assert p.raw_mask(["accel", "ppg"]) == 0x03
+    assert p.raw_mask(["gps", "gyro", "mag"]) == 0x58
+    assert p.raw_start_cmds(0x58)[1] == bytes([0x01, 0x58, 0, 0, 0, 0x19])
+    kind, s = p.parse_raw(bytes.fromhex("0600d904980ab8fbd704990abefb"))
+    assert kind == "mag" and s[0] == (1241, 2712, -1096) and len(s) == 2
+    kind, s = p.parse_raw(bytes.fromhex("0401fbff02000400070000000000"))
+    assert kind == "gyro" and s == [(-5, 2, 4), (7, 0, 0)]
+    kind, s = p.parse_raw(b"\x03\x00$GPGGA,1")
+    assert kind == "gps" and s == ["$GPGGA,1"]
+
+
+def test_nmea_parser_fix_and_satellites():
+    from server.gps import Nmea
+    n = Nmea()
+    text = ("$GPGSV,1,1,02,05,45,120,38,12,10,300,,*7F\r\n"
+            "$GNRMC,215503.00,A,2830.0000,N,07700.0000,E,1.0,90.0,011126,,,A*00\r\n"
+            "$GPGGA,215503.00,2830.0000,N,07700.0000,E,1,07,1.2,215.0,M,,M,,*00\r\n")
+    # Checksums above are placeholders, so strip them: the parser accepts sentences without one.
+    text = "\r\n".join(line.split("*")[0] for line in text.split("\r\n"))
+    assert n.feed(text[:40]) is False
+    assert n.feed(text[40:] + "\r\n") is True
+    st = n.state
+    assert st["fix"] and st["sats_used"] == 7 and st["alt_m"] == 215.0
+    assert abs(st["lat"] - 28.5) < 1e-6 and abs(st["lon"] - 77.0) < 1e-6
+    assert st["speed_mps"] == 0.51 and st["utc"].startswith("2026-11-01T21:55:03")
+    assert {s["id"] for s in st["satellites"]} == {"05", "12"}
+    assert next(s for s in st["satellites"] if s["id"] == "12")["snr"] is None
+
+
+def test_nmea_rejects_bad_checksum():
+    from server.gps import Nmea
+    n = Nmea()
+    assert n.feed("$GPGGA,215503.00,2830.0,N,07700.0,E,1,07,1.2,215.0,M,,M,,*FF\r\n") is False
+    assert n.state["sats_used"] == 0

@@ -73,14 +73,34 @@ def decode_info(data: bytes) -> str:
 
 # ---- raw sensor stream (Gadgetbridge Huami2021Service.CMD_RAW_SENSOR_*) ----
 
-RAW_START = (bytes([0x01, 0x03, 0x19]), bytes([0x01, 0x03, 0x00, 0x00, 0x00, 0x19]), bytes([0x02]))
+# The second byte of the start command is a sensor bitmask (found by probing; Gadgetbridge only uses 0x03).
+# Each bit enables one packet type on RAW_DATA: 0x01 accel (0x00), 0x02 PPG (0x01), 0x08 GPS NMEA text (0x03),
+# 0x10 gyroscope (0x04), 0x40 magnetometer (0x06). 0x20 gives an undecoded compressed stream (0x05).
+RAW_SENSORS = {"accel": 0x01, "ppg": 0x02, "gps": 0x08, "gyro": 0x10, "mag": 0x40}
+RAW_DEFAULT = ("accel", "ppg")
+
+
+def raw_mask(sensors) -> int:
+    mask = 0
+    for name in sensors:
+        if name not in RAW_SENSORS:
+            raise ValueError(f"unknown sensor {name!r}; choose from {sorted(RAW_SENSORS)}")
+        mask |= RAW_SENSORS[name]
+    return mask or 0x03
+
+
+def raw_start_cmds(mask: int = 0x03) -> tuple[bytes, bytes, bytes]:
+    return bytes([0x01, mask, 0x19]), bytes([0x01, mask, 0x00, 0x00, 0x00, 0x19]), bytes([0x02])
+
+
+RAW_START = raw_start_cmds(0x03)
 RAW_STOP = bytes([0x03])
 ACCEL_ONE_G = 4100  # raw accelerometer units per g
 RAW_RATE_HZ = 25.0
 
 
 def parse_raw(data: bytes) -> tuple[str, list]:
-    """Decode one raw-sensor packet: ("accel", [(x, y, z) in g]), ("ppg", [u16]) or ("other", [])."""
+    """Decode one raw-sensor packet: accel (g), ppg (u16), gyro/mag (raw int16 xyz), gps ([nmea text]) or other."""
     if len(data) < 2:
         return "other", []
     body = data[2:]
@@ -92,6 +112,15 @@ def parse_raw(data: bytes) -> tuple[str, list]:
         ]
     if data[0] == 0x01:
         return "ppg", [int.from_bytes(body[i:i + 2], "little") for i in range(0, len(body) - 1, 2)]
+    if data[0] in (0x04, 0x06):
+        # Gyroscope and magnetometer: int16 x, y, z triplets in raw sensor units (scale not documented).
+        n = len(body) // 6
+        return ("gyro" if data[0] == 0x04 else "mag"), [
+            tuple(int.from_bytes(body[i + k:i + k + 2], "little", signed=True) for k in (0, 2, 4))
+            for i in range(0, n * 6, 6)
+        ]
+    if data[0] == 0x03:
+        return "gps", [body.decode("ascii", "replace")]
     return "other", []
 
 

@@ -228,18 +228,31 @@ def parse_current_time(data: bytes) -> str | None:
 
 ICON_APP = 11  # HuamiIcon.APP_11
 ALERT_SMS, ALERT_CUSTOM_HUAMI = 5, 0xFA  # AlertCategory
+# AmazfitGTR2Support extends AmazfitGTRSupport extends AmazfitGTSSupport, whose notificationHasExtraHeader() is
+# true: four zero bytes follow the alert category. Without them the watch misreads the fields and reboots.
+EXTRA_HEADER = bytes(4)
+NOTIFICATION_MAX = 230  # HuamiSupport.notificationMaxLength()
+CALL_END = bytes([3, 3, 0, 0, 0, 0])  # HuamiSupport.onSetCallStateNew, CALL_START/CALL_END
+
+
+def _fit(text: str, limit: int) -> bytes:
+    """UTF-8 bytes cut to `limit` without splitting a character."""
+    raw = text.encode()
+    return raw[:limit].decode("utf-8", "ignore").encode() if len(raw) > limit else raw
 
 
 def notification_payload(title: str, body: str, kind: str = "message", app: str = "Dashboard") -> bytes:
-    """HuamiSupport.onNotification (chunked branch) and onSetCallStateNew."""
+    """HuamiSupport.onNotification (chunked branch, with the GTS-family extra header) and onSetCallStateNew."""
     title = (title or " ")[:32]
     body = (body or " ")[:512]
     if kind == "call":
-        return bytes([3, 0, 0, 0, 0, 0]) + title.encode() + bytes([0, 0, 0, 2])
-    message = f"{title}\0{body}\n\n".encode()[:225]
+        return bytes([3, 0, 0, 0, 0, 0]) + _fit(title, 64) + bytes([0, 0, 0, 2])
+    message = f"{title}\0{body}\n\n"
     if kind == "generic":
-        return bytes([ALERT_SMS, 1]) + message + b"\0 \0"
-    return bytes([ALERT_CUSTOM_HUAMI, 1, ICON_APP]) + message + f"\0{app}\0".encode()
+        prefix, suffix = bytes([ALERT_SMS]) + EXTRA_HEADER + bytes([1]), b"\0 \0"
+    else:
+        prefix, suffix = bytes([ALERT_CUSTOM_HUAMI]) + EXTRA_HEADER + bytes([1, ICON_APP]), f"\0{app}\0".encode()
+    return prefix + _fit(message, NOTIFICATION_MAX - len(prefix)) + suffix
 
 
 # Gadgetbridge keeps mMTU at 23 unless the watch requests more; one large write (Windows negotiates 247)

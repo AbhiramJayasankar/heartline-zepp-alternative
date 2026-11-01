@@ -12,6 +12,7 @@ from bleak import BleakClient, BleakScanner
 
 from . import health as h
 from . import protocol as p
+from .gps import Nmea
 from .store import Store
 
 DEFAULT_CONFIG = pathlib.Path(r"C:\Users\abhir\Desktop\projects\amazfit-gtr2e\watch.json")
@@ -70,6 +71,12 @@ class Watch:
         self._raw_csv = None
         self._raw_ppg: list[int] = []
         self._raw_accel: list[list[float]] = []
+        self._raw_gyro: list[list[int]] = []
+        self._raw_mag: list[list[int]] = []
+        self._raw_sensors: list[str] = list(p.RAW_DEFAULT)
+        self._nmea: Nmea | None = None
+        self._nmea_fh = None
+        self.gps: dict | None = None
         self._raw_flush_task: asyncio.Task | None = None
         self._syncing = False
         self.steps: dict | None = None
@@ -90,7 +97,9 @@ class Watch:
             "raw": {
                 "streaming": self.raw_streaming,
                 "file": self._raw_file.relative_to(ROOT).as_posix() if self._raw_file else None,
+                "sensors": self._raw_sensors,
             },
+            "gps": self.gps,
             "steps": self.steps,
         }
 
@@ -333,22 +342,27 @@ class Watch:
 
     # ---- raw sensor stream ---------------------------------------------------
 
-    async def _raw_begin(self, client: BleakClient, on_data, on_ctrl) -> None:
-        """Enable notifications and send Gadgetbridge's 3-step start."""
+    async def _raw_begin(self, client: BleakClient, on_data, on_ctrl, mask: int = 0x03) -> None:
+        """Enable notifications and send Gadgetbridge's 3-step start with the chosen sensor mask."""
         await client.start_notify(p.RAW_DATA, on_data)
         await client.start_notify(p.RAW_CTRL, on_ctrl)
-        for cmd in p.RAW_START:
+        for cmd in p.raw_start_cmds(mask):
             await client.write_gatt_char(p.RAW_CTRL, cmd, response=False)
             await asyncio.sleep(0.4)
 
-    async def raw_start(self) -> bool:
+    async def raw_start(self, sensors: list[str] | None = None) -> bool:
         client = self._require()
+        if sensors is not None:
+            mask = p.raw_mask(sensors)  # validates names before anything changes
+            if self.raw_streaming and sorted(sensors) != sorted(self._raw_sensors):
+                await self.raw_stop()
+            self._raw_sensors = list(sensors)
         self._want_raw = True
         if self.raw_streaming:
             return True
         self._open_raw_file()
         async with self._lock:
-            await self._raw_begin(client, self._on_raw, lambda _, d: None)
+            await self._raw_begin(client, self._on_raw, lambda _, d: None, p.raw_mask(self._raw_sensors))
         self.raw_streaming = True
         self._raw_flush_task = asyncio.create_task(self._raw_flush_loop())
         self._push_status()
@@ -375,6 +389,9 @@ class Watch:
         self._raw_fh = self._raw_file.open("w", newline="")
         self._raw_csv = csv.writer(self._raw_fh)
         self._raw_csv.writerow(["ts", "kind", "ppg", "ax", "ay", "az"])
+        if "gps" in self._raw_sensors:
+            self._nmea = Nmea()
+            self._nmea_fh = self._raw_file.with_suffix(".nmea").open("w", newline="")
 
     def _close_raw(self) -> None:
         self.raw_streaming = False
@@ -384,11 +401,17 @@ class Watch:
         if self._raw_fh is not None:
             self._raw_fh.close()
         self._raw_fh = self._raw_csv = None
-        self._raw_ppg, self._raw_accel = [], []
+        if self._nmea_fh is not None:
+            self._nmea_fh.close()
+        self._nmea_fh = self._nmea = None
+        self._raw_ppg, self._raw_accel, self._raw_gyro, self._raw_mag = [], [], [], []
 
     def _on_raw(self, _, data: bytearray) -> None:
         kind, samples = p.parse_raw(bytes(data))
         if not samples or self._raw_csv is None:
+            return
+        if kind == "gps":
+            self._on_gps(samples[0])
             return
         now, n = time.time(), len(samples)
         # Samples in a packet are ~1/25 s apart and the packet arrives after the last one.
@@ -397,18 +420,30 @@ class Watch:
             if kind == "ppg":
                 self._raw_csv.writerow([ts, "ppg", v, "", "", ""])
             else:
-                self._raw_csv.writerow([ts, "accel", "", *v])
+                self._raw_csv.writerow([ts, kind, "", *v])
         if kind == "ppg":
             self._raw_ppg.extend(samples)
-        else:
+        elif kind == "accel":
             self._raw_accel.extend(list(v) for v in samples)
+        elif kind == "gyro":
+            self._raw_gyro.extend(list(v) for v in samples)
+        elif kind == "mag":
+            self._raw_mag.extend(list(v) for v in samples)
+
+    def _on_gps(self, text: str) -> None:
+        if self._nmea_fh is not None:
+            self._nmea_fh.write(text)
+        if self._nmea is not None and self._nmea.feed(text):
+            self.gps = {**self._nmea.state, "ts": time.time()}
+            self._emit({"type": "gps", **self.gps})
 
     async def _raw_flush_loop(self) -> None:
         while True:
             await asyncio.sleep(RAW_FLUSH_EVERY)
-            if self._raw_ppg or self._raw_accel:
-                msg = {"type": "raw", "ts": time.time(), "ppg": self._raw_ppg, "accel": self._raw_accel}
-                self._raw_ppg, self._raw_accel = [], []
+            if self._raw_ppg or self._raw_accel or self._raw_gyro or self._raw_mag:
+                msg = {"type": "raw", "ts": time.time(), "ppg": self._raw_ppg, "accel": self._raw_accel,
+                       "gyro": self._raw_gyro, "mag": self._raw_mag}
+                self._raw_ppg, self._raw_accel, self._raw_gyro, self._raw_mag = [], [], [], []
                 self._emit(msg)
                 if self._raw_fh is not None:
                     self._raw_fh.flush()
@@ -713,8 +748,22 @@ class Watch:
         async with self._lock:
             for chunk in h.chunked_writes(payload, h.CHUNK_MTU):
                 await client.write_gatt_char(h.CHUNKED, chunk, response=False)
+        if kind == "call":
+            asyncio.create_task(self._end_call(client))
         self._event("info", f"Sent notification: {title}")
         return {"ok": True}
+
+    async def _end_call(self, client: BleakClient, after: float = 15.0) -> None:
+        """A call alert rings until told the call ended, as Gadgetbridge does on CALL_END."""
+        await asyncio.sleep(after)
+        if self._client is not client:
+            return
+        try:
+            async with self._lock:
+                for chunk in h.chunked_writes(h.CALL_END, h.CHUNK_MTU):
+                    await client.write_gatt_char(h.CHUNKED, chunk, response=False)
+        except Exception as e:
+            self._event("warn", f"Could not end the call alert: {e}")
 
     async def time_sync(self) -> dict:
         client = self._require()

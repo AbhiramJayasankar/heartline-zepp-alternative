@@ -20,13 +20,17 @@ Talks to the watch directly over Bluetooth LE from Windows, with a local web das
   started with `01 03 19`, `01 03 00 00 00 19`, `02` on `0x0001` (stop `03`). Every sample is recorded to `data/raw/*.csv`.
 - Activity history: one 8-byte record per minute (kind, intensity, steps, HR, ?, sleep, deep, rem) via `0x0004`/`0x0005`.
   The `03` ack is never sent, because it deletes the fetched data from the watch; Zepp still gets the activity history.
+- More raw sensors: the second byte of the raw start command is a sensor bitmask (Gadgetbridge only sends 0x03):
+  0x01 accel, 0x02 PPG, 0x08 GPS (NMEA text, packet type 0x03), 0x10 gyroscope (0x04), 0x40 magnetometer (0x06).
+  0x20 gives an undecoded compressed stream (0x05). PPG runs at ~50 Hz instead of 25 when more sensors are on.
+  GPS sentences are also saved to `data/raw/*.nmea`.
 - Vibrate (find device): `03` to Alert Level `0x2A06`.
 - Full GATT table.
 - Health data (`POST /api/health/sync`): manual HR, workouts with per-second HR tracks, PAI, automatic stress,
   sleep SpO2, skin temperature (one sample a minute), and a statistics blob (stored raw, not decoded).
   The watch accepts but returns nothing for normal SpO2, manual stress, sleep sessions, resting/max HR, sleep breathing and HRV.
 - Live steps (`0x0007`), device events (`0x0010`), watch settings (write-only: the page shows the last value written),
-  text notifications (chunked at 20 bytes; bigger writes drop the link), clock sync.
+  text notifications (GTS-family 4-byte extra header after the alert type; without it the watch reboots; chunked at 20 bytes), clock sync.
 - Insights (`server/analytics/`, methods and their limits in `server/analytics/METHODS.md`): beat detection from the raw PPG,
   HRV, rhythm screening (not a diagnosis), daily readiness, strain, sleep score, body battery, VO2max and fitness age.
 

@@ -433,7 +433,8 @@ async function toggleRaw() {
   const btn = $("raw-btn");
   btn.disabled = true;
   try {
-    const { streaming } = await api(on ? "/api/raw/stop" : "/api/raw/start", "POST");
+    const body = !on && window.selectedSensors ? { sensors: window.selectedSensors() } : undefined;
+    const { streaming } = await api(on ? "/api/raw/stop" : "/api/raw/start", "POST", body);
     state.status.raw = { ...(state.status.raw || {}), streaming };
     if (streaming) { wave.ppg = []; wave.accel = []; }
   } catch (e) {

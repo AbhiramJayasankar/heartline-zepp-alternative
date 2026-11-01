@@ -7,7 +7,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700;800&family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=4">
+  <script src="theme.js?v=4"></script>
 </head>
 <body>
   <header class="bar">
@@ -20,6 +21,7 @@
       <span class="link-text" id="link-text">Not connected</span>
     </div>
     <div class="bar-end">
+      <button class="btn btn-quiet theme-btn" id="theme-btn" type="button" aria-label="Colour theme: follows your system">Auto</button>
       <div class="live-steps" id="live-steps" title="Steps today, live from the watch" hidden>
         <span id="live-steps-value">â€“</span> steps
       </div>
@@ -34,6 +36,7 @@
   <nav class="jump" aria-label="Sections">
     <a href="#today">Today</a>
     <a href="#live">Live</a>
+    <a href="#motion">Motion and GPS</a>
     <a href="#check">Heart check</a>
     <a href="#activity">Activity</a>
     <a href="#trends">Trends</a>
@@ -116,6 +119,14 @@
           <button class="btn btn-pulse" id="raw-btn" type="button" disabled>Start raw sensors</button>
         </div>
         <p class="wave-file" id="wave-file" hidden></p>
+        <fieldset class="sensor-picks" id="sensor-picks">
+          <legend>Stream these sensors</legend>
+          <label><input type="checkbox" value="ppg" checked> Pulse</label>
+          <label><input type="checkbox" value="accel" checked> Accelerometer</label>
+          <label><input type="checkbox" value="gyro"> Gyroscope</label>
+          <label><input type="checkbox" value="mag"> Compass</label>
+          <label><input type="checkbox" value="gps"> GPS <small>uses more battery</small></label>
+        </fieldset>
       </div>
       <div class="wave-area">
         <div class="wave-box">
@@ -127,6 +138,44 @@
           <span class="wave-label">Accelerometer <span class="axis-key"><i class="k-x"></i>x <i class="k-y"></i>y <i class="k-z"></i>z</span></span>
           <canvas id="accel-canvas" aria-label="Live accelerometer"></canvas>
         </div>
+      </div>
+    </section>
+
+    <section class="motion" id="motion" aria-labelledby="motion-title">
+      <div class="activity-head">
+        <div>
+          <h2 id="motion-title">Motion and position</h2>
+          <p class="panel-copy">Live from the gyroscope, compass and GPS inside the watch. Tick them under Pulse waveform and start raw sensors.</p>
+        </div>
+      </div>
+      <div class="motion-grid">
+        <figure class="plot plot-gyro">
+          <figcaption>Gyroscope, rotation <span class="axis-key"><i class="k-x"></i>x <i class="k-y"></i>y <i class="k-z"></i>z</span></figcaption>
+          <canvas id="gyro-canvas" aria-label="Live gyroscope"></canvas>
+          <p class="chart-empty" id="gyro-empty">Tick Gyroscope and start raw sensors.</p>
+        </figure>
+        <figure class="plot plot-compass">
+          <figcaption>Compass</figcaption>
+          <svg id="compass-svg" viewBox="0 0 200 200" role="img" aria-label="Compass heading"></svg>
+          <p class="compass-readout" id="compass-heading">–</p>
+          <p class="plot-note" id="compass-note">Tick Compass and start raw sensors.</p>
+        </figure>
+        <figure class="plot plot-gps">
+          <figcaption>GPS satellites</figcaption>
+          <div class="gps-body">
+            <svg id="sky-svg" viewBox="0 0 200 200" role="img" aria-label="Satellites in view by direction and height"></svg>
+            <dl class="gps-facts">
+              <div><dt>Fix</dt><dd id="g-fix">–</dd></div>
+              <div><dt>Satellites</dt><dd id="g-sats">–</dd></div>
+              <div><dt>Position</dt><dd id="g-pos">–</dd></div>
+              <div><dt>Altitude</dt><dd id="g-alt">–</dd></div>
+              <div><dt>Speed</dt><dd id="g-speed">–</dd></div>
+              <div><dt>Accuracy (HDOP)</dt><dd id="g-hdop">–</dd></div>
+              <div><dt>GPS time</dt><dd id="g-time">–</dd></div>
+            </dl>
+          </div>
+          <p class="plot-note">Dots are satellites the watch can see: centre is straight up, the edge is the horizon. Filled dots have a usable signal. Indoors, expect no fix.</p>
+        </figure>
       </div>
     </section>
 
@@ -342,7 +391,8 @@
     </div>
   </main>
 
-  <script src="app.js"></script>
-  <script src="insights.js"></script>
+  <script src="app.js?v=4"></script>
+  <script src="insights.js?v=4"></script>
+  <script src="sensors.js?v=4"></script>
 </body>
 </html>

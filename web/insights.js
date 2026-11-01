@@ -241,6 +241,9 @@ async function loadRecordings(selectFile) {
       ? recordings.map((r) => `<option value="${esc(r.file)}">${new Date(r.start * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false })}, ${Math.round(r.duration_s)} s</option>`).join("")
       : `<option value="">No recordings yet</option>`;
     if (selectFile) sel.value = selectFile;
+    // Default to the newest recording long enough for HRV; short ones are usually sensor tests.
+    const usable = recordings.find((r) => r.duration_s >= 50);
+    if (!selectFile && usable) sel.value = usable.file;
     if (!ins.session && recordings.length) loadSession(sel.value);
   } catch {
     /* insights not available yet */

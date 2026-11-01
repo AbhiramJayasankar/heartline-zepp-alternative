@@ -29,6 +29,15 @@ class Hub:
             q.put_nowait(msg)
 
 
+class NoCacheStatic(StaticFiles):
+    """Dashboard files change with every update; make browsers revalidate instead of showing a stale page."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 def create_app(watch: Any = None, store: Store | None = None, hub: Hub | None = None) -> FastAPI:
     hub = hub or Hub()
     store = store or Store(ROOT / "data" / "watch.db")
@@ -104,7 +113,14 @@ def create_app(watch: Any = None, store: Store | None = None, hub: Hub | None = 
         return await call(watch.raw_probe())
 
     @app.post("/api/raw/start")
-    async def raw_start():
+    async def raw_start(body: dict | None = Body(None)):
+        sensors = (body or {}).get("sensors")
+        if sensors is not None:
+            try:
+                protocol.raw_mask(sensors)
+            except (TypeError, ValueError) as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
+            return await call(_streaming(watch.raw_start(sensors)))
         return await call(_streaming(watch.raw_start()))
 
     @app.post("/api/raw/stop")
@@ -219,7 +235,7 @@ def create_app(watch: Any = None, store: Store | None = None, hub: Hub | None = 
 
     web = ROOT / "web"
     web.mkdir(exist_ok=True)
-    app.mount("/", StaticFiles(directory=web, html=True), name="web")
+    app.mount("/", NoCacheStatic(directory=web, html=True), name="web")
     return app
 
 
