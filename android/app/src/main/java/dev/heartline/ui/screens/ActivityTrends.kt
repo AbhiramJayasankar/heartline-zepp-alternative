@@ -188,7 +188,7 @@ fun TrendsScreen(controller: HeartlineController) {
                             when {
                                 last == null -> "–"
                                 s.key == "sleep" -> "%.1f".format(last)
-                                last >= 100 -> fmtInt(last.toInt())
+                                last >= 100 || last % 1.0 == 0.0 -> fmtInt(last.toInt())
                                 else -> fmtOne(last)
                             } + if (last != null && s.unit.isNotEmpty()) " ${s.unit}" else "",
                             style = HL.type.stat.copy(fontSize = 22.sp), color = c.ink,
