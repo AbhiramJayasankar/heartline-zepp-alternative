@@ -83,4 +83,10 @@ class MappingTest {
         val buffers = SensorBuffers(); buffers.feed(RawUpdate(RawPacket.Ppg(IntArray(300) { it })))
         val s = buffers.snapshot(SensorsUi()); assertEquals(200, s.ppg.size); assertEquals(100f, s.ppg.first(), 0f)
     }
+
+    @Test fun lastChargeIsShownInThePhonesZone() {
+        assertEquals("31 Oct, 04:10", chargedLabel("2026-10-31T04:10:58+05:30", java.time.ZoneId.of("Asia/Kolkata")))
+        assertEquals("not a date", chargedLabel("not a date"))
+        assertEquals(null, chargedLabel(null))
+    }
 }

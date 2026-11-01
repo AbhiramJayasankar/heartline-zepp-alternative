@@ -1,6 +1,16 @@
 package dev.heartline.ui.screens
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsTopHeight
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -33,6 +43,20 @@ import java.time.format.DateTimeFormatter
 
 val Gutter = 20.dp
 
+/**
+ * A full-height scrolling page. Headers may draw behind the status bar at rest; once the page scrolls,
+ * a paper scrim fades in under the status bar so content never runs into the clock and icons.
+ */
+@Composable
+fun ScrollPage(state: ScrollState = rememberScrollState(), content: @Composable ColumnScope.() -> Unit) {
+    val scrolled by remember(state) { derivedStateOf { state.value > 0 } }
+    val alpha by animateFloatAsState(if (scrolled) 0.96f else 0f, label = "scrim")
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().verticalScroll(state), content = content)
+        Box(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(HL.colors.paper.copy(alpha = alpha)))
+    }
+}
+
 /** A scrolling screen with a display-face title, optional back arrow and trailing actions. */
 @Composable
 fun Screen(
@@ -43,7 +67,8 @@ fun Screen(
     contentPadding: PaddingValues = PaddingValues(horizontal = Gutter),
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).statusBarsPadding()) {
+    ScrollPage {
+        Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
         if (title != null || onBack != null) {
             Row(Modifier.fillMaxWidth().padding(start = if (onBack != null) 6.dp else Gutter, end = Gutter, top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (onBack != null) {

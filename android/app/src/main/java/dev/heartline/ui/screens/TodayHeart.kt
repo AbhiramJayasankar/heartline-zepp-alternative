@@ -83,7 +83,7 @@ fun TodayScreen(controller: HeartlineController, onOpenHeart: () -> Unit, onOpen
     val sync by controller.sync.collectAsStateWithLifecycle()
     val t = today
 
-    Column(Modifier.fillMaxSize().scrollY()) {
+    ScrollPage {
         // Readiness hero on the wash band
         Column(Modifier.fillMaxWidth().background(c.wash).statusBarsPadding().padding(horizontal = Gutter).padding(top = 14.dp, bottom = 24.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -213,7 +213,7 @@ fun HeartScreen(controller: HeartlineController, nav: Navigator) {
     LaunchedEffect(Unit) { while (true) { delay(5000); now = System.currentTimeMillis() / 1000 } }
     val connected = conn.state == LinkState.CONNECTED
 
-    Column(Modifier.fillMaxSize().scrollY()) {
+    ScrollPage {
         Column(Modifier.fillMaxWidth().paper().statusBarsPadding().padding(horizontal = Gutter).padding(top = 14.dp, bottom = 22.dp)) {
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(hr.bpm?.toString() ?: "–", style = HL.type.hero, color = if (hr.streaming) c.ink else c.inkSoft)
@@ -222,7 +222,7 @@ fun HeartScreen(controller: HeartlineController, nav: Navigator) {
             MutedText(
                 when {
                     !connected -> "Connect to the watch to see your heart rate."
-                    hr.streaming && hr.bpm == null -> "Measuring. The first reading can take up to 30 seconds."
+                    hr.streaming && hr.bpm == null -> "Measuring. The watch takes a minute or two to settle on the first reading."
                     hr.streaming -> "Live, updated ${hr.ts?.let { agoOf(it) } ?: ""}."
                     else -> "Start live heart rate to measure now."
                 },

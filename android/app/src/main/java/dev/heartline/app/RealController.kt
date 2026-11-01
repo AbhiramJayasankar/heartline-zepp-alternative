@@ -93,7 +93,7 @@ class RealController(
                 checkJob?.cancel(); checkRun.update { it?.copy(analysing = false, error = "The watch disconnected during the check") }
             }
         } }
-        launch { w.battery.collect { b -> battery.value = b?.let { BatteryUi(it.level, it.charging, it.lastChargeB ?: it.lastChargeA) } } }
+        launch { w.battery.collect { b -> battery.value = b?.let { BatteryUi(it.level, it.charging, chargedLabel(it.lastChargeB ?: it.lastChargeA)) } } }
         launch { w.deviceInfo.collect { i -> device.value = DeviceUi("Amazfit GTR 2e", settings.watch.value.mac.orEmpty(), i["software"], i["hardware"], i["serial"]) } }
         launch { w.heartRate.collect { h -> liveHr.update { it.copy(streaming = h.streaming, bpm = h.bpm, ts = h.ts) } } }
         launch { db.heartRate.observeSince(System.currentTimeMillis() / 1000.0 - 86400).collect { list -> liveHr.update { it.copy(recent = list.takeLast(600).map { HrPoint(it.ts.toLong(), it.bpm) }) } } }

@@ -78,3 +78,8 @@ class NotificationDeduplicator {
         return true
     }
 }
+
+/** The watch reports its last charge as an ISO timestamp; the UI shows "31 Oct, 04:10" in the phone's zone. */
+fun chargedLabel(iso: String?, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String? = iso?.let {
+    runCatching { java.time.OffsetDateTime.parse(it).atZoneSameInstant(zone).format(DateTimeFormatter.ofPattern("d MMM, HH:mm")) }.getOrDefault(it)
+}

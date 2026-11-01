@@ -340,7 +340,7 @@ fun SkyPlot(sats: List<SatUi>, modifier: Modifier = Modifier) {
             val weak = s.snr != null && !good
             drawCircle(if (good) c.ok else if (weak) c.sleepLight else c.surface, 5.dp.toPx(), p)
             drawCircle(if (good) c.ok else c.ink, 5.dp.toPx(), p, style = Stroke(1.5.dp.toPx()))
-            label(tm, s.id, p.x, p.y - 11.dp.toPx(), c.inkSoft, center = true)
+            if (s.snr != null) label(tm, s.id, p.x, p.y - 11.dp.toPx(), c.inkSoft, center = true)
         }
     }
 }
