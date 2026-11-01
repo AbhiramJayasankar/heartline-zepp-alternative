@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -49,7 +50,7 @@ fun OnboardingScreen(controller: HeartlineController) {
     var key by rememberSaveable { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
 
-    Column(Modifier.fillMaxSize().paper().statusBarsPadding().navigationBarsPadding().padding(Gutter)) {
+    Column(Modifier.fillMaxSize().background(c.paper).paper().statusBarsPadding().navigationBarsPadding().padding(Gutter)) {
         Text("${step + 1} of 3", style = HL.type.label, color = c.inkSoft)
         Gap(18)
         when (step) {
