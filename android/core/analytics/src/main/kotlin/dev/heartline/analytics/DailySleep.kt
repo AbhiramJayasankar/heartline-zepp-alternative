@@ -1,0 +1,106 @@
+package dev.heartline.analytics
+
+import java.time.*
+import kotlin.math.*
+
+internal val sleepStates = setOf("sleep_light", "sleep_deep", "sleep_rem")
+internal val noDataStates = setOf("not_worn", "charging", "unknown")
+internal fun dayOf(ts: Long, zone: ZoneId): LocalDate = Instant.ofEpochSecond(ts).atZone(zone).toLocalDate()
+
+internal class SleepBlock(val start: Long) {
+    var end = start
+    val rows = ArrayList<MinuteSample>()
+    var deep = 0
+    var rem = 0
+    var light = 0
+    var awake = 0
+    val asleep: Int get() = deep + rem + light
+}
+
+internal fun sleepBlocks(minutes: List<MinuteSample>): List<SleepBlock> {
+    val blocks = ArrayList<SleepBlock>()
+    var cur: SleepBlock? = null
+    val pending = ArrayList<MinuteSample>(30)
+    var gap = 0
+    for (m in minutes) {
+        if (m.state in sleepStates) {
+            val b = cur ?: SleepBlock(m.ts).also { cur = it }
+            b.rows.addAll(pending)
+            pending.clear()
+            b.rows.add(m)
+            b.end = m.ts
+            gap = 0
+        } else if (cur != null) {
+            gap++
+            if (m.state in noDataStates || gap > 30) {
+                pending.clear()
+                blocks.add(cur)
+                cur = null
+                gap = 0
+            } else pending.add(m)
+        }
+    }
+    cur?.let { blocks.add(it) }
+    for (b in blocks) {
+        b.deep = b.rows.count { it.state == "sleep_deep" }
+        b.rem = b.rows.count { it.state == "sleep_rem" }
+        b.light = b.rows.count { it.state == "sleep_light" }
+        b.awake = b.rows.size - b.asleep
+    }
+    return blocks
+}
+
+internal fun nightFor(blocks: List<SleepBlock>, d: LocalDate, lastTs: Long?, zone: ZoneId): Pair<SleepBlock?, Int> {
+    // daily.night_for uses midnight + 18 hours and a fixed 86400-second window, even across DST.
+    val lo = d.minusDays(1).atStartOfDay(zone).toEpochSecond() + 18 * 3600
+    val hi = lo + 86400
+    val inside = blocks.filter { it.end >= lo && it.end < hi }
+    val main = inside.maxByOrNull { it.asleep } ?: return null to 0
+    if (main.asleep < 60) return null to 0
+    if (lastTs != null && lastTs >= lo && lastTs < hi && Instant.ofEpochSecond(lastTs).atZone(zone).hour < 12) {
+        if (main.asleep < 180 || lastTs - main.end < 1800) return null to 0
+    }
+    return main to inside.sumOf { it.asleep }
+}
+
+internal fun sleepScore(asleep: Int, efficiency: Double, deep: Int, rem: Int): Int {
+    if (asleep <= 0) return 0
+    var s = 50 * min(1.0, asleep / 480.0)
+    s += 20 * ((efficiency - 70) / 25).coerceIn(0.0, 1.0)
+    s += 15 * min(1.0, deep.toDouble() / asleep / 0.13)
+    s += 15 * min(1.0, rem.toDouble() / asleep / 0.20)
+    return rounded(s).toInt()
+}
+
+internal fun restingHrFrom(rows: List<MinuteSample>): Double? {
+    val hr = rows.filter { it.hr != null && it.hr != 0 }
+    if (hr.size < 15) return null
+    var best: Double? = null
+    var j = 0
+    // Reuse one scratch window rather than constructing a sequence for each minute.
+    val scratch = DoubleArray(hr.size)
+    for (i in hr.indices) {
+        while (hr[i].ts - hr[j].ts >= 1800) j++
+        if (i - j + 1 >= 15) {
+            for (k in j..i) scratch[k - j] = hr[k].hr!!.toDouble()
+            java.util.Arrays.sort(scratch, 0, i - j + 1)
+            val n = i - j + 1
+            val v = if (n % 2 == 0) (scratch[n / 2 - 1] + scratch[n / 2]) / 2 else scratch[n / 2]
+            best = if (best == null) v else min(best, v)
+        }
+    }
+    return best?.let { rounded(it) }
+}
+
+internal fun sleepRegularity(minutes: List<MinuteSample>): Double? {
+    val states = HashMap<Long, Boolean>()
+    for (m in minutes) if (m.state !in noDataStates) states[Math.floorDiv(m.ts, 60)] = m.state in sleepStates
+    var same = 0
+    var total = 0
+    for ((k, s) in states) {
+        val next = states[k + 1440] ?: continue
+        total++
+        if (s == next) same++
+    }
+    return if (total < 360) null else rounded(-100 + 200.0 * same / total, 1)
+}
