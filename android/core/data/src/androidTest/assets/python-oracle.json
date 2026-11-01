@@ -1,0 +1,131 @@
+{
+  "timezone": "India Standard Time",
+  "counts": {
+    "hr_samples": 1027,
+    "events": 542,
+    "activity": 4310,
+    "meta": 4,
+    "health": 4338,
+    "workouts": 7,
+    "raw_fetches": 35,
+    "insight_sessions": 10
+  },
+  "hr_stats": {
+    "min": 53,
+    "max": 107,
+    "avg": 85.0,
+    "count": 1027
+  },
+  "activity_summary": {
+    "steps": 11411,
+    "hr_min": 51,
+    "hr_avg": 76.7,
+    "hr_max": 182,
+    "active_minutes": 1641,
+    "worn_minutes": 2710,
+    "sleep_minutes": 1080
+  },
+  "activity_last_ts": 1793518560,
+  "activity_middle": 1793388720,
+  "activity_prev_kind": 1,
+  "health": {
+    "manual_hr": {
+      "count": 4,
+      "first": 1793471635,
+      "last": 1793474130
+    },
+    "pai": {
+      "count": 9,
+      "first": 1792952990,
+      "last": 1793485325
+    },
+    "spo2_sleep": {
+      "count": 1,
+      "first": 1793479798,
+      "last": 1793479798
+    },
+    "stress": {
+      "count": 10,
+      "first": 1793480400,
+      "last": 1793484240
+    },
+    "temperature": {
+      "count": 4314,
+      "first": 1790025780,
+      "last": 1793485200
+    }
+  },
+  "hrv_by_day": {
+    "2026-11-01": 44.8
+  },
+  "health_by_day": {
+    "temperature": {
+      "2026-09-22": 32.0,
+      "2026-10-29": 30.9,
+      "2026-10-30": 26.7,
+      "2026-10-31": 31.5,
+      "2026-11-01": 31.8
+    },
+    "stress": {
+      "2026-11-01": 43.9
+    },
+    "spo2_sleep": {
+      "2026-11-01": 99.0
+    },
+    "manual_hr": {
+      "2026-11-01": 107.2
+    },
+    "pai": {
+      "2026-10-25": 0.2,
+      "2026-10-26": 0.7,
+      "2026-10-27": 2.8,
+      "2026-10-28": 0.4,
+      "2026-10-29": 0.7,
+      "2026-10-30": 16.9,
+      "2026-10-31": 18.8,
+      "2026-11-01": 6.2
+    }
+  },
+  "latest_rhythm": {
+    "status": "regular",
+    "start": 1793519862.482
+  },
+  "raw_sha256": [
+    "e4e8a7abd926fd859ff3cf2b2d3f0459dffde4ff3c9c76ff19f75780245414a9",
+    "be3d0db3a8d219e68783f30a7f1768974afe501a859bd7b8d100811882b5fdd3",
+    "b2283181292c48ecc184c0f8437e034b18655daadeef5f545eed3c5073cdb2e0",
+    "296161f3d19895e988e7a71f91c00cbf775fffcd2f1fce4d050d7df976d3b876",
+    "bba8d824684bd5a0d1dad3e314e4c23792d67497e6c501a416b3311514111af5",
+    "cc63c7310d17d1e021a45f2d110fa597a09b2bff5b78f99599dbbe982fc0e427",
+    "ac2ad4eae154b845aca57a1592e9fab69b6b9a0333330bcefb09a116d1ef92f1",
+    "8b5614f9d7be016b81af6c861cd14e335e2d8922411bd61ed08ef166ad097c30",
+    "6f8e50be2a3fb86e4297ce5a0b770159dcfeb38dffbd72291eb5fc1708b4acd7",
+    "6b5c1ef93b68d54279df6bc4e52fea845fc4b1aaa5af94ff64c8308ba0b40ca5",
+    "adda31b2d7771dcfc9ce9ab57e655f4450b81ea1da763f89eb2cedea179b6de5",
+    "1b567554c615400d2a22616cdd556bba333a8a05639e1e59b301539633b6b18c",
+    "55483c65e075e013efb098b1007bf3bfc3456c99f5d50799a740cf1cd945ea00",
+    "20c3bf6abd1ad24566b9a7d7cee638e911aa250dabbb43ae426e69719eadc32a",
+    "3905b082c3c0c297792cd80c89fd99a31221971839218a11b33815d93d1d0087",
+    "33eb910eb00d372fe186b65d68ec5903cd567c8b1e9279f2951b8fd97d519595",
+    "8bdd208907a36c1035284d1f3a5c6dae2a3d5ba2596605fd5f98c99cbbbc3e76",
+    "b7fa5e85ff30a82d8cfea035805019a57190ba2818e6862a8ba544da7525bfec",
+    "e5406b7317a689abbe15d46e6775e7e1111e25eaa0742d1089ddffe6b1123f5d",
+    "1d2846aa29e9a9ab24680b0083eecf9de6a1984171525a4461c55aa8711192ce",
+    "928bef1960a017e76e029ec85d48909083dff8f0a265a9a0d281e033439fc73f",
+    "f172bb42bb424756094e4e3cf854e1429807b4b345b945693a7bcba1255454c4",
+    "247c11e1ea4141dd411cd1e415cbd35d4ad506ece3bff5f49c7e5eaab258c437",
+    "773cbed47d2d7c21ea8109afb35e1eb642e5a36f4c6cc654d6cb46a43bac2e26",
+    "e7a6eaaf53196e0ee89442325f829f0cd3bbcd03aa057e683ea9e205c78f404d",
+    "1dfeeff5c19afe635329fffd520ff1ef0eeafb192a3a84fadfbe19fd650e1927",
+    "57e37dfcc037d5f0590d8729cc88086d7b0abfcfa7ea8e665dc76e80da8b5246",
+    "8261a81d2b22bd1f7beae97467d50cec20bd946e6a72610a48c73dfd85d06cb1",
+    "767e21569518bb2db7c171e7af08ff59a61dc994910a10c1180d54c3622afb81",
+    "a0fea565502912a889c0e5aed6b711219fc8aa79803767c088ea768e7ade8e4d",
+    "1ff22b05185abde5b9824319275c03affc1f3cc503a055cd47d85445c39a8273",
+    "1ff22b05185abde5b9824319275c03affc1f3cc503a055cd47d85445c39a8273",
+    "09459ee934732a2fd1ec39606f43f0cc6247e440bbd2ef34754b198a80260c7f",
+    "3c8cf27ef824c9b6447886575fe4f5c8adbe748ee1877c1aef28154554680d17",
+    "60b097458bc96f68ba28502a46b056f3df20dafd8c34b0a57caeffb3d50e2b9b"
+  ],
+  "fixture_sha256": "6c44fbd87f644e9c5a3166ba322a619f9896594fa7360c18aa2a4597264136dd"
+}
