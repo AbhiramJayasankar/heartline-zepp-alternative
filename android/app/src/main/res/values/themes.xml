@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.Heartline" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#FCF6F4</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

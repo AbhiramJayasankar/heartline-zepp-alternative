@@ -5,3 +5,8 @@ data/
 __pycache__/
 *.log
 discovery/
+android/.gradle/
+android/build/
+android/**/build/
+android/local.properties
+android/.kotlin/
