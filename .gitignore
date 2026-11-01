@@ -1,7 +1,7 @@
 .venv/
 huami-token/
 watch.json
-data/
+/data/
 __pycache__/
 *.log
 discovery/
