@@ -73,7 +73,7 @@ class WatchConnection(
                     check(adapter.isEnabled) { "Turn on Bluetooth" }
                     val key = keys.load() ?: error("Save the watch key first")
                     var c = GattClient(context); client = c
-                    try { c.connect(adapter.getRemoteDevice(mac)) }
+                    try { c.connect(remoteDevice(adapter, mac)) }
                     catch (e: CancellationException) { throw e }
                     catch (_: Exception) {
                         c.close()
@@ -145,6 +145,12 @@ class WatchConnection(
         runner?.cancelAndJoin(); runner = null
         link.value = ConnectionStatus()
         log("info", "Disconnected")
+    }
+    /** The watch uses a random static address (top two bits set); a plain getRemoteDevice assumes a public one. */
+    private fun remoteDevice(adapter: android.bluetooth.BluetoothAdapter, mac: String): BluetoothDevice {
+        val random = (mac.substring(0, 2).toInt(16) and 0xC0) == 0xC0
+        return if (random && android.os.Build.VERSION.SDK_INT >= 33) adapter.getRemoteLeDevice(mac, BluetoothDevice.ADDRESS_TYPE_RANDOM)
+        else adapter.getRemoteDevice(mac)
     }
     private suspend fun scan(mac: String): BluetoothDevice = withTimeout(15_000) {
         suspendCancellableCoroutine { continuation ->
