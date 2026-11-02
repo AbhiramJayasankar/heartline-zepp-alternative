@@ -249,7 +249,7 @@ fun AlarmsScreen(controller: HeartlineController, nav: Navigator) {
             Row(Modifier.fillMaxWidth().clickable { editing = a }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("%02d:%02d".format(a.hour, a.minute), style = HL.type.stat.copy(fontSize = 34.sp), color = if (a.enabled) c.ink else c.inkSoft)
-                    MutedText(daysLabel(a.days) + if (a.smart) ", smart wake-up" else "")
+                    MutedText(daysLabel(a.days))
                 }
                 Switch(
                     a.enabled, { controller.saveAlarm(a.copy(enabled = it)) },
@@ -270,7 +270,6 @@ private fun AlarmEditor(alarm: AlarmUi, isNew: Boolean, onDismiss: () -> Unit, o
     val c = HL.colors
     val time = rememberTimePickerState(alarm.hour, alarm.minute, is24Hour = true)
     var days by remember { mutableStateOf(alarm.days) }
-    var smart by remember { mutableStateOf(alarm.smart) }
     AlertDialog(
         onDismissRequest = onDismiss, containerColor = c.surface,
         title = { Text(if (isNew) "New alarm" else "Edit alarm", style = HL.type.section, color = c.ink) },
@@ -296,10 +295,9 @@ private fun AlarmEditor(alarm: AlarmUi, isNew: Boolean, onDismiss: () -> Unit, o
                 }
                 Gap(6)
                 MutedText(daysLabel(days))
-                ToggleRow("Smart wake-up", "Wakes you in light sleep up to 30 minutes early, if the watch supports it.", smart) { smart = it }
             }
         },
-        confirmButton = { TextButton({ onSave(alarm.copy(hour = time.hour, minute = time.minute, days = days, smart = smart, enabled = true)) }) { Text("Save", color = c.pulse) } },
+        confirmButton = { TextButton({ onSave(alarm.copy(hour = time.hour, minute = time.minute, days = days, enabled = true)) }) { Text("Save", color = c.pulse) } },
         dismissButton = {
             Row {
                 if (!isNew) TextButton(onDelete) { Text("Delete", color = c.inkSoft) }

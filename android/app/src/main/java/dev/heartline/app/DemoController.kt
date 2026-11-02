@@ -168,7 +168,7 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override fun stopFindPhone() = phoneLink.update { it.copy(findPhoneRinging = false) }
 
     override val alarms = MutableStateFlow(listOf(
-        AlarmUi(0, true, 6, 30, setOf(java.time.DayOfWeek.MONDAY, java.time.DayOfWeek.TUESDAY, java.time.DayOfWeek.WEDNESDAY, java.time.DayOfWeek.THURSDAY, java.time.DayOfWeek.FRIDAY), smart = true),
+        AlarmUi(0, true, 6, 30, setOf(java.time.DayOfWeek.MONDAY, java.time.DayOfWeek.TUESDAY, java.time.DayOfWeek.WEDNESDAY, java.time.DayOfWeek.THURSDAY, java.time.DayOfWeek.FRIDAY)),
         AlarmUi(1, false, 8, 0, setOf(java.time.DayOfWeek.SATURDAY, java.time.DayOfWeek.SUNDAY)),
     ))
     override val reminders = MutableStateFlow(ReminderSyncUi(
