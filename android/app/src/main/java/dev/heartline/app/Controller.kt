@@ -100,7 +100,7 @@ enum class HealthConnectStatus { UNAVAILABLE, NEEDS_INSTALL, NEEDS_PERMISSION, R
 data class HealthConnectUi(val status: HealthConnectStatus = HealthConnectStatus.UNAVAILABLE, val enabled: Boolean = false, val lastExport: Long? = null, val lastResult: String? = null)
 data class BackgroundUi(
     val batteryUnrestricted: Boolean = false, val notificationAccess: Boolean = false, val miui: Boolean = false,
-    val bluetoothOn: Boolean = true, val postNotifications: Boolean = true,
+    val bluetoothOn: Boolean = true, val postNotifications: Boolean = true, val companionLinked: Boolean = false,
 )
 
 enum class LinkState { DISCONNECTED, SCANNING, CONNECTING, AUTHENTICATING, CONNECTED, ERROR }

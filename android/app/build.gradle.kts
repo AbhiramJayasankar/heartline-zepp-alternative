@@ -4,6 +4,8 @@ plugins {
 }
 
 android {
+    // local.properties is per-machine and gitignored; its path syntax is not ours to lint.
+    lint { disable += "PropertyEscape" }
     namespace = "dev.heartline"
     compileSdk = 37
 

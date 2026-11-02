@@ -118,6 +118,9 @@ private fun CheckItem(ok: Boolean?, title: String, detail: String, action: Strin
 fun KeepRunningScreen(controller: HeartlineController, nav: Navigator) {
     val ctx = LocalContext.current
     val bg by controller.background.collectAsStateWithLifecycle()
+    val prefs by controller.prefs.collectAsStateWithLifecycle()
+    var linkError by remember { mutableStateOf<String?>(null) }
+    val linkSheet = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { controller.refreshBackground() }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { controller.refreshBackground() }
     Screen("Keep running", onBack = { nav.pop() }, subtitle = "Heartline has to stay connected while the screen is off to sync, forward notifications and ring the phone. Phones shut background apps down unless you allow them.") {
         CheckItem(
@@ -125,6 +128,17 @@ fun KeepRunningScreen(controller: HeartlineController, nav: Navigator) {
             if (bg.batteryUnrestricted) "Android won't pause Heartline to save battery." else "Android pauses Heartline when the screen is off. Allow it to run unrestricted.",
             if (bg.batteryUnrestricted) null else "Allow unrestricted",
         ) { SystemScreens.batteryExemption(ctx) }
+        CheckItem(
+            bg.companionLinked, "Companion link with the watch",
+            if (bg.companionLinked) "Android wakes Heartline when the watch is nearby and lets it keep the connection running."
+            else (linkError ?: "Register Heartline as the watch's companion app, so Android wakes it when the watch is nearby and keeps the connection running. Zepp's own link is not affected."),
+            if (bg.companionLinked || prefs.watchMac == null) null else "Link the watch",
+        ) {
+            linkError = null
+            dev.heartline.service.CompanionLink.request(ctx, prefs.watchMac!!, onPending = { linkSheet.launch(androidx.activity.result.IntentSenderRequest.Builder(it).build()) }) { error ->
+                linkError = error; controller.refreshBackground()
+            }
+        }
         if (bg.miui) {
             CheckItem(
                 null, "MIUI: Autostart",
@@ -261,6 +275,7 @@ private fun AlarmEditor(alarm: AlarmUi, isNew: Boolean, onDismiss: () -> Unit, o
     val c = HL.colors
     val time = rememberTimePickerState(alarm.hour, alarm.minute, is24Hour = true)
     var days by remember { mutableStateOf(alarm.days) }
+    val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
     AlertDialog(
         onDismissRequest = onDismiss, containerColor = c.surface,
         title = { Text(if (isNew) "New alarm" else "Edit alarm", style = HL.type.section, color = c.ink) },
@@ -281,7 +296,7 @@ private fun AlarmEditor(alarm: AlarmUi, isNew: Boolean, onDismiss: () -> Unit, o
                             Modifier.size(36.dp).clip(CircleShape).background(if (on) c.ink else Color.Transparent).border(1.dp, if (on) c.ink else c.line, CircleShape)
                                 .clickable { days = if (on) days - d else days + d },
                             contentAlignment = Alignment.Center,
-                        ) { Text(d.getDisplayName(TextStyle.NARROW, Locale.getDefault()), style = HL.type.label, color = if (on) c.paper else c.inkSoft) }
+                        ) { Text(d.getDisplayName(TextStyle.NARROW, locale), style = HL.type.label, color = if (on) c.paper else c.inkSoft) }
                     }
                 }
                 Gap(6)

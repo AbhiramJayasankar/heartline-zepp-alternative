@@ -29,6 +29,7 @@ class WatchService : Service() {
     override fun onCreate() {
         super.onCreate()
         watch = WatchConnection(this, scope, app.watchStore)
+        app.settings.watch.value.mac?.let { CompanionLink.observe(this, it) }
         phoneFeatures = PhoneFeatures(this, scope, app.db, watch, app.settings)
         watch.onSuccessfulSync = { dev.heartline.app.HealthConnectExporter.get(this).afterSync() }
         calls = CallForwarder(this, scope, app.settings, watch)
