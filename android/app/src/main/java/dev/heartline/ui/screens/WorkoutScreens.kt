@@ -429,6 +429,8 @@ private fun PulseSection(p: dev.heartline.app.PulseUi) {
     }
     Gap(24); SectionTitle("Pulse regularity"); Gap(4)
     MutedText("Individual beats from the raw optical signal, whenever your wrist was still. A screening look, not an ECG.")
+    Gap(4)
+    MutedText("Why only still moments: when the arm moves, pressure under the strap swamps the pulse (it falls from about a fifth of the signal to about a twentieth). Cancelling it with the motion sensors was tested on a real session and could not recover trustworthy beats, so moving stretches are left out rather than guessed. Heart rate itself still works while moving.")
     Gap(10)
     Text(title, style = HL.type.score.copy(fontSize = 34.sp, lineHeight = 36.sp), color = color)
     val noisy = p.windows.size - valid.size
