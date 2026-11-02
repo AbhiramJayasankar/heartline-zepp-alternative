@@ -1,6 +1,6 @@
 # Workout capture
 
-`analyzeCapture(Recording, epoch-second HR samples, Profile, label)` is a pure JVM analysis.
+`analyzeCapture(Recording, epoch-second HR samples, Profile, label, activities = emptyList())` is a pure JVM analysis.
 `CaptureRunner` in the app's service owns collection, persistence and analysis. No watch workout
 start/stop event is assumed, and capture does not start a workout on the watch.
 
@@ -42,10 +42,9 @@ These are total HR-based estimates for the observed window, not an estimate of a
 above basal metabolism. The model is less reliable for lifting and post-exercise elevated HR.
 Source: [Keytel et al., J Sports Sci 2005, 23:289–297](https://doi.org/10.1080/02640410470001730089).
 
-At most one >=30-second rest interval (up to 60 seconds) is passed to the existing beat/SQI engine.
-Its result is reported as an independent PPG cross-check only at SQI >=0.7 with simultaneous watch HR.
-It never substitutes for, smooths, or corrects the watch's HR. Motion/noisy workout PPG cannot
-contribute beats to the capture HR report.
+Still-window pulse regularity is an independent PPG check, described in Task G below. It never
+substitutes for, smooths, or corrects the watch's HR. Moving PPG cannot contribute beats to the
+capture HR report. Synced watch workout summaries are retained separately from raw-derived metrics.
 
 ## Motion and segmentation
 
@@ -96,15 +95,15 @@ to each continuous span. Sensor stalls/reconnects never become interpolated arti
 Rests are now the entire gaps between successive detected cores, including walking/re-racking.
 This is an inter-set recovery interval, not proof of stillness or complete motion coverage.
 Recovery remains start HR minus HR 60 seconds later, null for shorter gaps or missing HR.
-Negative recovery is retained. Stillness **segments**, rather than these recovery intervals,
-continue to gate the existing independent PPG cross-check.
+Negative recovery is retained. The independent pulse check uses per-second accel/gyro still stretches, rather than these
+recovery intervals; the new peak-aligned aggregate curve is described in Task G below.
 
 This remains a wrist-rhythm heuristic, not an exercise recognizer. Hanging leg raises and reverse
 wrist curls are known blind spots when the wrist barely rotates. Irregular/fast reps (periods
 under 1.2 s can alias), static lifts, alternating arms, partial reps, long periodic non-exercise
 movement and incidental rhythmic activity can change classification/counts. Gait exclusion can
 trim a strength core. Magnetometer/gyro recordings are retained but do not gate lifting.
-There is no GPS or distance estimate.
+There is no raw-sensor GPS or distance estimate. A matching synced watch workout may supply distance.
 
 ## Service and persistence
 
@@ -171,14 +170,14 @@ post-walk movements. Expected output: rest in 30 of the first 40 seconds (initia
 orientation changes remain `other`), walking 55–110 seconds at 101 spm, no lifting sets. HR is absent
 from the CSV; the test correctly leaves HR-derived summaries null rather than using moving PPG.
 
-Owner hardware review should check: all four raw rates during a watch workout; stable ~1 Hz watch
-HR; capture continuity with the UI closed; reconnect producing a new CSV and an accurate gap;
+Owner hardware review should check: all four raw rates during a watch workout; stable live watch HR (about one notification
+per 2.6 s on this session); capture continuity with the UI closed; reconnect producing a new CSV and an accurate gap;
 manual/planned stop while disconnected followed by reconnect producing no new capture file;
 restoration of pre-existing live-HR mode; two counted sets at known tempo separated by >=60 s of
 rest; a one-minute treadmill walk and run (including holding rails); and no false lifting sets during
 ordinary wrist movement. Compare set boundaries/counts and HR recovery against a manual log.
-The watch's workout flag is unavailable, so movement labels cannot confirm which workout was
-selected on the watch. No phone or watch interaction is part of development validation.
+A live watch workout flag is unavailable; synced watch workout names/totals are compared separately
+from raw movement labels. No phone or watch interaction is part of development validation.
 
 ## Task F real-session regression (2026-11-02)
 
@@ -284,3 +283,216 @@ export ANDROID_USER_HOME="C:/Users/abhir/Desktop/projects/hl-f/android/build/and
   :core:analytics:test :app:testDebugUnitTest :app:assembleDebug \
   :core:protocol:test :core:ble:test :app:lintDebug
 ```
+
+
+## Task G: capture engine 3 (2026-11-03)
+
+All new times are seconds from the capture start, except `CaptureResult.start` (epoch seconds).
+The existing 23 set cores, gait mask, rep counts and ACF tempos remain unchanged. No log is
+available to production analysis. The manual log is used only by regression/tuning tools.
+`CaptureResult` adds activities, recovery, floor, work/rest seconds, cardio and pulse; each set
+adds complete-cycle rep details, a group, watch activity name, slowdown, partial-last flag and HR rise.
+The app maps and persists every field against the existing UI contract; Controller, DemoController
+and UI sources are unchanged. Engine version `3` invalidates cached results.
+
+### Rep cycles, orientation and exercise groups
+
+`rhythmReps` returns the winning peak indices, projection, sign, window offset and PCA direction.
+Its count is still exactly `max(positive peaks, negative peaks)`. Previously the sign was discarded;
+when counts tie, select the sign with lower variance of peak-to-peak periods. This deterministic
+phase choice avoids PCA eigenvector sign determining the reported cycle. Detection thresholds,
+filter bands, extended windows, peak finding, counts and tempos are unchanged.
+
+Consecutive peaks define one complete cycle, so `repDetail.size == reps - 1`; no final cycle is
+invented after the last peak. The signed projection's minimum between peaks splits the phases;
+slow/fast are their maximum/minimum, without claiming eccentric/concentric identity. Independently
+low-pass raw XYZ at 1.5 Hz inside the same coverage span. Normalize its vectors and take the angle
+at the first peak versus the trough. These are wrist arcs, not joint range of motion. Regress
+complete-cycle durations against zero-based cycle index for slowdown when there are >=5 cycles.
+Flag the last cycle below 80% of the median arc when there are >=4 cycles. Extended-window
+incidental movement and asymmetric cycles can affect the last flag and slope.
+
+Grouping uses adjacent set cores and a deliberately small rule: start a new group if the gap is
+>360 s, any derived cardio block intervenes, the mean gravity directions differ by >25 degrees,
+the tempo ratio exceeds exp(0.4) in either direction, or the gravity difference is >10 degrees AND
+median wrist arc changes by both >15 degrees and a factor >1.6. Otherwise retain the group. This
+uses gravity, tempo and arc; PCA sign/axis is not needed to separate the tuned exercises. It does
+not assign exercise names. The arc condition separates low-rotation pull-ups from pulldowns while
+avoiding a split inside the slower final preacher-curl set.
+
+Measured on both the compact fixture and the two complete raw CSVs:
+
+- 23 sets, exact frozen boundaries (maximum difference 0 s), exact counts and ACF tempos.
+  The previous 21/27 logged resistance matches and rep accuracy remain unchanged.
+- Four preacher-curl median arcs: **139.62, 139.72, 137.36, 141.39 degrees**.
+- 22:40 pulldown: median **33.46 degrees**, last **25.44 degrees**, ratio **0.760**; partial-last true.
+- 22:20 and 22:24 assisted pull-ups: slowdown **+0.2414 and +0.2186 s/cycle**.
+- Eight runs across all 23 detections, including two unmatched bouts. Among 21 positive-overlap
+  log matches spanning six observed exercises, **adjusted Rand index 1.000**. All **20/20 adjacent
+  matched-set decisions** are correct: **5/5 exercise boundaries** and **15/15 non-boundaries**.
+  The two unmatched bouts have no exercise label and are excluded from this score. The regression
+  requires ARI >=0.90 and all 20 decisions. This is tuning-session accuracy, not held-out validation.
+
+### Live HR, recovery and work/rest
+
+`startHr` is the latest real notification at/before the exact set start, valid for <5 s. HR rise is
+the maximum observed HR from start through end+15 s, including the held start value, minus start HR.
+Missing start HR keeps both fields null. Lookup uses binary search and bounded ranges, not a full
+HR scan for every set. The existing set average and core peak fields retain their old meanings.
+Activity is the synced watch workout containing the set midpoint, irrespective of motion label.
+
+**22/23** set starts have HR: **102-139 bpm**; observed rises span **0-14 bpm**. The 22:29 set
+has missing start HR under the five-second freshness rule. Nineteen sets fall inside the watch's
+Strength training record, two forearm sets inside its still-open Treadmill record, and two outside
+both records. This disagreement is intentionally retained instead of using watch names to change
+raw set classification.
+
+For recovery, consider each inter-set rest >=60 s with no cardio block. Find the first maximum
+on the one-second observed HR clock in [set start, end+15), bounded by the next set. Align to that
+peak, then sample at five-second offsets through 240 s and strictly before the next set. Offset
+zero is the alignment anchor; other samples before the core ends are excluded. Missing HR never
+fills a point. Retain offsets with n >= max(3, ceil(0.20 * eligible rests)). There are **21 eligible
+rests**, minimum support **5**. Measured deltas: **-4.92 bpm at 20 s (n=12), -7.63 at 60 s (n=19),
+-5.00 at 120 s (n=18), +1.00 at 180 s (n=11)**. The curve falls early, stays fairly flat to two
+minutes and rises later. Its level differs from the log-aligned Python curve because detector
+cores/peak times differ from typed set intervals and absent HR is excluded.
+
+The HR floor is the linearly interpolated 10th percentile of covered one-second HR in each
+five-minute capture-relative window, including the final partial window. **22 points**: first
+**88 bpm**, late-strength **128 bpm**, treadmill **173 bpm**, final **108 bpm**. Work is the sum
+of detected core lengths: **581 s (9:41)**. Rest sums consecutive-core gaps <=600 s without an
+intervening derived cardio block: **4098 s (68:18)**, work/(work+rest) **12.4%**. These exclude
+undetected/extended rep time and are not manual-log workout totals.
+
+### Cardio and watch comparison
+
+Merge existing walking/running segments across gaps <=20 s; require >=180 s. Split at overlapping
+cardio-workout boundaries, so a watch name only applies to gait inside that workout. Keywords
+(case-insensitive) include treadmill, walk, run, cycl, bike, ellipt, row, stair and cardio. Gait,
+set exclusion and cadence classification are unchanged. Cadence is duration-weighted existing gait
+cadence. Keep original watch distance and active seconds; speed is 3.6 * distance_m / active_s.
+Clipping a watch record changes only bounds, never prorates its totals.
+
+Average HR uses all covered seconds; steady HR and drift use the last half (drift is least-squares
+slope *60). Fit b+a*(1-exp(-t/tau)) for rise and asym+d*exp(-t/tau) for recovery, searching integer
+tau 10..600 with analytic linear least squares. Fits require >=20 observations spanning >=30 s,
+positive amplitude >=3 bpm, >=5% variance explained, and an interior optimum; otherwise null.
+Recovery uses up to 240 s after gait ends, truncated by another cardio block. Drop60/120 uses
+observed HR at the block end minus HR at the offset and is null beyond coverage or at/after the
+next block. An intervening strength effort can still contaminate a recovery fit.
+
+The raw block is **23:22:49.964-23:33:29.964 IST (640 s)**, named **Treadmill**:
+
+| Metric | Raw/gait-derived | Synced watch record |
+|---|---:|---:|
+| Average HR | 169 bpm | 166 bpm |
+| Steady / peak HR | 179 / 184 bpm | peak 184 bpm |
+| Rise tau | 119 s | unavailable |
+| Last-half drift | -0.059 bpm/min | unavailable |
+| Drop at 60 / 120 s | 33 / 40 bpm | unavailable |
+| Recovery tau | 48 s | unavailable |
+| Cadence | 96 spm | 92 spm |
+| Active time | gait block 640 s | 612 s |
+| Steps | approximately 1024 from rounded block cadence | 935 |
+| Distance / speed | no independent raw estimate | 683 m / 4.018 km/h |
+
+The watch record runs 23:22:34-23:39:58, longer than its active time. The unchanged gait classifier
+continues through cooldown about 50 s after the logged treadmill stop. Therefore rise tau,
+drift, drop60 and recovery tau differ from the brief's log-bounded Python estimates (160 s,
++0.8 bpm/min, 25 bpm, 73 s). The regression tolerances explicitly allow those boundary effects;
+no log or guessed active-time cutoff is injected into production segmentation. Distance/speed
+fields on Cardio are clearly the matching watch record's values. The second preserved activity is
+Strength training, 4098 active seconds, average/max 118/152 bpm, 777 steps and 519 kcal.
+
+### Pulse regularity
+
+Per capture-relative second require >=15 accel AND gyro samples, accel-magnitude SD <0.03 g,
+and mean gyro magnitude <0.6 times the session median of covered per-second magnitudes. Subtract
+session median XYZ gyro bias before the norm. Require the surrounding three still seconds; bridge
+an isolated one-second hole, then require >=20 s. Analyze at most 40 stretches, longest first,
+with at most 120 s per stretch. PPG gaps >0.5 s reject the window; a >1 s arrival gap breaks its
+clock fit. A per-run least-squares sample-index/arrival-time clock removes packet jitter without
+stretching reconnects. `Recording.ppgArrivalT` retains raw timing separately from the unchanged
+legacy PPG/check clock, and capture merging preserves its epoch offsets.
+
+Reuse `detectBeats`, `intervals`/`flagEctopic` and `assessRhythm`. An optional live-HR capture mode
+in detectBeats uses the polarity-corrected band-passed waveform's systolic derivative peak, with
+refractory distance 0.55 * live RR and a one-RR morphology template; normal check-session defaults
+and golden results are unchanged. Live HR selects refractory/template lengths, never beat times,
+intervals or HR estimates. Saturation >2% rejects a window; interpolate smaller glitches. Require
+>=30 clean intervals and mean clean-interval PPG HR within 10 bpm of live HR; other measurable
+windows are unreliable. Per-window RMSSD/nRMSSD uses clean intervals. Pool clean intervals at their
+original scale for assessRhythm, preserving original per-window ectopic candidate counts via an
+optional override; never search for compensatory pauses across window joins. Pooling can still
+include a difference between adjacent windows' HR scales. Preserve the original medical disclaimer.
+
+Only adjacent originally consecutive clean intervals enter Poincare pairs (milliseconds, cap 600).
+The best clean-interval yield supplies a 12 s, 25 Hz filtered excerpt with beat offsets from its
+start. Original waveform/beat pairs are retained, not synthesized from live HR.
+
+Full raw result: **9 candidate stretches**, 8 measurable windows, **6 valid / 183 usable seconds**,
+overall **regular**, **nRMSSD 0.042**, entropy **0.925**, **zero ectopic candidates**. The other two
+measurable windows have <30 clean intervals; one candidate has too little clean PPG. Valid-window
+PPG/watch differences: **1, 1, 5, 2, 1, 0 bpm** (mean **1.67**, max **5**). Valid nRMSSD is
+**0.0223-0.0558**, RMSSD **11.66-29.70 ms**. There are **211 Poincare pairs**, **300 excerpt
+samples**, **25 excerpt beats**. The compact fixture gives the same status, usable seconds, counts
+and agreement; entropy 0.923 and very small timing differences reflect local versus complete-run
+clock fits. This is more conservative than the separate Python pulse prototype's 9-11 windows.
+It is an optical wellness estimate, not ECG evidence or a medical diagnosis.
+
+### Fixtures, data loading, performance and validation
+
+`gym_rich_fixture.py` reads the supplied CSVs and SQLite with mode=ro, using no manual log. It keeps
+all gyro rows, original PPG around candidate still windows (+/-5 s), and the remaining accel tail
+past the existing fixture's 23:51 cutoff. Gyro/PPG retain their source values; the accel tail keeps nine significant digits, preserving engine Float precision.
+The new gzip is **1,709,882 bytes**, HR/watch JSON **41,582 bytes**; total new fixtures **1,751,464
+bytes**, below 3 MB. Existing accel/oracle/log fixtures are untouched. Regenerate from android/:
+
+```text
+python core/analytics/tools/gym_rich_fixture.py PATH_TO_GYM2
+```
+
+Full raw analysis reads **166,655 accel, 166,657 gyro, 159,581 PPG and 149,793 mag samples** over
+**6473.97 s**. Measured engine-only time **1.34 s** on this Windows JVM (CSV loading excluded),
+compact-fixture runs **1.17-1.70 s** while building, and a **3-hour replay 1.77 s**. Phone execution
+and memory are not measured. New sensor passes/clock fitting are linear, medians use sorting,
+HR range queries use binary search, pulse work is bounded by 40*120 s, and exponential fitting
+uses a fixed 591-candidate tau grid (linear in block length) with at most 240 s of recovery.
+
+The service loads overlapping workout summaries (including earlier starts) through
+`HealthRepository.workoutSummariesOverlapping`, excluding large track JSON. JSON end times supply
+the overlap predicate without a schema change; malformed summaries are ignored. Mapping tests
+assert every new field and null, full JSON equality after round trip, and old six-column set JSON
+defaults. Synthetic tests cover identifiable/flat/wrong-sign exponential fits, gait merging/watch
+clipping, missing and interrupted recovery, support thresholds, stillness, clocks, absent data and
+ectopic count preservation. Real tests require unchanged sets, grouping, rep arcs/slopes/partial,
+HR/activity, recovery shape, work/rest/floor, named cardio values and >=5 valid regular pulse windows.
+
+Verification on 2026-11-03: **62 analytics + 95 app JVM tests (157 total), zero failures/errors/skips**.
+The requested `:core:analytics:test :app:testDebugUnitTest :app:assembleDebug :app:lintDebug` passes. App lint has no errors; pre-existing UI warnings remain.
+The full-CSV replay also passes the same real-session assertions. To run it, set HEARTLINE_GYM_RAW
+to the read-only input directory, then run `:core:analytics:cleanTest :core:analytics:test --tests
+'*GymRichCaptureTest.richSession*'`. Unset the variable for self-contained fixture regression.
+
+The restricted environment needs workspace-local Gradle/Android/JVM homes and a workspace copy
+of the existing debug keystore. Maven sockets are denied, so a build-only init script supplies
+Android Studio layoutlib's bundled org.json runtime to the JVM tests instead of downloading the
+normal test-only `org.json:json:20250517` dependency. The init script and extracted jar are ignored
+build artifacts; app runtime still uses Android org.json. Exact final invocation from android/:
+
+```bash
+export JAVA_HOME='/c/Program Files/Android/Android Studio/jbr'
+export GRADLE_USER_HOME='C:/Users/abhir/Desktop/projects/hl-g/android/build/gradle-home'
+export ANDROID_USER_HOME='C:/Users/abhir/Desktop/projects/hl-g/android/build/android-user'
+./gradlew --offline --no-daemon \
+  -Duser.home=C:/Users/abhir/Desktop/projects/hl-g/android/build/user-home \
+  -Pkotlin.compiler.execution.strategy=in-process -I build/gym-checks.init.gradle \
+  :core:analytics:test :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
+```
+
+Changed production files: WorkoutCapture, CaptureRhythm, new CaptureRecovery/CapturePulse,
+Models (raw PPG clock), Ppg (optional capture mode), Rhythm (optional pooled candidate count),
+CaptureMapping, CaptureJson, CaptureRunner, CaptureStorage, new CaptureActivity and HealthRepository.
+Changed/added tests: CaptureMappingTest, new CaptureActivityTest/CaptureRichTest/GymRichCaptureTest;
+plus app's test-only JSON dependency, this document, the fixture tool and two compact fixtures.
+No commit, device interaction, protocol or UI change.

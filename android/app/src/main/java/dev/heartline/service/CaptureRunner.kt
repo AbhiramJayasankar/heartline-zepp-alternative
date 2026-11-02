@@ -150,11 +150,15 @@ class CaptureRunner(
 
     private suspend fun analyze(s: CaptureSession) {
         val hr = db.heartRate.range(s.start.toDouble(), (s.end ?: now()).toDouble()).map { it.ts to it.bpm }
+        // Include workouts starting before capture. JSON holds end; filter/clip after loading.
+        val activities = db.health.workoutSummariesOverlapping(s.start.toDouble(), (s.end ?: now()).toDouble()).mapNotNull {
+            captureActivity(it, s.start.toDouble(), (s.end ?: now()).toDouble())
+        }
         val p = settings.profile.value
         val result = withContext(Dispatchers.Default) {
             val parts = readCaptureFiles(folder, s)
             val analysis = analyzeCapture(mergeCapture(s, parts), hr,
-                Profile(p.age, p.sex?.name?.lowercase(), p.weightKg, p.heightCm, p.maxHr, p.restingHr), s.label)
+                Profile(p.age, p.sex?.name?.lowercase(), p.weightKg, p.heightCm, p.maxHr, p.restingHr), s.label, activities)
             val notes = analysis.notes + s.gaps.filter { (it.end ?: s.end ?: s.start) > it.start }.map {
                 "Raw stream gap from ${it.start - s.start} to ${(it.end ?: s.end ?: it.start) - s.start} seconds after capture start."
             } + listOfNotNull(s.error) + if (parts.size < s.files.size) listOf("Some recording files are missing; analysis uses the remaining data.") else emptyList()

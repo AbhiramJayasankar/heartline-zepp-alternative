@@ -8,9 +8,9 @@ import java.io.File
 
 internal const val CAPTURE_SESSION = "capture_session_"
 internal const val CAPTURE_RESULT = "capture_result_"
-/** Stored analyses from an older engine are recomputed when opened. Bump when set/rep detection changes. */
+/** Stored analyses from an older engine are recomputed when opened. Bump when analysis changes. */
 internal const val CAPTURE_ENGINE = "capture_engine_"
-internal const val CAPTURE_ENGINE_VERSION = "2"
+internal const val CAPTURE_ENGINE_VERSION = "3"
 
 internal fun CaptureSession.json(): String = JSONObject().apply {
     put("id", id); put("label", label); put("start", start); put("end", end ?: JSONObject.NULL); put("planned", plannedS)
@@ -40,7 +40,7 @@ internal fun mergeCapture(session: CaptureSession, parts: List<Recording>): Reco
         times { it.accT }, parts.flatMap { it.acc.toList() }.toTypedArray(),
         times { it.gyroT }, parts.flatMap { it.gyro.toList() }.toTypedArray(),
         times { it.magT }, parts.flatMap { it.mag.toList() }.toTypedArray(), times { it.accArrivalT },
-        session.elapsed(session.end ?: session.start).toDouble())
+        session.elapsed(session.end ?: session.start).toDouble(), times { it.ppgArrivalT })
 }
 
 internal fun readCaptureFiles(folder: File, session: CaptureSession) = session.files.mapNotNull { name ->

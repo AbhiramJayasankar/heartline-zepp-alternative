@@ -38,7 +38,8 @@ fun makeRecording(
         val offset = accT[0] - start
         for (i in t.indices) t[i] += offset
     } else DoubleArray(accT.size) { accT[it] - start }
-    return Recording(start, retime(ppgT), ppg.copyOf(), at, Array(acc.size) { acc[it].copyOf() })
+    return Recording(start, retime(ppgT), ppg.copyOf(), at, Array(acc.size) { acc[it].copyOf() },
+        ppgArrivalT = DoubleArray(ppgT.size) { ppgT[it] - start })
 }
 
 fun readRecordingCsv(reader: Reader): Recording {
@@ -166,7 +167,7 @@ internal fun findPeaks(y: DoubleArray, distance: Int, prominence: Double): IntAr
     return out.toIntArray()
 }
 
-internal fun detectBeats(rec: Recording, motion: Motion): Beats {
+internal fun detectBeats(rec: Recording, motion: Motion, expectedHr: Double? = null): Beats {
     if (rec.durationS < 8) return Beats(notes = listOf("Recording too short to find heartbeats (needs at least 8 s)."))
     val t = grid(0.0, rec.ppgT.last(), 0.01)
     val x = interpolate(rec.ppgT, rec.ppg, t)
@@ -178,26 +179,38 @@ internal fun detectBeats(rec: Recording, motion: Motion): Beats {
     for (v in d) skew += (v - dm).pow(3)
     skew /= d.size * (variance(d).pow(1.5) + 1e-12)
     if (skew < 0) for (i in y.indices) y[i] = -y[i]
+    // Green-PPG systolic edges are more stable than rounded peaks at elevated HR.
+    // Capture mode uses the same detector/quality pipeline on the rising edge of the
+    // polarity-corrected waveform. Live HR sets a refractory distance, never beat times.
+    val detector = if (expectedHr == null) y else DoubleArray(y.size) { i ->
+        (y[min(y.lastIndex, i + 1)] - y[max(0, i - 1)]) * 50
+    }
     val spread = percentile(y, 95.0) - percentile(y, 5.0)
-    val peaks = findPeaks(y, 33, 0.25 * spread)
+    val distance = expectedHr?.let { (.55 * 60 / it * 100).toInt().coerceAtLeast(20) } ?: 33
+    val prominence = if (expectedHr == null) .25 * spread else max(0.0, .3 * percentile(detector, 90.0))
+    val peaks = findPeaks(detector, distance, prominence)
     if (peaks.size < 4) return Beats(filtered = y,
         notes = listOf("Too few clear heartbeats; the watch may be loose or off the wrist."))
     val times = DoubleArray(peaks.size) { i ->
         val p = peaks[i]
-        val den = y[p - 1] - 2 * y[p] + y[p + 1]
-        (p + if (den != 0.0) 0.5 * (y[p - 1] - y[p + 1]) / den else 0.0) / 100
+        val den = detector[p - 1] - 2 * detector[p] + detector[p + 1]
+        (p + if (den != 0.0) 0.5 * (detector[p - 1] - detector[p + 1]) / den else 0.0) / 100
     }
     val amplitude = DoubleArray(peaks.size) { i ->
         val p = peaks[i]
         val lo = if (i > 0) peaks[i - 1] else max(0, p - 60)
-        var low = y[lo]
-        for (j in lo..p) low = min(low, y[j])
-        y[p] - low
+        var low = detector[lo]
+        for (j in lo..p) low = min(low, detector[j])
+        detector[p] - low
     }
-    val valid = BooleanArray(peaks.size) { peaks[it] - 30 >= 0 && peaks[it] + 45 < y.size }
-    val windows = Array(peaks.size) { i -> if (valid[i]) y.copyOfRange(peaks[i] - 30, peaks[i] + 45) else null }
+    // During exercise recovery a fixed 750 ms template can span two beats. Keep the
+    // existing check-session defaults; captures may shorten it using simultaneous live HR.
+    val before = expectedHr?.let { (3000 / it).roundToInt().coerceIn(10, 75) } ?: 30
+    val after = expectedHr?.let { (3000 / it).roundToInt().coerceIn(10, 75) } ?: 45
+    val valid = BooleanArray(peaks.size) { peaks[it] - before >= 0 && peaks[it] + after < y.size }
+    val windows = Array(peaks.size) { i -> if (valid[i]) y.copyOfRange(peaks[i] - before, peaks[i] + after) else null }
     val stack = windows.filterNotNull()
-    val template = if (stack.size >= 3) DoubleArray(75) { j -> median(DoubleArray(stack.size) { stack[it][j] }) } else null
+    val template = if (stack.size >= 3) DoubleArray(before + after) { j -> median(DoubleArray(stack.size) { stack[it][j] }) } else null
     val medAmp = median(amplitude)
     val good = BooleanArray(peaks.size) { i ->
         valid[i] && template != null && correlation(windows[i]!!, template) >= 0.80 &&

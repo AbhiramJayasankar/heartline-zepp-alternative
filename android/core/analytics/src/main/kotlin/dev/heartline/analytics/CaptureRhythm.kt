@@ -2,7 +2,11 @@ package dev.heartline.analytics
 
 import kotlin.math.*
 
-internal data class RhythmSet(val start: Double, val end: Double, val reps: Int, val tempoS: Double)
+internal data class RhythmSet(val start: Double, val end: Double, val reps: Int, val tempoS: Double,
+    val repDetail: List<CaptureRep> = emptyList(), val gravity: DoubleArray = doubleArrayOf(),
+    val axis: DoubleArray = doubleArrayOf())
+internal data class RhythmRepPeaks(val reps: Int, val tempoS: Double, val peaks: IntArray, val sign: Int,
+    val signal: DoubleArray, val offset: Int, val axis: DoubleArray)
 private const val RHYTHM_FS = 25.0
 
 /** Port of gym2/prototype_detector.py. Arrival-clock interpolation is intentional: retiming changes rep rhythm.
@@ -31,9 +35,20 @@ internal fun captureRhythm(rec: Recording, gait: List<CaptureSegment>, duration:
         val scores = rhythmPeriodicity(axes)
         val excluded = BooleanArray(scores.size) { s -> gait.any { origin + s >= it.start && origin + s < it.end } }
         val filtered = axes.map { zeroPhase(it, butterworth(RHYTHM_FS, .12, 1.0)) }
+        val gravity = axes.map { zeroPhase(it, butterworth(RHYTHM_FS, 1.5)) }
         for ((a, b) in rhythmRuns(scores, excluded)) {
-            val (reps, tempo) = rhythmReps(filtered, a, b)
-            out += RhythmSet(origin + a, origin + b, reps, tempo)
+            val peaks = rhythmReps(filtered, a, b)
+            val detail = peaks.peaks.toList().zipWithNext().map { (p0, p1) ->
+                val trough = (p0 until p1).minBy { peaks.sign * peaks.signal[it] }
+                val phaseA = (trough - p0) / RHYTHM_FS
+                val phaseB = (p1 - trough) / RHYTHM_FS
+                val g0 = DoubleArray(3) { gravity[it][peaks.offset + p0] }
+                val gt = DoubleArray(3) { gravity[it][peaks.offset + trough] }
+                CaptureRep(origin + (peaks.offset + p0) / RHYTHM_FS, (p1 - p0) / RHYTHM_FS,
+                    max(phaseA, phaseB), min(phaseA, phaseB), vectorAngle(g0, gt))
+            }
+            out += RhythmSet(origin + a, origin + b, peaks.reps, peaks.tempoS, detail,
+                DoubleArray(3) { mean(gravity[it].copyOfRange(a * 25, b * 25)) }, peaks.axis)
         }
     }
     for (i in rec.accArrivalT.indices) {
@@ -100,7 +115,7 @@ internal fun rhythmRuns(scores: DoubleArray, excluded: BooleanArray = BooleanArr
 }
 
 /** Core PCA == first right singular vector of centered XYZ. Count both signs so eigenvector sign is immaterial. */
-internal fun rhythmReps(filtered: List<DoubleArray>, start: Int, end: Int): Pair<Int, Double> {
+internal fun rhythmReps(filtered: List<DoubleArray>, start: Int, end: Int): RhythmRepPeaks {
     val a = start * 25; val b = end * 25
     val mu = DoubleArray(3) { k -> mean(filtered[k].copyOfRange(a, b)) }
     val cov = Array(3) { DoubleArray(3) }
@@ -111,13 +126,21 @@ internal fun rhythmReps(filtered: List<DoubleArray>, start: Int, end: Int): Pair
     val v = dominantDirection(cov)
     fun project(from: Int, to: Int) = DoubleArray(to - from) { i -> (0..2).sumOf { k -> (filtered[k][from + i] - mu[k]) * v[k] } }
     val core = project(a, b)
-    val window = project(max(0, a - 250), min(filtered.first().size, b + 250))
+    val offset = max(0, a - 250)
+    val window = project(offset, min(filtered.first().size, b + 250))
     val period = acfMaximum(core, 30, 200).first / RHYTHM_FS
     val amplitude = percentile(DoubleArray(core.size) { abs(core[it]) }, 90.0)
-    if (amplitude < 1e-6) return 0 to period
+    if (amplitude < 1e-6) return RhythmRepPeaks(0, period, intArrayOf(), 1, window, offset, v)
     val distance = (0.55 * period * RHYTHM_FS).toInt().coerceAtLeast(1)
-    return max(findPeaks(window, distance, .9 * amplitude).size,
-        findPeaks(DoubleArray(window.size) { -window[it] }, distance, .9 * amplitude).size) to period
+    val positive = findPeaks(window, distance, .9 * amplitude)
+    val negative = findPeaks(DoubleArray(window.size) { -window[it] }, distance, .9 * amplitude)
+    // Count is the frozen max of both signs. For a tie use the more consistent cycle
+    // intervals so the selected phase is independent of arbitrary PCA eigenvector sign.
+    fun spread(peaks: IntArray): Double = if (peaks.size < 3) 0.0 else
+        variance(DoubleArray(peaks.size - 1) { (peaks[it + 1] - peaks[it]).toDouble() })
+    val sign = if (positive.size > negative.size || (positive.size == negative.size && spread(positive) <= spread(negative))) 1 else -1
+    val peaks = if (sign == 1) positive else negative
+    return RhythmRepPeaks(peaks.size, period, peaks, sign, window, offset, v)
 }
 
 // Symmetric 3x3 Jacobi eigendecomposition avoids an SVD dependency and handles any wrist orientation.
