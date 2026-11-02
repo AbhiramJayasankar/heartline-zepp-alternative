@@ -109,16 +109,58 @@ data class WorkoutDetailUi(
 
 data class CaptureRunUi(val label: String, val startedAt: Long, val plannedS: Int, val hr: Int?, val seconds: Int, val samples: Long, val error: String? = null)
 data class CaptureItemUi(val id: String, val label: String, val start: Long, val durationS: Int, val avgHr: Int?, val sets: Int?, val load: Double?)
-/** [start]/[end] are seconds from the capture start. */
-data class SetUi(val start: Double, val end: Double, val reps: Int, val avgHr: Int?, val peakHr: Int?, val tempoS: Double?)
+/** One repetition. [t] is seconds from the capture start; [slowS] + [fastS] = [durationS]; [arcDeg] is wrist rotation. */
+data class RepUi(val t: Double, val durationS: Double, val slowS: Double, val fastS: Double, val arcDeg: Double)
+/**
+ * [start]/[end] are seconds from the capture start. [group] numbers runs of consecutive sets that look like the same
+ * exercise (0, 1, 2…). [activity] is the overlapping watch workout's name, if any. [slowdownS] is the change in rep time
+ * per rep (positive = slowing). [partialLast] means the last rep's arc fell well short of the set's typical arc.
+ */
+data class SetUi(
+    val start: Double, val end: Double, val reps: Int, val avgHr: Int?, val peakHr: Int?, val tempoS: Double?,
+    val repDetail: List<RepUi> = emptyList(), val group: Int = 0, val activity: String? = null,
+    val slowdownS: Double? = null, val partialLast: Boolean = false, val startHr: Int? = null, val hrRise: Int? = null,
+)
 data class RestUi(val start: Double, val end: Double, val startHr: Int?, val endHr: Int?, val drop60: Int?)
 /** kind: "lifting", "walking", "running", "rest" or "other". */
 data class SegmentUi(val start: Double, val end: Double, val kind: String, val avgHr: Int?, val cadenceSpm: Int?)
+/** A watch workout that overlaps the capture, clipped to it. Times are seconds from the capture start. */
+data class CaptureActivityUi(
+    val start: Double, val end: Double, val type: String, val activeS: Int?, val distanceM: Int?, val steps: Int?,
+    val calories: Int?, val avgHr: Int?, val maxHr: Int?,
+)
+/** Average heart-rate change [delta] (bpm) [t] seconds after a set's peak, over [n] rests. */
+data class RecoveryPointUi(val t: Int, val delta: Double, val n: Int)
+/**
+ * A sustained walking/running block (3 min or more). [name] comes from an overlapping watch workout (e.g. "Treadmill").
+ * [riseTauS]/[recoveryTauS] are exponential time constants; [drop60]/[drop120] are bpm fallen after the block ends.
+ */
+data class CardioUi(
+    val start: Double, val end: Double, val kind: String, val name: String?, val avgHr: Int?, val steadyHr: Int?, val peakHr: Int?,
+    val riseTauS: Int?, val driftPerMin: Double?, val drop60: Int?, val drop120: Int?, val recoveryTauS: Int?,
+    val cadenceSpm: Int?, val distanceM: Int?, val speedKmh: Double?,
+)
+/** Beat-level check of one still stretch. status: "regular", "irregular", "possible_af" or "unreliable". */
+data class PulseWindowUi(val start: Double, val end: Double, val beats: Int, val hrPpg: Int, val hrWatch: Int?, val rmssdMs: Double, val nrmssd: Double, val status: String)
+/**
+ * Pulse regularity from raw PPG in still stretches. status: "regular", "irregular", "possible_af" or "insufficient_data".
+ * [pairs] are consecutive clean beat intervals in ms (Poincaré). [excerpt] is band-passed PPG at [excerptFs] Hz starting
+ * [excerptStart] s into the capture, with [excerptBeats] in seconds from the excerpt start.
+ */
+data class PulseUi(
+    val status: String, val usableS: Int, val windows: List<PulseWindowUi>, val nrmssd: Double?, val entropy: Double?,
+    val ectopic: Int, val pairs: List<Pair<Double, Double>>, val excerpt: List<Double>, val excerptFs: Double,
+    val excerptStart: Double, val excerptBeats: List<Double>, val notes: List<String>,
+)
 data class CaptureAnalysisUi(
     val id: String, val label: String, val start: Long, val durationS: Int,
     val avgHr: Int?, val maxHr: Int?, val minHr: Int?, val zones: List<ZoneTimeUi>, val load: Double?, val calories: Int?,
     val steps: Int?, val hr: List<SeriesPoint>, val motion: List<SeriesPoint>, val segments: List<SegmentUi>,
     val sets: List<SetUi>, val rests: List<RestUi>, val hrSource: String, val notes: List<String>,
+    val activities: List<CaptureActivityUi> = emptyList(), val recovery: List<RecoveryPointUi> = emptyList(),
+    /** Lowest-decile heart rate per 5-minute window: the session's rising baseline. */
+    val floor: List<SeriesPoint> = emptyList(), val workS: Int? = null, val restS: Int? = null,
+    val cardio: List<CardioUi> = emptyList(), val pulse: PulseUi? = null,
 )
 
 data class PlaceUi(val name: String, val region: String?, val lat: Double, val lon: Double)
