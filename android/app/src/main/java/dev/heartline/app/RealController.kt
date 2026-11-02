@@ -289,12 +289,17 @@ class RealController(
 
 
     // ---- Task C: Health Connect and background state. Replace these stubs. ----
-    override val healthConnect = MutableStateFlow(HealthConnectUi())
+    private val healthExporter = HealthConnectExporter.get(context)
+    override val healthConnect = healthExporter.status
     override val background = MutableStateFlow(BackgroundUi())
-    override val healthConnectPermissions: Set<String> = emptySet()
-    override fun setHealthConnect(enabled: Boolean) {}
-    override fun exportHealthConnectNow() {}
-    override fun refreshBackground() {}
+    override val healthConnectPermissions: Set<String> get() = healthExporter.permissions
+    override fun setHealthConnect(enabled: Boolean) = healthExporter.setEnabled(enabled)
+    override fun exportHealthConnectNow() = healthExporter.exportNow()
+    override fun refreshBackground() {
+        background.value = dev.heartline.service.backgroundState(context)
+        healthExporter.refresh()
+    }
+    init { refreshBackground() }
     // ---- end Task C ----
 
 

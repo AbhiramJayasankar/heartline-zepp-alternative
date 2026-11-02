@@ -2,11 +2,9 @@ package dev.heartline.ui.screens
 
 import android.Manifest
 import android.content.ActivityNotFoundException
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -86,23 +84,16 @@ fun ToggleRow(title: String, detail: String?, checked: Boolean, enabled: Boolean
     }
 }
 
-/** System screens the app can only send the user to; each falls back to the app's own settings page. */
+/** System screens the app can only send the user to; SystemIntents picks the first one this phone has. */
 object SystemScreens {
-    private fun Context.open(vararg intents: Intent): Boolean = intents.any { i ->
-        try { startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true } catch (_: ActivityNotFoundException) { false } catch (_: SecurityException) { false }
-    }
-    private fun details(ctx: Context) = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}"))
-    fun batteryExemption(ctx: Context) = ctx.open(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}")), Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS), details(ctx))
-    fun miuiAutostart(ctx: Context) = ctx.open(
-        Intent().setComponent(ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity")),
-        details(ctx),
-    )
-    fun miuiBatterySaver(ctx: Context) = ctx.open(
-        Intent("miui.intent.action.HIDDEN_APPS_CONFIG_ACTIVITY").putExtra("package_name", ctx.packageName).putExtra("package_label", "Heartline"),
-        details(ctx),
-    )
-    fun notificationAccess(ctx: Context) = ctx.open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS), details(ctx))
-    fun appDetails(ctx: Context) = ctx.open(details(ctx))
+    private fun Context.open(intent: Intent?): Boolean = intent != null && try {
+        startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true
+    } catch (_: ActivityNotFoundException) { false } catch (_: SecurityException) { false }
+    fun batteryExemption(ctx: Context) = ctx.open(dev.heartline.service.SystemIntents.batteryExemption(ctx))
+    fun miuiAutostart(ctx: Context) = ctx.open(dev.heartline.service.SystemIntents.miuiAutostart(ctx))
+    fun miuiBatterySaver(ctx: Context) = ctx.open(dev.heartline.service.SystemIntents.miuiBatterySaver(ctx))
+    fun notificationAccess(ctx: Context) = ctx.open(dev.heartline.service.SystemIntents.notificationListenerSettings(ctx))
+    fun appDetails(ctx: Context) = ctx.open(dev.heartline.service.SystemIntents.appDetails(ctx))
 }
 
 @Composable

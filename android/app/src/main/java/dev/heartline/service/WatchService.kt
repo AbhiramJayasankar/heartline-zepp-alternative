@@ -30,6 +30,7 @@ class WatchService : Service() {
         super.onCreate()
         watch = WatchConnection(this, scope, app.watchStore)
         phoneFeatures = PhoneFeatures(this, scope, app.db, watch, app.settings)
+        watch.onSuccessfulSync = { dev.heartline.app.HealthConnectExporter.get(this).afterSync() }
         calls = CallForwarder(this, scope, app.settings, watch)
         agenda = WatchAgendaSync(this, scope, app.db, watch)
         val manager = getSystemService(NotificationManager::class.java)
@@ -99,8 +100,13 @@ class WatchService : Service() {
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        if (intent.action != Intent.ACTION_BOOT_COMPLETED && intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
         if (context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED || KeyStore(context).load() == null) return
-        context.startForegroundService(Intent(context, WatchService::class.java))
+        // Android 12+ exempts BOOT_COMPLETED and MY_PACKAGE_REPLACED from background FGS start
+        // restrictions. Android 15's boot type restrictions allow connectedDevice; the granted
+        // BLUETOOTH_CONNECT permission satisfies its Android 14+ runtime prerequisite.
+        // https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start
+        try { context.startForegroundService(Intent(context, WatchService::class.java)) }
+        catch (e: RuntimeException) { android.util.Log.w("Heartline", "Watch service restart rejected", e) }
     }
 }
