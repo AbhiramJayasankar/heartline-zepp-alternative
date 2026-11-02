@@ -128,7 +128,8 @@ class RealController(
         val from = date.atStartOfDay(zone).toEpochSecond().toDouble()
         val to = date.plusDays(1).atStartOfDay(zone).toEpochSecond().toDouble() - 1
         return combine(db.activity.observeRange(from, to), db.health.observeWorkouts(from, to), today,
-            db.health.observeRawFetches(-Double.MAX_VALUE).map { withContext(Dispatchers.Default) { storedWorkoutRoutes(it) } }) { rows, workouts, _, routes ->
+            db.health.observeRawFetches(-Double.MAX_VALUE).map { withContext(Dispatchers.Default) { storedWorkoutDetails(it) } },
+            settings.profile) { rows, workouts, _, details, profile ->
             val minutes = mappedMinutes(rows, db.activity.prevKind(from))
             val hr = minutes.mapNotNull { it.hr }
             val sleepFrom = from - 86400
@@ -138,7 +139,7 @@ class RealController(
                 minutes.count { it.state in setOf(MinuteState.SLEEP_DEEP, MinuteState.SLEEP_LIGHT, MinuteState.SLEEP_REM) },
                 minutes.count { it.state !in setOf(MinuteState.NOT_WORN, MinuteState.CHARGING) }, hr.minOrNull(), hr.takeIf { it.isNotEmpty() }?.average()?.toInt(), hr.maxOrNull(),
                 daily.days.lastOrNull { it.date == date.toString() }?.sleepUi(), workouts.map { workout ->
-                    workout.ui().copy(route = routes[workout.start].orEmpty())
+                    workout.ui().withWorkoutDetail(details[workout.start], ProfileUi(age = profile.age, maxHr = profile.maxHr))
                 })
         }
     }
