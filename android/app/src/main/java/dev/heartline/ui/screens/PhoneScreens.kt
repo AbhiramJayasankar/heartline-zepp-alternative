@@ -393,7 +393,11 @@ fun FindPhoneBanner(controller: HeartlineController) {
 fun HealthConnectScreen(controller: HeartlineController, nav: Navigator) {
     val ctx = LocalContext.current
     val hc by controller.healthConnect.collectAsStateWithLifecycle()
-    val ask = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { controller.refreshBackground(); controller.setHealthConnect(true) }
+    // The client library picks the right permission screen: the Health Connect app on Android 13,
+    // the built-in system module on Android 14+ (a hand-built intent crashes there).
+    val ask = rememberLauncherForActivityResult(androidx.health.connect.client.PermissionController.createRequestPermissionResultContract()) { granted ->
+        controller.refreshBackground(); if (granted.isNotEmpty()) controller.setHealthConnect(true)
+    }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { controller.refreshBackground() }
     Screen("Health Connect", onBack = { nav.pop() }, subtitle = "Share your heart rate, sleep, steps, SpO2, workouts and HRV with apps that read from Health Connect. Heartline only writes; it never reads other apps' data.") {
         when (hc.status) {
@@ -409,10 +413,7 @@ fun HealthConnectScreen(controller: HeartlineController, nav: Navigator) {
                 MutedText("Allow Heartline to write each kind of data. You can change this any time in Health Connect.")
                 Gap(10)
                 PillButton("Allow in Health Connect", {
-                    ask.launch(
-                        Intent("androidx.health.ACTION_REQUEST_PERMISSIONS").setPackage("com.google.android.apps.healthdata")
-                            .putExtra("androidx.health.EXTRA_PERMISSIONS", controller.healthConnectPermissions.toTypedArray()),
-                    )
+                    runCatching { ask.launch(controller.healthConnectPermissions) }
                 })
             }
             dev.heartline.app.HealthConnectStatus.READY -> {
