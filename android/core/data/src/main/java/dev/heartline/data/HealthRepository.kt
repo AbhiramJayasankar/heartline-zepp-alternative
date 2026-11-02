@@ -4,6 +4,7 @@ import dev.heartline.data.model.*
 import kotlinx.coroutines.flow.Flow
 import java.time.LocalDate
 import java.time.ZoneId
+import org.json.JSONObject
 
 class HealthRepository(private val db: HeartlineDatabase) {
     suspend fun upsert(points: List<HealthPoint>): Int = db.write(setOf("health")) { sql ->
@@ -44,6 +45,13 @@ class HealthRepository(private val db: HeartlineDatabase) {
     suspend fun workoutLastStart(): Long? = db.read {
         it.select("SELECT MAX(start) FROM workouts") { c -> c.longOrNull(0) }.first()
     }
+    /** Capture comparisons need summaries only: do not load potentially large GPS track JSON.
+     * End lives in JSON, so include earlier starts and filter actual overlap without a schema change. */
+    suspend fun workoutSummariesOverlapping(from: Double, to: Double): List<Workout> = db.read {
+        it.select("SELECT start,data FROM workouts WHERE start < ? AND start > ? ORDER BY start", listOf(to, from - 86_400)) { c ->
+            Workout(c.getLong(0), c.getString(1))
+        }
+    }.filter { row -> runCatching { JSONObject(row.data).optDouble("end", 0.0) > from }.getOrDefault(false) }
     fun observeWorkouts(from: Double, to: Double = Double.MAX_VALUE): Flow<List<Workout>> =
         db.observe("workouts") { workouts(from, to) }
 

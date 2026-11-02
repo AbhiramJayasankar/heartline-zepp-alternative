@@ -35,9 +35,12 @@ internal fun turningPointRatio(rr: DoubleArray): Pair<Double, Boolean> {
     return (if (mu != 0.0) tp / mu else 0.0) to (abs(tp - mu) <= 1.96 * sigma)
 }
 
-internal fun assessRhythm(iv: Intervals, hr: Double?, beatNotes: List<String> = emptyList()): RhythmResult {
+internal fun assessRhythm(iv: Intervals, hr: Double?, beatNotes: List<String> = emptyList(),
+    ectopicBeats: Int? = null): RhythmResult {
     val rr = iv.rr.filterIndexed { i, _ -> !iv.artifact[i] }.toDoubleArray()
-    val ect = iv.ectopic.count { it } / 2
+    // Capture pooling removes ectopic intervals from timing statistics, but retains the
+    // independently counted candidates from the original windows for status and notes.
+    val ect = ectopicBeats ?: (iv.ectopic.count { it } / 2)
     if (rr.size < 30) return RhythmResult("insufficient_data", ect, null, beatNotes + listOf(
         "Only ${rr.size} clean beat intervals; at least 30 are needed. " +
             "Sit still with the watch snug for a minute and measure again.", DISCLAIMER), null)
