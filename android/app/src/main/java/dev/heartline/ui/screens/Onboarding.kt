@@ -79,7 +79,12 @@ fun OnboardingScreen(controller: HeartlineController) {
                 Gap(16)
                 OutlinedTextField(mac, { mac = it.uppercase().take(17) }, label = { Text("Bluetooth address, like C1:0B:05:00:0A:46") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Gap(8)
-                OutlinedTextField(key, { key = it.trim().take(34) }, label = { Text("Auth key (32 hex characters)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    key, { key = it.trim().take(34) }, label = { Text("Auth key (32 hex characters)") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    // A password field: masked on screen and kept out of the keyboard's learning and suggestions.
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password, autoCorrectEnabled = false),
+                )
                 error?.let { Gap(6); Text(it, style = HL.type.small, color = c.pulse) }
                 Gap(8)
                 MutedText("The key is stored encrypted with the phone's keystore and never leaves it.")
