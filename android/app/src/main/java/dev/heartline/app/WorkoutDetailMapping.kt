@@ -84,7 +84,7 @@ internal fun WorkoutUi.withWorkoutDetail(raw: StoredWorkoutDetail?, profile: Pro
         fun addValue(label: String, value: Number?, unit: String = "") {
             if (value == null || !value.toDouble().isFinite()) return
             val number = if (value is Int || value is Long) value.toString()
-                else String.format(Locale.ROOT, "%.3f", value.toDouble()).trimEnd('0').trimEnd('.')
+                else String.format(Locale.ROOT, "%.2f", value.toDouble()).trimEnd('0').trimEnd('.')
             add(label to (number + if (unit.isEmpty()) "" else " $unit"))
         }
         if (s != null) {

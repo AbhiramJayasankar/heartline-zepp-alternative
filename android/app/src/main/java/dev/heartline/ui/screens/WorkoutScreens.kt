@@ -310,8 +310,9 @@ fun WorkoutScreen(controller: HeartlineController, route: Route.Workout, nav: Na
         if (d.extras.isNotEmpty()) {
             Gap(24); SectionTitle("Everything else the watch recorded"); Gap(4)
             d.extras.forEach { (k, v) ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                    Text(k, style = HL.type.body, color = c.inkSoft, modifier = Modifier.weight(1f)); Text(v, style = HL.type.bodyStrong, color = c.ink)
+                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text(k, style = HL.type.body, color = c.inkSoft, modifier = Modifier.weight(1f))
+                    Text(v, style = HL.type.bodyStrong, color = c.ink, textAlign = androidx.compose.ui.text.style.TextAlign.End, modifier = Modifier.weight(1f))
                 }
                 HorizontalDivider(color = c.line)
             }

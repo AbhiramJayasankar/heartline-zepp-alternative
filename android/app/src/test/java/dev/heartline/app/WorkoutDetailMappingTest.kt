@@ -122,10 +122,10 @@ class WorkoutDetailMappingTest {
         assertEquals(72, d.minHr); assertNull(d.minAltM); assertNull(d.maxAltM)
         assertNull(d.trainingEffect); assertNull(d.recoveryHours); assertTrue(d.laps.isEmpty())
         val extras = d.extras.toMap()
-        assertEquals("2.628 km/h", extras["Minimum speed"])
+        assertEquals("2.63 km/h", extras["Minimum speed"])
         assertEquals("82 spm", extras["Minimum cadence"])
         assertEquals("62 cm", extras["Minimum stride"])
-        assertEquals("562.101 m", extras["Secondary distance"])
+        assertEquals("562.1 m", extras["Secondary distance"])
     }
 
     @Test fun joinsOnWorkoutStartWithNewestCaptureAndPreservesRoute() {
