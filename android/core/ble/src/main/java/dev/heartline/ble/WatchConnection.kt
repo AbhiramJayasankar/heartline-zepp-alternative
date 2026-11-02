@@ -244,6 +244,7 @@ class WatchConnection(
     suspend fun readBattery() = actions.withLock { batteryState.value = parseBattery(requireClient().read(Uuids.BATTERY)) }
     suspend fun setLiveHr(on: Boolean) = actions.withLock {
         wantHr = on
+        if (!on && link.value.state != ConnectionState.CONNECTED) { hrState.update { it.copy(streaming = false) }; return@withLock }
         val c = requireClient()
         if (on == hrState.value.streaming) return@withLock
         ping?.cancel()
@@ -331,7 +332,12 @@ class WatchConnection(
         log("info", "Sensor probe, $summary")
         summary
     }
-    suspend fun stopRaw(): File? = actions.withLock { wantRaw = false; val file = recording?.file; stopRawLocked(requireClient()); file }
+    suspend fun stopRaw(): File? = actions.withLock {
+        wantRaw = false
+        val file = recording?.file
+        if (link.value.state == ConnectionState.CONNECTED) stopRawLocked(requireClient()) else closeRecording()
+        file
+    }
     private suspend fun stopRawLocked(c: GattClient) {
         watchdog?.cancel(); watchdog = null
         if (recording == null) return

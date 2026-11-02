@@ -171,16 +171,16 @@ class RealController(
         launchAction { check(keys.load() != null && settings.watch.value.mac != null) { "Save the watch key and address first" }; ensureService(connect = true) }
     }
     override fun disconnect() { cancelCheck(); action { it.disconnect() } }
-    override fun setLiveHr(on: Boolean) = action { it.setLiveHr(on) }
+    override fun setLiveHr(on: Boolean) { if (!captureTask.running || on) action { if (!captureTask.running || on) it.setLiveHr(on) } }
     override fun setRawSensors(sensors: Set<Sensor>, streaming: Boolean) {
-        if (checkJob?.isActive == true) return
+        if (checkJob?.isActive == true || captureTask.running) return
         val selected = sensors.map { RawSensor.valueOf(it.name) }.toSet()
         settings.setRawSensorDefaultSelection(sensors.map { dataSensor(it) }.toSet())
         this.sensors.update { it.copy(selected = sensors) }
-        action { if (streaming) it.startRaw(selected) else it.stopRaw() }
+        action { if (!captureTask.running) { if (streaming) it.startRaw(selected) else it.stopRaw() } }
     }
     override fun startCheck(seconds: Int) {
-        if (checkJob?.isActive == true) return
+        if (checkJob?.isActive == true || captureTask.running) return
         require(seconds in 10..600)
         checkRun.value = CheckRunUi(seconds, System.currentTimeMillis() / 1000, false, null, null)
         checkJob = scope.launch {
@@ -188,6 +188,7 @@ class RealController(
             var ownsRecording = false
             try {
                 s = ensureService()
+                check(!captureTask.running) { "Stop workout capture before starting a heart check" }
                 check(!s.watch.raw.value.streaming) { "Stop raw recording before starting a check" }
                 ownsRecording = true
                 val file = s.command { it.startRaw(setOf(RawSensor.PPG, RawSensor.ACCEL)) }
@@ -308,12 +309,13 @@ class RealController(
 
 
     // ---- Task E: workout capture. Replace these stubs. ----
-    override val captureRun = MutableStateFlow<CaptureRunUi?>(null)
-    override val captures = MutableStateFlow<List<CaptureItemUi>>(emptyList())
-    override fun startCapture(label: String, minutes: Int) {}
-    override fun stopCapture() {}
-    override suspend fun captureDetail(id: String): CaptureAnalysisUi? = null
-    override fun deleteCapture(id: String) {}
+    private val captureTask = CaptureController(scope, db, service) { ensureService() }
+    override val captureRun = captureTask.run
+    override val captures = captureTask.items
+    override fun startCapture(label: String, minutes: Int) { if (checkJob?.isActive != true) captureTask.start(label, minutes) }
+    override fun stopCapture() = captureTask.stop()
+    override suspend fun captureDetail(id: String): CaptureAnalysisUi? = captureTask.detail(id)
+    override fun deleteCapture(id: String) = captureTask.delete(id)
     // ---- end Task E ----
 
 
