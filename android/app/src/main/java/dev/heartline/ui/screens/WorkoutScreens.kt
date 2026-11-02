@@ -86,7 +86,7 @@ fun CaptureScreen(controller: HeartlineController, nav: Navigator) {
     val conn by controller.connection.collectAsStateWithLifecycle()
     val r = run
     var label by rememberSaveable { mutableStateOf("Gym") }
-    var minutes by rememberSaveable { mutableIntStateOf(60) }
+    var minutes by rememberSaveable { mutableIntStateOf(180) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(r != null) { while (r != null) { delay(1000); now = System.currentTimeMillis() } }
     // When a capture ends, open its report as soon as the analysis lands.
@@ -105,7 +105,7 @@ fun CaptureScreen(controller: HeartlineController, nav: Navigator) {
             Gap(18)
             Text("For how long?", style = HL.type.label, color = c.inkSoft)
             Gap(8)
-            Segmented(listOf(30 to "30 min", 45 to "45 min", 60 to "1 h", 90 to "1 h 30"), minutes, { minutes = it })
+            Segmented(listOf(45 to "45 min", 60 to "1 h", 90 to "1 h 30", 180 to "Until I stop"), minutes, { minutes = it })
             Gap(24)
             PillButton("Start capture", { controller.startCapture(label, minutes) }, Modifier.fillMaxWidth(), style = ButtonStyle.PULSE, enabled = conn.state == LinkState.CONNECTED)
             if (conn.state != LinkState.CONNECTED) { Gap(6); MutedText("Connect the watch first.") }
@@ -122,7 +122,7 @@ fun CaptureScreen(controller: HeartlineController, nav: Navigator) {
             Column(Modifier.fillMaxWidth().paper().padding(vertical = 18.dp)) {
                 Text(r.label, style = HL.type.label, color = c.inkSoft)
                 Text(clock(elapsed.toDouble()), style = HL.type.hero.copy(fontSize = 96.sp), color = c.ink)
-                MutedText("of ${r.plannedS / 60} min, stops by itself")
+                MutedText(if (r.plannedS >= 180 * 60) "until you tap Stop (stops itself after 3 h)" else "of ${r.plannedS / 60} min, stops by itself")
             }
             Gap(12)
             Row(Modifier.fillMaxWidth()) {
