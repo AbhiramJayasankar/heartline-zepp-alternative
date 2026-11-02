@@ -72,6 +72,8 @@ sealed interface Route {
     data object Reminders : Route
     data object PhoneLink : Route
     data object HealthConnect : Route
+    data object Capture : Route
+    data class CaptureResult(val id: String) : Route
 }
 
 class Navigator {
@@ -121,6 +123,7 @@ fun AppRoot(controller: HeartlineController) {
         Box(Modifier.fillMaxSize().background(c.paper).padding(inner).then(if (top != null) Modifier.navigationBarsPadding() else Modifier)) {
             Column(Modifier.fillMaxSize()) {
             dev.heartline.ui.screens.FindPhoneBanner(controller)
+            if (top != Route.Capture) dev.heartline.ui.screens.CaptureBanner(controller) { nav.push(Route.Capture) }
             AnimatedContent(targetState = top ?: tab, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "screen") { target ->
                 Column(Modifier.fillMaxSize()) {
                     androidx.compose.runtime.CompositionLocalProvider(dev.heartline.ui.screens.LocalTabScroll provides (target as? Tab)?.let { tabScroll[it] }) {
@@ -146,6 +149,8 @@ fun AppRoot(controller: HeartlineController) {
                         Route.Reminders -> dev.heartline.ui.screens.RemindersScreen(controller, nav)
                         Route.PhoneLink -> dev.heartline.ui.screens.PhoneLinkScreen(controller, nav)
                         Route.HealthConnect -> dev.heartline.ui.screens.HealthConnectScreen(controller, nav)
+                        Route.Capture -> dev.heartline.ui.screens.CaptureScreen(controller, nav)
+                        is Route.CaptureResult -> dev.heartline.ui.screens.CaptureResultScreen(controller, target.id, nav)
                         else -> Unit
                     }
                     }

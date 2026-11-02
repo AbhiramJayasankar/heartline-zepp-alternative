@@ -105,6 +105,8 @@ fun ActivityScreen(controller: HeartlineController, nav: Navigator) {
             MutedText("${timeOf(n.start)} to ${timeOf(n.end)}. REM is estimated from the watch's sleep fields.")
         }
         Gap(24)
+        CapturePanel(controller, nav)
+        Gap(24)
         SectionTitle("Workouts")
         Gap(4)
         if (d == null || d.workouts.isEmpty()) MutedText("No workouts this day.")
@@ -139,35 +141,6 @@ private fun Legend() {
                 Spacer(Modifier.width(5.dp))
                 Text(label, style = HL.type.small, color = c.inkSoft)
             }
-        }
-    }
-}
-
-@Composable
-fun WorkoutScreen(controller: HeartlineController, route: Route.Workout, nav: Navigator) {
-    val day by remember(route.epochDay) { controller.activityDay(LocalDate.ofEpochDay(route.epochDay)) }.collectAsState(initial = null)
-    val w = day?.workouts?.firstOrNull { it.start == route.start }
-    Screen(w?.type ?: "Workout", onBack = { nav.pop() }, subtitle = w?.let { "${dateTimeOf(it.start)}, ${it.durationS / 60} min" }) {
-        if (w == null) { MutedText("Loading…"); return@Screen }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Stat("Average", fmtInt(w.avgHr), unit = "bpm"); Stat("Max", fmtInt(w.maxHr), unit = "bpm"); Stat("Calories", fmtInt(w.calories), unit = "kcal")
-        }
-        Gap(12)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Stat("Steps", fmtInt(w.steps)); Stat("Distance", w.distanceM?.let { "%.2f".format(it / 1000.0) } ?: "–", unit = "km"); Stat("Duration", fmtHm(w.durationS / 60))
-        }
-        if (w.route.size >= 2) {
-            Gap(18)
-            Panel(padding = androidx.compose.foundation.layout.PaddingValues(12.dp)) {
-                Text("Route", style = HL.type.label, color = HL.colors.inkSoft)
-                Gap(6)
-                dev.heartline.ui.components.RouteMap(w.route)
-            }
-        }
-        Gap(18)
-        Panel {
-            Text("Heart rate through the workout", style = HL.type.label, color = HL.colors.inkSoft)
-            HrTraceChart(w.track, w.durationS.toLong().coerceAtLeast(60), w.start + w.durationS)
         }
     }
 }
