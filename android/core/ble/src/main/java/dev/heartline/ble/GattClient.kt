@@ -56,6 +56,7 @@ class GattClient(private val context: Context) : AutoCloseable {
         }
     }
     private fun notice(uuid: UUID, value: ByteArray) {
+        BleLog.rx(uuid, value)
         if (!notices.tryEmit(GattNotification(uuid, value.copyOf()))) {
             pending?.result?.completeExceptionally(IOException("Notification consumer overflow"))
             close()
@@ -90,8 +91,9 @@ class GattClient(private val context: Context) : AutoCloseable {
         // This Android request has no completion callback on API 31-33.
         delay(100)
     }
-    suspend fun read(uuid: UUID): ByteArray = operation("read", uuid) { requireGatt().readCharacteristic(characteristic(uuid)) }
+    suspend fun read(uuid: UUID): ByteArray = operation("read", uuid) { requireGatt().readCharacteristic(characteristic(uuid)) }.also { BleLog.line("rd", uuid, it) }
     suspend fun write(uuid: UUID, value: ByteArray, response: Boolean = false) {
+        BleLog.tx(uuid, value)
         operation("write", uuid) {
             val c = characteristic(uuid)
             val type = if (response) BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT else BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE

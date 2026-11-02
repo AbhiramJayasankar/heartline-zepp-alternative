@@ -78,7 +78,44 @@ interface HeartlineController {
     fun exportHealthConnectNow()
     /** Re-reads battery-optimisation, notification-access and permission state (call on resume). */
     fun refreshBackground()
+
+    // Workout capture: every useful sensor at full rate for a session, analysed afterwards
+    val captureRun: StateFlow<CaptureRunUi?>
+    val captures: StateFlow<List<CaptureItemUi>>
+    /** Streams pulse, motion, gyroscope and compass plus the watch's own live heart rate until [minutes] pass or [stopCapture]. */
+    fun startCapture(label: String, minutes: Int)
+    fun stopCapture()
+    suspend fun captureDetail(id: String): CaptureAnalysisUi?
+    fun deleteCapture(id: String)
 }
+
+data class SeriesPoint(val t: Double, val v: Double)
+/** Time in one heart-rate zone; zone 1..5, bounds in bpm (high null for the top zone). */
+data class ZoneTimeUi(val zone: Int, val name: String, val lowBpm: Int, val highBpm: Int?, val seconds: Int)
+data class LapUi(val index: Int, val durationS: Int, val distanceM: Int?, val avgHr: Int?, val paceSPerKm: Double?)
+/** Everything decoded beyond the basic summary. Any decoded field without a dedicated slot goes in [extras] as label to value. */
+data class WorkoutDetailUi(
+    val activeS: Int? = null, val avgPaceSPerKm: Double? = null, val bestPaceSPerKm: Double? = null,
+    val avgSpeedKmh: Double? = null, val maxSpeedKmh: Double? = null, val avgCadence: Int? = null, val maxCadence: Int? = null,
+    val avgStrideCm: Int? = null, val ascentM: Double? = null, val descentM: Double? = null, val minAltM: Double? = null, val maxAltM: Double? = null,
+    val minHr: Int? = null, val trainingEffect: Double? = null, val load: Double? = null, val recoveryHours: Int? = null,
+    val zones: List<ZoneTimeUi> = emptyList(), val speedKmh: List<SeriesPoint> = emptyList(), val cadence: List<SeriesPoint> = emptyList(),
+    val altitude: List<SeriesPoint> = emptyList(), val laps: List<LapUi> = emptyList(), val extras: List<Pair<String, String>> = emptyList(),
+)
+
+data class CaptureRunUi(val label: String, val startedAt: Long, val plannedS: Int, val hr: Int?, val seconds: Int, val samples: Long, val error: String? = null)
+data class CaptureItemUi(val id: String, val label: String, val start: Long, val durationS: Int, val avgHr: Int?, val sets: Int?, val load: Double?)
+/** [start]/[end] are seconds from the capture start. */
+data class SetUi(val start: Double, val end: Double, val reps: Int, val avgHr: Int?, val peakHr: Int?, val tempoS: Double?)
+data class RestUi(val start: Double, val end: Double, val startHr: Int?, val endHr: Int?, val drop60: Int?)
+/** kind: "lifting", "walking", "running", "rest" or "other". */
+data class SegmentUi(val start: Double, val end: Double, val kind: String, val avgHr: Int?, val cadenceSpm: Int?)
+data class CaptureAnalysisUi(
+    val id: String, val label: String, val start: Long, val durationS: Int,
+    val avgHr: Int?, val maxHr: Int?, val minHr: Int?, val zones: List<ZoneTimeUi>, val load: Double?, val calories: Int?,
+    val steps: Int?, val hr: List<SeriesPoint>, val motion: List<SeriesPoint>, val segments: List<SegmentUi>,
+    val sets: List<SetUi>, val rests: List<RestUi>, val hrSource: String, val notes: List<String>,
+)
 
 data class PlaceUi(val name: String, val region: String?, val lat: Double, val lon: Double)
 data class WeatherUi(
@@ -143,7 +180,7 @@ data class TrendsUi(
 enum class MinuteState { NOT_WORN, SLEEP_LIGHT, SLEEP_DEEP, SLEEP_REM, ACTIVE, IDLE, CHARGING, UNKNOWN }
 data class MinuteUi(val ts: Long, val state: MinuteState, val steps: Int, val hr: Int?)
 data class RoutePoint(val t: Int, val lat: Double, val lon: Double, val altM: Double? = null)
-data class WorkoutUi(val start: Long, val durationS: Int, val type: String, val avgHr: Int?, val maxHr: Int?, val calories: Int?, val steps: Int?, val distanceM: Int?, val track: List<HrPoint>, val route: List<RoutePoint> = emptyList())
+data class WorkoutUi(val start: Long, val durationS: Int, val type: String, val avgHr: Int?, val maxHr: Int?, val calories: Int?, val steps: Int?, val distanceM: Int?, val track: List<HrPoint>, val route: List<RoutePoint> = emptyList(), val detail: WorkoutDetailUi? = null)
 data class ActivityDayUi(
     val date: LocalDate, val minutes: List<MinuteUi>, val steps: Int, val activeMinutes: Int, val sleepMinutes: Int,
     val wornMinutes: Int, val hrMin: Int?, val hrAvg: Int?, val hrMax: Int?, val sleep: SleepNightUi?, val workouts: List<WorkoutUi>,

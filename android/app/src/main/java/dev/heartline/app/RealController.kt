@@ -306,6 +306,16 @@ class RealController(
 
 
 
+    // ---- Task E: workout capture. Replace these stubs. ----
+    override val captureRun = MutableStateFlow<CaptureRunUi?>(null)
+    override val captures = MutableStateFlow<List<CaptureItemUi>>(emptyList())
+    override fun startCapture(label: String, minutes: Int) {}
+    override fun stopCapture() {}
+    override suspend fun captureDetail(id: String): CaptureAnalysisUi? = null
+    override fun deleteCapture(id: String) {}
+    // ---- end Task E ----
+
+
     fun forwardNotification(title: String, body: String, kind: NotificationKind, app: String) {
         val s = service.value ?: return
         if (s.watch.connection.value.state != ConnectionState.CONNECTED) return

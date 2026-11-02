@@ -186,6 +186,13 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override fun exportHealthConnectNow() = healthConnect.update { it.copy(lastExport = now()) }
     override fun refreshBackground() {}
 
+    override val captureRun = MutableStateFlow<CaptureRunUi?>(null)
+    override val captures = MutableStateFlow(listOf(CaptureItemUi("demo-gym", "Gym", now() - 7200, 3600, 128, 14, 96.0)))
+    override fun startCapture(label: String, minutes: Int) { captureRun.value = CaptureRunUi(label, now(), minutes * 60, 92, 0, 0) }
+    override fun stopCapture() { captureRun.value = null }
+    override suspend fun captureDetail(id: String): CaptureAnalysisUi? = demoCapture()
+    override fun deleteCapture(id: String) = captures.update { l -> l.filter { it.id != id } }
+
     private fun addEvent(msg: String) = events.update { listOf(EventUi(now(), false, false, msg)) + it }
 
     // ---------- synthetic content ----------
@@ -294,5 +301,22 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
         WatchSettingUi("lift_wrist", "Lift wrist to wake", "bool", true, emptyList(), null, null),
         WatchSettingUi("inactivity_warnings", "Move reminders", "bool", false, emptyList(), null, null),
         WatchSettingUi("time_24h", "24-hour clock", "bool", true, emptyList(), null, null),
+    )
+}
+
+/** A plausible 60-minute gym session: 45 min of lifting sets, then 15 min on the treadmill. */
+private fun demoCapture(): CaptureAnalysisUi {
+    val start = System.currentTimeMillis() / 1000 - 7200
+    val sets = (0 until 14).map { i -> val s = 120.0 + i * 180; SetUi(s, s + 45, 8 + (i % 3) * 2, 118 + i % 5 * 4, 132 + i % 4 * 6, 2.6) }
+    val rests = sets.zipWithNext { a, b -> RestUi(a.end, b.start, a.peakHr, 98 + (a.reps % 3) * 3, 24 + (a.reps % 4) * 3) }
+    val hr = (0..720).map { k -> val t = k * 5.0; val inSet = sets.any { t in it.start..it.end }
+        SeriesPoint(t, when { t > 2700 -> 128.0 + (t - 2700) / 60; inSet -> 130.0; else -> 104.0 } + 4 * kotlin.math.sin(k / 3.0)) }
+    val motion = (0..720).map { k -> val t = k * 5.0; SeriesPoint(t, if (t > 2700) 0.45 else if (sets.any { t in it.start..it.end }) 0.6 else 0.05) }
+    return CaptureAnalysisUi(
+        "demo-gym", "Gym", start, 3600, 121, 158, 86,
+        listOf(ZoneTimeUi(1, "Warm-up", 95, 114, 1320), ZoneTimeUi(2, "Fat burn", 114, 133, 1500), ZoneTimeUi(3, "Aerobic", 133, 152, 660), ZoneTimeUi(4, "Threshold", 152, 171, 120), ZoneTimeUi(5, "Max", 171, null, 0)),
+        96.0, 412, 2140, hr, motion,
+        listOf(SegmentUi(0.0, 2700.0, "lifting", 116, null), SegmentUi(2700.0, 3600.0, "walking", 134, 118)),
+        sets, rests, "Watch heart rate, checked against the raw pulse", listOf("Pulse was noisy during sets; heart rate in sets comes from the watch's own reading."),
     )
 }

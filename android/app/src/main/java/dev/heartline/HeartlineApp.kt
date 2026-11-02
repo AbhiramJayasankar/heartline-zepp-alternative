@@ -25,6 +25,7 @@ class HeartlineApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        dev.heartline.ble.BleLog.init(filesDir)
         controller = realController
     }
 

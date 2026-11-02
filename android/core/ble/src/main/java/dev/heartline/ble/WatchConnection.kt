@@ -220,6 +220,8 @@ class WatchConnection(
             Uuids.RAW_DATA -> {
                 val r = recording ?: return
                 val packet = parseRaw(n.value)
+                // Raw packets are saved to the recording; ones the parser doesn't know are logged so they can be studied.
+                if (packet is RawPacket.Unknown) BleLog.note("raw type ${packet.type}: ${n.value.joinToString("") { "%02x".format(it) }}")
                 r.feed(packet)
                 if (packet is RawPacket.GpsText) gpsState.value = r.gps.state
                 rawEvents.emit(RawUpdate(packet))
@@ -465,7 +467,7 @@ class WatchConnection(
     private suspend fun optional(name: String, block: suspend () -> Unit) {
         try { block() } catch (e: CancellationException) { throw e } catch (e: Exception) { log("warn", "$name failed: ${e.message}") }
     }
-    private suspend fun log(level: String, message: String) = persistence.event(level, message)
+    private suspend fun log(level: String, message: String) { BleLog.note("$level: $message"); persistence.event(level, message) }
     private fun now() = System.currentTimeMillis() / 1000
 
     companion object {
