@@ -71,14 +71,14 @@ class WatchConnection(
             while (isActive && wantConnected) {
                 var receiver: Job? = null
                 try {
-                    link.value = ConnectionStatus(ConnectionState.CONNECTING)
+                    link.value = ConnectionStatus(ConnectionState.CONNECTING, error = lastError)
                     val adapter = context.getSystemService(BluetoothManager::class.java).adapter ?: error("Bluetooth unavailable")
                     if (!adapter.isEnabled) {
                         // Wait quietly instead of failing every few seconds; one log line per outage.
                         link.value = ConnectionStatus(ConnectionState.ERROR, error = BLUETOOTH_OFF)
                         if (lastError != BLUETOOTH_OFF) { log("warn", "Bluetooth is off. Heartline reconnects when it's back on."); lastError = BLUETOOTH_OFF }
                         while (!adapter.isEnabled) delay(2000)
-                        link.value = ConnectionStatus(ConnectionState.CONNECTING)
+                        link.value = ConnectionStatus(ConnectionState.CONNECTING, error = lastError)
                     }
                     val key = keys.load() ?: error("Save the watch key first")
                     var c = GattClient(context); client = c
@@ -86,13 +86,13 @@ class WatchConnection(
                     catch (e: CancellationException) { throw e }
                     catch (_: Exception) {
                         c.close()
-                        link.value = ConnectionStatus(ConnectionState.SCANNING)
+                        link.value = ConnectionStatus(ConnectionState.SCANNING, error = lastError)
                         val found = scan(mac)
                         // While its bonded phone (Zepp) is connected the watch still advertises, but non-connectably:
                         // scanners see it and every connection attempt times out. Say so instead of retrying blind.
                         if (!found.isConnectable) throw IllegalStateException(WATCH_BUSY)
                         val device = found.device
-                        link.value = ConnectionStatus(ConnectionState.CONNECTING)
+                        link.value = ConnectionStatus(ConnectionState.CONNECTING, error = lastError)
                         c = GattClient(context); client = c
                         // Connectable and in range, yet refused: most often another phone grabbed it in between.
                         try { c.connect(device) } catch (e: CancellationException) { throw e } catch (e: Exception) { throw IllegalStateException(WATCH_BUSY, e) }
