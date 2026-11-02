@@ -196,7 +196,7 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
     Screen(a?.label ?: "Session", onBack = { nav.pop() }, subtitle = a?.let { "${dateTimeOf(it.start)}, ${fmtHm(it.durationS / 60)}" },
         trailing = { TextButton({ confirm = true }) { Text("Delete", color = c.inkSoft) } }) {
         if (a == null) { MutedText("Analysing the recording…"); return@Screen }
-        val restLengths = a.rests.map { it.end - it.start }.sorted()
+        val restLengths = a.rests.filter { r -> r.end - r.start <= 600 && a.cardio.none { it.start < r.end && it.end > r.start } }.map { it.end - it.start }.sorted()
         val medianRest = restLengths.getOrNull(restLengths.size / 2)
         StatGrid(listOf(
             Triple("Average", fmtInt(a.avgHr), "bpm"), Triple("Max", fmtInt(a.maxHr), "bpm"), Triple("Lowest", fmtInt(a.minHr), "bpm"),
@@ -231,7 +231,9 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
         if (a.zones.isNotEmpty()) {
             Gap(24); SectionTitle("Heart-rate zones"); Gap(12); ZoneBars(a.zones)
         }
-        val parts = a.segments.filter { it.kind == "walking" || it.kind == "running" }
+        val gait = a.segments.filter { it.kind == "walking" || it.kind == "running" }
+        val parts = gait.filter { it.end - it.start >= 120 }
+        val shortWalks = gait.filter { it.end - it.start < 120 }
         if (parts.isNotEmpty()) {
             Gap(24); SectionTitle("Parts of the session"); Gap(4)
             parts.forEach { s ->
@@ -246,6 +248,11 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
                 }
                 HorizontalDivider(color = c.line)
             }
+        }
+        if (shortWalks.isNotEmpty()) {
+            Gap(if (parts.isEmpty()) 24 else 10)
+            MutedText("Plus ${shortWalks.size} short walk${if (shortWalks.size == 1) "" else "s"} between sets, ${clock(shortWalks.sumOf { it.end - it.start })} in all" +
+                (shortWalks.mapNotNull { it.cadenceSpm }.takeIf { it.isNotEmpty() }?.let { ", about ${it.average().roundToInt()} steps/min" } ?: "") + ".")
         }
         Gap(24)
         SectionTitle("How this was measured")
@@ -298,12 +305,13 @@ private fun WatchWorkouts(a: CaptureAnalysisUi) {
     MutedText("What the watch logged for the workouts you started on it, beside what the raw sensors measured over the same minutes. The sensors see individual sets and reps; the watch adds names, distance and its calorie estimate.")
     a.activities.forEach { w ->
         val hr = a.hr.filter { it.t in w.start..w.end }.map { it.v }
-        val sets = a.sets.filter { (it.start + it.end) / 2 in w.start..w.end }
+        val sets = a.sets.filter { it.activity == w.type && (it.start + it.end) / 2 in w.start..w.end }
+        val partial = w.activeS != null && w.activeS > (w.end - w.start) + 60
         val cardio = a.cardio.filter { it.end > w.start && it.start < w.end }
         val steps = a.segments.filter { it.cadenceSpm != null }.sumOf { s -> (minOf(s.end, w.end) - maxOf(s.start, w.start)).coerceAtLeast(0.0) * s.cadenceSpm!! / 60 }.roundToInt()
         Gap(14)
         Text(w.type, style = HL.type.bodyStrong, color = c.ink)
-        MutedText("${clock(w.start)} to ${clock(w.end)} into the capture")
+        MutedText("${clock(w.start)} to ${clock(w.end)} into the capture" + if (partial) ". Only part of this ${clock(w.activeS!!.toDouble())} workout falls in this capture, so the watch's figures cover more time than the sensors' do." else "")
         Gap(6)
         Row(Modifier.fillMaxWidth()) {
             Spacer(Modifier.weight(1.2f))
@@ -339,7 +347,7 @@ private fun Exercises(a: CaptureAnalysisUi) {
             dev.heartline.ui.components.Dot(color, 10.dp); Spacer(Modifier.width(8.dp))
             Text("Exercise ${exerciseLetter(gi)}", style = HL.type.section.copy(fontSize = 20.sp), color = c.ink)
         }
-        MutedText(listOfNotNull("${sets.size} sets", "${sets.sumOf { it.reps }} reps",
+        MutedText(listOfNotNull(if (sets.size == 1) "1 set" else "${sets.size} sets", "${sets.sumOf { it.reps }} reps",
             sets.mapNotNull { it.tempoS }.takeIf { it.isNotEmpty() }?.let { "about %.1f s per rep".format(it.average()) },
             sets.mapNotNull { s -> s.repDetail.map { it.arcDeg }.sorted().let { r -> r.getOrNull(r.size / 2) } }.takeIf { it.isNotEmpty() }?.let { "wrist turns about ${it.average().roundToInt()}°" },
             sets.first().activity).joinToString(", "))
@@ -412,16 +420,21 @@ private fun CardioBlock(a: CaptureAnalysisUi, k: dev.heartline.app.CardioUi) {
 private fun PulseSection(p: dev.heartline.app.PulseUi) {
     val c = HL.colors
     val valid = p.windows.filter { it.status != "unreliable" }
-    val (title, color) = when (p.status) {
-        "regular" -> "Regular" to c.ok; "irregular" -> "Some irregular beats" to c.warn
-        "possible_af" -> "Irregular pattern" to c.pulse; else -> "Not enough still time" to c.inkSoft
+    // Under a minute of clean signal is too little for a verdict, whatever the beats looked like.
+    val enough = p.usableS >= 60
+    val (title, color) = when {
+        !enough || p.status == "insufficient_data" -> "Too little still time" to c.inkSoft
+        p.status == "regular" -> "Regular" to c.ok; p.status == "irregular" -> "Some irregular beats" to c.warn
+        else -> "Irregular pattern" to c.pulse
     }
     Gap(24); SectionTitle("Pulse regularity"); Gap(4)
     MutedText("Individual beats from the raw optical signal, whenever your wrist was still. A screening look, not an ECG.")
     Gap(10)
     Text(title, style = HL.type.score.copy(fontSize = 34.sp, lineHeight = 36.sp), color = color)
+    val noisy = p.windows.size - valid.size
     MutedText("From ${clock(p.usableS.toDouble())} of still wrist in ${valid.size} stretch${if (valid.size == 1) "" else "es"}" +
-        (if (p.windows.size > valid.size) "; ${p.windows.size - valid.size} more were too noisy to use." else "."))
+        (if (noisy > 0) "; $noisy more ${if (noisy == 1) "was" else "were"} too noisy to use." else ".") +
+        (if (!enough && valid.isNotEmpty()) " What there was looked ${if (p.status == "regular") "regular" else "uneven"}, but a verdict needs a minute or more; sit still for a few minutes during a capture to get one." else ""))
     if (p.excerpt.size > 1) {
         Gap(12)
         PaperPanel {
