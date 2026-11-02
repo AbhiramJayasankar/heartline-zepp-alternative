@@ -59,6 +59,18 @@ class WatchConnection(
     private var wantHr = false
     private var wantRaw = false
     private var mac: String? = null
+    private val quietReconnects = QuietReconnects()
+    private var reconnectNotice: Job? = null
+    init {
+        scope.launch {
+            while (isActive) {
+                delay(60 * 60_000L)
+                quietReconnects.summary()?.let { log("info", it) }
+            }
+        }
+    }
+    /** Successful transfers only; WatchService launches export outside the BLE command queue. */
+    var onSuccessfulSync: (() -> Unit)? = null
 
     fun connect(mac: String) {
         wantConnected = true; this.mac = mac
@@ -99,7 +111,6 @@ class WatchConnection(
                     }
                     link.value = ConnectionStatus(ConnectionState.CONNECTED, now())
                     failures = 0
-                    log("info", "Connected and authenticated")
                     optional("Battery read") { readBattery() }
                     val info = linkedMapOf<String, String>()
                     for ((name, uuid) in DEVICE_INFO) optional("Read $name") { info[name] = decodeInfo(c.read(uuid)) }
@@ -111,8 +122,15 @@ class WatchConnection(
                     if (wantHr) setLiveHr(true)
                     if (wantRaw) startRaw(rawState.value.sensors)
                     readyState.value = true
+                    reconnectNotice?.cancel(); reconnectNotice = null
+                    for (message in quietReconnects.authenticated(android.os.SystemClock.elapsedRealtime())) log("info", message)
                     c.disconnected.await()
-                    log("warn", "Connection lost, reconnecting")
+                    quietReconnects.dropped(android.os.SystemClock.elapsedRealtime())
+                    reconnectNotice?.cancel()
+                    reconnectNotice = scope.launch {
+                        delay(30_001)
+                        quietReconnects.overdue(android.os.SystemClock.elapsedRealtime())?.let { log("warn", it) }
+                    }
                 } catch (e: CancellationException) { throw e }
                 catch (e: Exception) {
                     link.value = ConnectionStatus(ConnectionState.ERROR, error = e.message)
@@ -132,6 +150,7 @@ class WatchConnection(
         }
     }
     suspend fun disconnect() {
+        reconnectNotice?.cancel(); reconnectNotice = null; quietReconnects.clearPending()
         wantConnected = false; wantHr = false; wantRaw = false
         if (link.value.state == ConnectionState.CONNECTED) {
             try {
@@ -345,6 +364,7 @@ class WatchConnection(
             }
             persistence.meta("activity_last_sync", now().toString())
             log("info", "Activity sync done: $added new minutes")
+            onSuccessfulSync?.invoke()
         } finally { syncState.value = SyncStatus() }
     }
     suspend fun syncHealth() = syncLock.withLock {
@@ -356,6 +376,7 @@ class WatchConnection(
                 optional("Sync ${type.key}") { if (type == FetchType.WORKOUTS) syncWorkouts() else syncHealthType(type) }
             }
             persistence.meta("health_last_sync", now().toString()); log("info", "Health sync done")
+            onSuccessfulSync?.invoke()
         } finally { syncState.value = SyncStatus() }
     }
     private suspend fun syncHealthType(type: FetchType) {
@@ -364,7 +385,7 @@ class WatchConnection(
             val f = fetch(type, since)
             if (f.data.isEmpty()) break
             persistence.rawFetch(type.key, f.reply, f.start, f.data)
-            val rows = parseHealth(type, f.data, f.start, now())
+            val rows = if (type == FetchType.RESTING_HR) parseRestingHeartRate(f.data) else parseHealth(type, f.data, f.start, now())
             if (rows.all { it.value == null }) break
             persistence.health(rows)
             if (type.consumedOnTransfer) break
