@@ -67,12 +67,19 @@ class WatchConnection(
         if (runner?.isActive == true) return
         runner = scope.launch {
             var failures = 0
+            var lastError: String? = null
             while (isActive && wantConnected) {
                 var receiver: Job? = null
                 try {
                     link.value = ConnectionStatus(ConnectionState.CONNECTING)
                     val adapter = context.getSystemService(BluetoothManager::class.java).adapter ?: error("Bluetooth unavailable")
-                    check(adapter.isEnabled) { "Turn on Bluetooth" }
+                    if (!adapter.isEnabled) {
+                        // Wait quietly instead of failing every few seconds; one log line per outage.
+                        link.value = ConnectionStatus(ConnectionState.ERROR, error = BLUETOOTH_OFF)
+                        if (lastError != BLUETOOTH_OFF) { log("warn", "Bluetooth is off. Heartline reconnects when it's back on."); lastError = BLUETOOTH_OFF }
+                        while (!adapter.isEnabled) delay(2000)
+                        link.value = ConnectionStatus(ConnectionState.CONNECTING)
+                    }
                     val key = keys.load() ?: error("Save the watch key first")
                     var c = GattClient(context); client = c
                     try { c.connect(remoteDevice(adapter, mac)) }
@@ -80,9 +87,15 @@ class WatchConnection(
                     catch (_: Exception) {
                         c.close()
                         link.value = ConnectionStatus(ConnectionState.SCANNING)
-                        val device = scan(mac)
+                        val found = scan(mac)
+                        // While its bonded phone (Zepp) is connected the watch still advertises, but non-connectably:
+                        // scanners see it and every connection attempt times out. Say so instead of retrying blind.
+                        if (!found.isConnectable) throw IllegalStateException(WATCH_BUSY)
+                        val device = found.device
                         link.value = ConnectionStatus(ConnectionState.CONNECTING)
-                        c = GattClient(context); client = c; c.connect(device)
+                        c = GattClient(context); client = c
+                        // Connectable and in range, yet refused: most often another phone grabbed it in between.
+                        try { c.connect(device) } catch (e: CancellationException) { throw e } catch (e: Exception) { throw IllegalStateException(WATCH_BUSY, e) }
                     }
                     c.discoverServices(); c.connectionPriority()
                     receiver = scope.launch(start = CoroutineStart.UNDISPATCHED) {
@@ -100,7 +113,7 @@ class WatchConnection(
                         } finally { key.fill(0); c.enableNotification(Uuids.AUTH, false) }
                     }
                     link.value = ConnectionStatus(ConnectionState.CONNECTED, now())
-                    failures = 0
+                    failures = 0; lastError = null
                     log("info", "Connected and authenticated")
                     optional("Battery read") { readBattery() }
                     val info = linkedMapOf<String, String>()
@@ -118,7 +131,9 @@ class WatchConnection(
                 } catch (e: CancellationException) { throw e }
                 catch (e: Exception) {
                     link.value = ConnectionStatus(ConnectionState.ERROR, error = e.message)
-                    log("error", "Connection failed: ${e.message}")
+                    // Retries repeat the same failure every backoff step; log it once until something changes.
+                    if (e.message != lastError) log("error", "Connection failed: ${e.message}")
+                    lastError = e.message
                 } finally {
                     withContext(NonCancellable) {
                         readyState.value = false
@@ -154,12 +169,12 @@ class WatchConnection(
         return if (random && android.os.Build.VERSION.SDK_INT >= 33) adapter.getRemoteLeDevice(mac, BluetoothDevice.ADDRESS_TYPE_RANDOM)
         else adapter.getRemoteDevice(mac)
     }
-    private suspend fun scan(mac: String): BluetoothDevice = withTimeout(15_000) {
+    private suspend fun scan(mac: String): ScanResult = withTimeout(15_000) {
         suspendCancellableCoroutine { continuation ->
             val scanner = checkNotNull(context.getSystemService(BluetoothManager::class.java).adapter.bluetoothLeScanner) { "Bluetooth scanner unavailable" }
             val callback = object : ScanCallback() {
                 override fun onScanResult(type: Int, result: ScanResult) {
-                    if (continuation.isActive) { scanner.stopScan(this); continuation.resume(result.device) }
+                    if (continuation.isActive) { scanner.stopScan(this); continuation.resume(result) }
                 }
                 override fun onScanFailed(code: Int) { if (continuation.isActive) continuation.resumeWithException(IllegalStateException("Scan failed: $code")) }
             }
@@ -405,4 +420,9 @@ class WatchConnection(
     }
     private suspend fun log(level: String, message: String) = persistence.event(level, message)
     private fun now() = System.currentTimeMillis() / 1000
+
+    companion object {
+        const val BLUETOOTH_OFF = "Turn on Bluetooth"
+        const val WATCH_BUSY = "The watch is nearby but won't accept a connection. Another phone or the Zepp app is probably connected to it: turn off Bluetooth on that phone."
+    }
 }
