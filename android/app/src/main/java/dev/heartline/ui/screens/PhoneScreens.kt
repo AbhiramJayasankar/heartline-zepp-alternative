@@ -321,20 +321,22 @@ fun RemindersScreen(controller: HeartlineController, nav: Navigator) {
         SectionTitle("Calendars")
         Gap(4)
         if (r.calendars.isEmpty()) MutedText("No calendars on this phone.")
+        else if (r.enabled && r.selected.isEmpty()) Text("Tick at least one calendar to send its events.", style = HL.type.small, color = c.pulse)
         r.calendars.forEach { cal ->
             val on = cal.id in r.selected
             Row(Modifier.fillMaxWidth().clickable { controller.setReminderSync(r.enabled, if (on) r.selected - cal.id else r.selected + cal.id) }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(on, { controller.setReminderSync(r.enabled, if (on) r.selected - cal.id else r.selected + cal.id) }, colors = CheckboxDefaults.colors(checkedColor = c.ink))
                 Column {
-                    Text(cal.name, style = HL.type.body, color = c.ink)
-                    cal.account?.let { MutedText(it) }
+                    // MIUI's on-device calendar reports untranslated resource keys as its names.
+                    Text(if (cal.name == "calendar_displayname_local") "On this phone" else cal.name, style = HL.type.body, color = c.ink)
+                    cal.account?.takeIf { it != "account_name_local" && it != cal.name }?.let { MutedText(it) }
                 }
             }
         }
         Gap(20)
         SectionTitle("Coming up on the watch")
         Gap(4)
-        if (!r.enabled || r.upcoming.isEmpty()) MutedText(if (r.enabled) "Nothing in the next 14 days." else "Turn on sending to see what goes to the watch.")
+        if (!r.enabled || r.upcoming.isEmpty()) MutedText(when { !r.enabled -> "Turn on sending to see what goes to the watch."; r.selected.isEmpty() -> "No calendars ticked."; else -> "Nothing in the next 14 days." })
         else r.upcoming.forEach { e ->
             Row(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
                 Text(e.title, style = HL.type.body, color = c.ink, modifier = Modifier.weight(1f))
