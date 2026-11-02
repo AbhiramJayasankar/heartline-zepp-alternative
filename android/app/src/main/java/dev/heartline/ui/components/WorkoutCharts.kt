@@ -48,7 +48,7 @@ fun clock(seconds: Double): String { val s = seconds.toInt(); return if (s >= 36
  * [durationS] fixes the time axis so sets and HR line up exactly.
  */
 @Composable
-fun SessionChart(hr: List<SeriesPoint>, durationS: Int, zones: List<ZoneTimeUi>, sets: List<SetUi>, modifier: Modifier = Modifier) {
+fun SessionChart(hr: List<SeriesPoint>, durationS: Int, zones: List<ZoneTimeUi>, sets: List<SetUi>, modifier: Modifier = Modifier, floor: List<SeriesPoint> = emptyList()) {
     val c = HL.colors
     val tm = rememberTextMeasurer()
     Canvas(modifier.fillMaxWidth().height(200.dp)) {
@@ -62,10 +62,15 @@ fun SessionChart(hr: List<SeriesPoint>, durationS: Int, zones: List<ZoneTimeUi>,
             val yTop = y((z.highBpm ?: hi.toInt()).toDouble().coerceAtMost(hi)); val yBot = y(z.lowBpm.toDouble().coerceAtLeast(lo))
             if (yBot > top && yTop < bottom) drawRect(zoneColor(z.zone, c).copy(alpha = 0.10f), Offset(left, yTop.coerceAtLeast(top)), Size(right - left, (yBot.coerceAtMost(bottom) - yTop.coerceAtLeast(top))))
         }
-        sets.forEach { s -> drawRect(c.pulse.copy(alpha = 0.16f), Offset(x(s.start), top), Size((x(s.end) - x(s.start)).coerceAtLeast(2f), bottom - top)) }
+        sets.forEach { s -> drawRect(groupColor(s.group, c).copy(alpha = 0.22f), Offset(x(s.start), top), Size((x(s.end) - x(s.start)).coerceAtLeast(2f), bottom - top)) }
         if (hr.size > 1) {
             val path = Path().apply { hr.forEachIndexed { i, p -> if (i == 0) moveTo(x(p.t), y(p.v)) else lineTo(x(p.t), y(p.v)) } }
             drawPath(path, c.ink, style = Stroke(2.dp.toPx(), join = StrokeJoin.Round))
+        }
+        // The rising baseline: lowest heart rate per five minutes, stepped so each value covers its window.
+        if (floor.size > 1) {
+            val step = Path().apply { floor.forEachIndexed { i, p -> val y0 = y(p.v); if (i == 0) moveTo(x(p.t), y0) else lineTo(x(p.t), y0); lineTo(x(floor.getOrNull(i + 1)?.t ?: durationS.toDouble()), y0) } }
+            drawPath(step, c.pulse, style = Stroke(1.5.dp.toPx(), pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10f, 7f))))
         }
         listOf(lo, (lo + hi) / 2, hi).forEach { v -> label(tm, "${v.toInt()}", right + 4.dp.toPx(), y(v) - 7.dp.toPx(), c.inkSoft) }
         val step = listOf(300, 600, 900, 1800).firstOrNull { durationS / it <= 6 } ?: 3600

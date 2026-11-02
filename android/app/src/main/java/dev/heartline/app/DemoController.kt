@@ -309,7 +309,16 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
 /** A plausible 60-minute gym session: 45 min of lifting sets, then 15 min on the treadmill. */
 private fun demoCapture(): CaptureAnalysisUi {
     val start = System.currentTimeMillis() / 1000 - 7200
-    val sets = (0 until 14).map { i -> val s = 120.0 + i * 180; SetUi(s, s + 45, 8 + (i % 3) * 2, 118 + i % 5 * 4, 132 + i % 4 * 6, 2.6) }
+    val sets = (0 until 14).map { i ->
+        val s = 120.0 + i * 180; val group = i / 4; val reps = 8 + (i % 3) * 2; val tempo = 2.6 + group * 0.8
+        val arc = listOf(140.0, 40.0, 25.0, 12.0)[group]
+        val detail = (0 until reps).map { k ->
+            val d = tempo + k * (if (i % 4 == 3) 0.12 else 0.03)
+            RepUi(s + 4 + k * tempo, d, d * 0.7, d * 0.3, arc * (if (k == reps - 1 && i % 4 == 3) 0.7 else 1.0 - 0.04 * kotlin.math.sin(k * 1.7)))
+        }
+        SetUi(s, s + 45, reps, 118 + i % 5 * 4, 132 + i % 4 * 6, tempo, detail, group, "Strength training",
+            if (i % 4 == 3) 0.12 else 0.03, i % 4 == 3, 108 + group * 4, 10 + i % 4 * 3)
+    }
     val rests = sets.zipWithNext { a, b -> RestUi(a.end, b.start, a.peakHr, 98 + (a.reps % 3) * 3, 24 + (a.reps % 4) * 3) }
     val hr = (0..720).map { k -> val t = k * 5.0; val inSet = sets.any { t in it.start..it.end }
         SeriesPoint(t, when { t > 2700 -> 128.0 + (t - 2700) / 60; inSet -> 130.0; else -> 104.0 } + 4 * kotlin.math.sin(k / 3.0)) }
@@ -320,5 +329,24 @@ private fun demoCapture(): CaptureAnalysisUi {
         96.0, 412, 2140, hr, motion,
         listOf(SegmentUi(0.0, 2700.0, "lifting", 116, null), SegmentUi(2700.0, 3600.0, "walking", 134, 118)),
         sets, rests, "Watch heart rate, checked against the raw pulse", listOf("Pulse was noisy during sets; heart rate in sets comes from the watch's own reading."),
+        activities = listOf(CaptureActivityUi(10.0, 2690.0, "Strength training", 2680, 0, 610, 402, 117, 150),
+            CaptureActivityUi(2700.0, 3600.0, "Treadmill", 612, 683, 935, 137, 152, 171)),
+        recovery = listOf(0 to 0.0, 20 to -6.2, 40 to -9.1, 60 to -10.3, 80 to -9.6, 100 to -8.8, 120 to -8.5, 140 to -6.9, 160 to -4.1).map { (t, d) -> RecoveryPointUi(t, d, 13) },
+        floor = (0 until 12).map { k -> SeriesPoint(k * 300.0, if (k < 9) 100.0 + k * 3 else 140.0 + (k - 9) * 4) },
+        workS = 14 * 45, restS = 13 * 135,
+        cardio = listOf(CardioUi(2700.0, 3600.0, "walking", "Treadmill", 152, 165, 171, 160, 0.8, 25, 40, 73, 118, 683, 3.7)),
+        pulse = demoPulse(),
     )
+}
+
+private fun demoPulse(): PulseUi {
+    val fs = 25.0; val ibi = 0.52
+    val beats = (0 until 23).map { k -> 0.2 + k * ibi + 0.015 * kotlin.math.sin(k * 0.9) }
+    val wave = (0 until (12 * fs).toInt()).map { i -> val t = i / fs; val ph = beats.lastOrNull { it <= t }?.let { t - it } ?: 0.3
+        -kotlin.math.exp(-ph / 0.09) + 0.35 * kotlin.math.exp(-((ph - 0.25) / 0.06).let { it * it }) }
+    val pairs = (0 until 220).map { k -> val a = 500.0 + 25 * kotlin.math.sin(k / 9.0) + (k * 37 % 11 - 5); a to a + (k * 53 % 13 - 6) }
+    return PulseUi("regular", 268, listOf(
+        PulseWindowUi(810.0, 845.0, 64, 112, 114, 37.0, 0.07, "regular"), PulseWindowUi(1310.0, 1345.0, 73, 120, 121, 16.5, 0.033, "regular"),
+        PulseWindowUi(1700.0, 1725.0, 40, 96, 117, 60.0, 0.21, "unreliable"), PulseWindowUi(2410.0, 2440.0, 55, 115, 116, 18.0, 0.034, "regular"),
+    ), 0.05, 0.82, 0, pairs, wave, fs, 1318.0, beats, listOf("Wellness estimate from the watch's optical sensor, not a medical diagnosis."))
 }

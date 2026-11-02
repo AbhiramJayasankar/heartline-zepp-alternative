@@ -1,6 +1,9 @@
 package dev.heartline.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,6 +30,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -36,6 +40,7 @@ import dev.heartline.app.LinkState
 import dev.heartline.app.WorkoutDetailUi
 import dev.heartline.ui.Navigator
 import dev.heartline.ui.Route
+import dev.heartline.ui.components.ActivityBand
 import dev.heartline.ui.components.ButtonStyle
 import dev.heartline.ui.components.HrTraceChart
 import dev.heartline.ui.components.LegendDot
@@ -191,29 +196,42 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
     Screen(a?.label ?: "Session", onBack = { nav.pop() }, subtitle = a?.let { "${dateTimeOf(it.start)}, ${fmtHm(it.durationS / 60)}" },
         trailing = { TextButton({ confirm = true }) { Text("Delete", color = c.inkSoft) } }) {
         if (a == null) { MutedText("Analysing the recording…"); return@Screen }
+        val restLengths = a.rests.map { it.end - it.start }.sorted()
+        val medianRest = restLengths.getOrNull(restLengths.size / 2)
         StatGrid(listOf(
             Triple("Average", fmtInt(a.avgHr), "bpm"), Triple("Max", fmtInt(a.maxHr), "bpm"), Triple("Lowest", fmtInt(a.minHr), "bpm"),
             Triple("Load", a.load?.roundToInt()?.toString() ?: "–", null), Triple("Calories", fmtInt(a.calories), "kcal"), Triple("Steps", fmtInt(a.steps), null),
             Triple("Sets", if (a.sets.isEmpty()) "–" else a.sets.size.toString(), null), Triple("Reps", if (a.sets.isEmpty()) "–" else a.sets.sumOf { it.reps }.toString(), null),
-            Triple("Avg rest", a.rests.takeIf { it.isNotEmpty() }?.let { clock(it.map { r -> r.end - r.start }.average()) } ?: "–", null),
+            Triple("Median rest", medianRest?.let { clock(it) } ?: "–", null),
+            Triple("Under load", a.workS?.let { fmtHm(((it + 30) / 60)) } ?: "–", null),
+            Triple("Work share", a.workS?.let { w -> a.restS?.takeIf { w + it > 0 }?.let { "${100 * w / (w + it)}" } } ?: "–", "%"),
+            Triple("Exercises", if (a.sets.isEmpty()) "–" else a.sets.map { it.group }.distinct().size.toString(), null),
         ))
         Gap(20)
         Panel(padding = PaddingValues(12.dp)) {
-            Text("Heart rate, sets shaded", style = HL.type.label, color = c.inkSoft)
+            Text(if (a.floor.size > 1) "Heart rate, sets shaded by exercise, dashed line is your lowest per 5 min" else "Heart rate, sets shaded", style = HL.type.label, color = c.inkSoft)
             Gap(6)
-            SessionChart(a.hr, a.durationS, a.zones, a.sets)
+            SessionChart(a.hr, a.durationS, a.zones, a.sets, floor = a.floor)
             MotionStrip(a.motion, a.durationS)
             Gap(8)
             SegmentBar(a.segments, a.durationS)
+            if (a.activities.isNotEmpty()) { Gap(6); ActivityBand(a.activities, a.durationS) }
             Gap(8)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 a.segments.map { it.kind }.distinct().forEach { k -> LegendDot(segmentColor(k, c), k.replaceFirstChar { it.uppercase() }) }
+                if (a.activities.isNotEmpty()) LegendDot(c.ink.copy(alpha = 0.3f), "Watch workout")
             }
         }
+        BaselineNote(a)
+        if (a.activities.isNotEmpty()) WatchWorkouts(a)
+        if (a.sets.isNotEmpty()) Exercises(a)
+        if (a.recovery.size >= 2) Recovery(a, medianRest)
+        a.cardio.forEach { CardioBlock(a, it) }
+        a.pulse?.let { PulseSection(it) }
         if (a.zones.isNotEmpty()) {
             Gap(24); SectionTitle("Heart-rate zones"); Gap(12); ZoneBars(a.zones)
         }
-        val parts = a.segments.filter { it.kind != "rest" }
+        val parts = a.segments.filter { it.kind == "walking" || it.kind == "running" }
         if (parts.isNotEmpty()) {
             Gap(24); SectionTitle("Parts of the session"); Gap(4)
             parts.forEach { s ->
@@ -225,24 +243,6 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
                         MutedText("${clock(s.start)} to ${clock(s.end)}" + (s.cadenceSpm?.let { ", $it steps/min" } ?: ""))
                     }
                     Text("${fmtInt(s.avgHr)} bpm", style = HL.type.label, color = c.ink)
-                }
-                HorizontalDivider(color = c.line)
-            }
-        }
-        if (a.sets.isNotEmpty()) {
-            Gap(24); SectionTitle("Sets"); Gap(4)
-            a.sets.forEachIndexed { i, s ->
-                val rest = a.rests.firstOrNull { it.start >= s.end - 1 && it.start <= s.end + 5 }
-                Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("${i + 1}", style = HL.type.stat.copy(fontSize = 22.sp), color = c.inkSoft, modifier = Modifier.width(36.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("${s.reps} reps, ${clock(s.end - s.start)}", style = HL.type.bodyStrong, color = c.ink)
-                        MutedText(listOfNotNull(s.tempoS?.let { "%.1f s per rep".format(it) }, rest?.let { "then ${clock(it.end - it.start)} rest" }, rest?.drop60?.let { "recovered $it bpm in 1 min" }).joinToString(", "))
-                    }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text("${fmtInt(s.peakHr)} peak", style = HL.type.label, color = c.ink)
-                        MutedText("${fmtInt(s.avgHr)} avg")
-                    }
                 }
                 HorizontalDivider(color = c.line)
             }
@@ -260,6 +260,209 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
         confirmButton = { TextButton({ controller.deleteCapture(id); confirm = false; nav.pop() }) { Text("Delete", color = c.pulse) } },
         dismissButton = { TextButton({ confirm = false }) { Text("Cancel", color = c.inkSoft) } },
     )
+}
+
+/** A panel ruled like ECG paper, for the charts that plot heart signals. */
+@Composable
+private fun PaperPanel(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    val c = HL.colors
+    val shape = RoundedCornerShape(10.dp)
+    Column(Modifier.fillMaxWidth().clip(shape).background(c.surface).paper().border(1.dp, c.line, shape).padding(12.dp), content = content)
+}
+
+@Composable
+private fun BaselineNote(a: CaptureAnalysisUi) {
+    if (a.floor.size < 3) return
+    val first = a.floor.first().v.roundToInt(); val top = a.floor.maxBy { it.v }; val last = a.floor.last().v.roundToInt()
+    if (top.v.roundToInt() - first < 8) return
+    Gap(10)
+    MutedText("Your lowest heart rate climbed from $first bpm at the start to ${top.v.roundToInt()} around ${clock(top.t)}, and was $last by the end. Each set starts from a higher floor as the session goes on.")
+}
+
+/** One label with the watch's figure and the raw sensors' figure side by side. */
+@Composable
+private fun CompareRow(label: String, watch: String, sensors: String) {
+    val c = HL.colors
+    Row(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
+        Text(label, style = HL.type.body, color = c.inkSoft, modifier = Modifier.weight(1.2f))
+        Text(watch, style = HL.type.bodyStrong, color = c.ink, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
+        Text(sensors, style = HL.type.bodyStrong, color = c.ink, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
+    }
+    HorizontalDivider(color = c.line)
+}
+
+@Composable
+private fun WatchWorkouts(a: CaptureAnalysisUi) {
+    val c = HL.colors
+    Gap(24); SectionTitle("The watch's own workouts"); Gap(4)
+    MutedText("What the watch logged for the workouts you started on it, beside what the raw sensors measured over the same minutes. The sensors see individual sets and reps; the watch adds names, distance and its calorie estimate.")
+    a.activities.forEach { w ->
+        val hr = a.hr.filter { it.t in w.start..w.end }.map { it.v }
+        val sets = a.sets.filter { (it.start + it.end) / 2 in w.start..w.end }
+        val cardio = a.cardio.filter { it.end > w.start && it.start < w.end }
+        val steps = a.segments.filter { it.cadenceSpm != null }.sumOf { s -> (minOf(s.end, w.end) - maxOf(s.start, w.start)).coerceAtLeast(0.0) * s.cadenceSpm!! / 60 }.roundToInt()
+        Gap(14)
+        Text(w.type, style = HL.type.bodyStrong, color = c.ink)
+        MutedText("${clock(w.start)} to ${clock(w.end)} into the capture")
+        Gap(6)
+        Row(Modifier.fillMaxWidth()) {
+            Spacer(Modifier.weight(1.2f))
+            Text("Watch", style = HL.type.label, color = c.inkSoft, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
+            Text("Sensors", style = HL.type.label, color = c.inkSoft, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
+        }
+        HorizontalDivider(color = c.line)
+        CompareRow("Average HR", fmtInt(w.avgHr), if (hr.isEmpty()) "–" else fmtInt(hr.average().roundToInt()))
+        CompareRow("Max HR", fmtInt(w.maxHr), if (hr.isEmpty()) "–" else fmtInt(hr.max().roundToInt()))
+        CompareRow("Active time", w.activeS?.let { clock(it.toDouble()) } ?: "–",
+            when { cardio.isNotEmpty() -> clock(cardio.sumOf { it.end - it.start }); sets.isNotEmpty() -> clock(sets.sumOf { it.end - it.start }) + " in sets"; else -> "–" })
+        CompareRow("Steps", fmtInt(w.steps), if (steps > 0) fmtInt(steps) else "–")
+        if (w.distanceM != null && w.distanceM > 0) CompareRow("Distance", "%.2f km".format(w.distanceM / 1000.0), "–")
+        CompareRow("Calories", w.calories?.let { "$it kcal" } ?: "–", "–")
+        if (sets.isNotEmpty()) CompareRow("Sets / reps", "–", "${sets.size} / ${sets.sumOf { it.reps }}")
+    }
+}
+
+@Composable
+private fun Exercises(a: CaptureAnalysisUi) {
+    val c = HL.colors
+    Gap(24); SectionTitle("Exercises and sets"); Gap(4)
+    MutedText("Back-to-back sets that move the wrist the same way are grouped as one exercise. Each block is one rep: its width is how long the rep took, the solid part is the slower half, and its height is how far the wrist turned.")
+    val groups = ArrayList<MutableList<dev.heartline.app.SetUi>>()
+    a.sets.forEach { s -> if (groups.lastOrNull()?.last()?.group == s.group) groups.last().add(s) else groups.add(mutableListOf(s)) }
+    val maxDur = a.sets.maxOfOrNull { s -> s.repDetail.sumOf { it.durationS } }?.coerceAtLeast(1.0) ?: 1.0
+    var setNo = 0
+    groups.forEachIndexed { gi, sets ->
+        val color = dev.heartline.ui.components.groupColor(sets.first().group, c)
+        val arcMax = sets.flatMap { s -> s.repDetail.map { minOf(it.arcDeg, 160.0) } }.maxOrNull() ?: 1.0
+        Gap(18)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            dev.heartline.ui.components.Dot(color, 10.dp); Spacer(Modifier.width(8.dp))
+            Text("Exercise ${exerciseLetter(gi)}", style = HL.type.section.copy(fontSize = 20.sp), color = c.ink)
+        }
+        MutedText(listOfNotNull("${sets.size} sets", "${sets.sumOf { it.reps }} reps",
+            sets.mapNotNull { it.tempoS }.takeIf { it.isNotEmpty() }?.let { "about %.1f s per rep".format(it.average()) },
+            sets.mapNotNull { s -> s.repDetail.map { it.arcDeg }.sorted().let { r -> r.getOrNull(r.size / 2) } }.takeIf { it.isNotEmpty() }?.let { "wrist turns about ${it.average().roundToInt()}°" },
+            sets.first().activity).joinToString(", "))
+        sets.forEach { s ->
+            setNo++
+            val rest = a.rests.firstOrNull { it.start >= s.end - 1 && it.start <= s.end + 5 }
+            Gap(10)
+            Row(verticalAlignment = Alignment.Bottom) {
+                Column(Modifier.width(70.dp)) {
+                    Text("Set $setNo", style = HL.type.label, color = c.inkSoft)
+                    Text("${s.reps} reps", style = HL.type.bodyStrong, color = c.ink)
+                }
+                if (s.repDetail.isNotEmpty()) dev.heartline.ui.components.RepStrip(s.repDetail, maxDur, arcMax, color, Modifier.weight(1f))
+                else Spacer(Modifier.weight(1f))
+            }
+            MutedText(listOfNotNull(
+                "${clock(s.start)}, lasted ${clock(s.end - s.start)}",
+                if (s.startHr != null && s.peakHr != null) "HR ${s.startHr} to ${s.peakHr}" + (s.hrRise?.let { " (+$it)" } ?: "") else s.peakHr?.let { "peak $it bpm" },
+                s.slowdownS?.takeIf { it >= 0.1 }?.let { "slowed %.2f s per rep".format(it) },
+                if (s.partialLast) "last rep was short" else null,
+                rest?.let { "then ${clock(it.end - it.start)} rest" + (it.drop60?.let { d -> ", HR down $d in 1 min" } ?: "") },
+            ).joinToString(", "))
+        }
+    }
+}
+
+private fun exerciseLetter(i: Int): String = if (i < 26) ('A' + i).toString() else "${i + 1}"
+
+@Composable
+private fun Recovery(a: CaptureAnalysisUi, medianRest: Double?) {
+    val m = a.recovery.minBy { it.delta }
+    val at60 = a.recovery.minByOrNull { kotlin.math.abs(it.t - 60) }
+    Gap(24); SectionTitle("Heart rate between sets"); Gap(4)
+    MutedText("Average change from each set's peak while you rested, across ${a.recovery.first().n} rests.")
+    Gap(10)
+    PaperPanel { dev.heartline.ui.components.RecoveryChart(a.recovery, medianRest) }
+    Gap(10)
+    MutedText(buildString {
+        at60?.let { append("Heart rate fell about ${(-it.delta).roundToInt()} bpm in the first minute. ") }
+        append("It stopped falling around ${m.t} s")
+        medianRest?.let { append(if (it > m.t + 30) ", well before your median rest of ${clock(it)} ended" else ", close to your median rest of ${clock(it)}") }
+        append(". Heart-rate recovery is not muscle recovery, so longer rests before hard sets can still pay off.")
+    })
+}
+
+@Composable
+private fun CardioBlock(a: CaptureAnalysisUi, k: dev.heartline.app.CardioUi) {
+    val c = HL.colors
+    Gap(24); SectionTitle(k.name ?: k.kind.replaceFirstChar { it.uppercase() }); Gap(4)
+    MutedText("${clock(k.start)} to ${clock(k.end)} into the capture, ${clock(k.end - k.start)} of steady ${k.kind}" + (k.name?.let { ", named by the watch" } ?: ""))
+    Gap(10)
+    PaperPanel { dev.heartline.ui.components.HrWindowChart(a.hr, (k.start - 120).coerceAtLeast(0.0), (k.end + 240).coerceAtMost(a.durationS.toDouble()), k.start, k.end) }
+    Gap(14)
+    StatGrid(listOf(
+        Triple("Steady", fmtInt(k.steadyHr), "bpm"), Triple("Peak", fmtInt(k.peakHr), "bpm"), Triple("Average", fmtInt(k.avgHr), "bpm"),
+        Triple("Rise time", fmtInt(k.riseTauS), "s"), Triple("Drift", k.driftPerMin?.let { "%+.1f".format(it) } ?: "–", "bpm/min"), Triple("Cadence", fmtInt(k.cadenceSpm), "spm"),
+        Triple("Drop 1 min", fmtInt(k.drop60), "bpm"), Triple("Drop 2 min", fmtInt(k.drop120), "bpm"), Triple("Recovery", fmtInt(k.recoveryTauS), "s"),
+        Triple("Distance", k.distanceM?.takeIf { it > 0 }?.let { "%.2f".format(it / 1000.0) } ?: "–", "km"), Triple("Speed", k.speedKmh?.let { "%.1f".format(it) } ?: "–", "km/h"),
+    ))
+    Gap(10)
+    val notes = listOfNotNull(
+        k.riseTauS?.let { "Rise time is how quickly heart rate settled towards its plateau (a time constant). Fitter hearts settle in under a minute; $it s is where regular cardio shows up first." },
+        k.drop60?.let { if (it > 12) "Heart rate fell $it bpm in the first minute after stopping, comfortably above the 12 bpm warning level." else "Heart rate fell only $it bpm in the first minute after stopping; 12 or less is worth keeping an eye on." },
+        if (k.distanceM != null || k.speedKmh != null) "Distance and speed come from the watch's workout; heart rate, cadence and timing from the raw sensors." else null,
+    )
+    notes.forEach { MutedText(it); Gap(4) }
+}
+
+@Composable
+private fun PulseSection(p: dev.heartline.app.PulseUi) {
+    val c = HL.colors
+    val valid = p.windows.filter { it.status != "unreliable" }
+    val (title, color) = when (p.status) {
+        "regular" -> "Regular" to c.ok; "irregular" -> "Some irregular beats" to c.warn
+        "possible_af" -> "Irregular pattern" to c.pulse; else -> "Not enough still time" to c.inkSoft
+    }
+    Gap(24); SectionTitle("Pulse regularity"); Gap(4)
+    MutedText("Individual beats from the raw optical signal, whenever your wrist was still. A screening look, not an ECG.")
+    Gap(10)
+    Text(title, style = HL.type.score.copy(fontSize = 34.sp, lineHeight = 36.sp), color = color)
+    MutedText("From ${clock(p.usableS.toDouble())} of still wrist in ${valid.size} stretch${if (valid.size == 1) "" else "es"}" +
+        (if (p.windows.size > valid.size) "; ${p.windows.size - valid.size} more were too noisy to use." else "."))
+    if (p.excerpt.size > 1) {
+        Gap(12)
+        PaperPanel {
+            Text("Filtered pulse at ${clock(p.excerptStart)}, each beat marked", style = HL.type.label, color = c.inkSoft)
+            Gap(6)
+            dev.heartline.ui.components.PulseWave(p.excerpt, p.excerptFs, p.excerptBeats)
+        }
+    }
+    if (p.pairs.size >= 20) {
+        Gap(12)
+        PaperPanel {
+            Text("Each beat gap against the next (ms)", style = HL.type.label, color = c.inkSoft)
+            Gap(6)
+            dev.heartline.ui.components.PoincarePlot(p.pairs)
+            Gap(4)
+            MutedText("A regular rhythm hugs the diagonal. An irregular one, such as atrial fibrillation, scatters into a wide fan.")
+        }
+    }
+    Gap(14)
+    StatGrid(listOf(
+        Triple("Irregularity", p.nrmssd?.let { "%.3f".format(it) } ?: "–", null), Triple("Entropy", p.entropy?.let { "%.2f".format(it) } ?: "–", null),
+        Triple("Early beats", p.ectopic.toString(), null),
+    ))
+    Gap(6)
+    MutedText("Irregularity is beat-to-beat variation relative to the average gap (nRMSSD). Atrial fibrillation usually shows above 0.10 together with high entropy.")
+    if (p.windows.isNotEmpty()) {
+        Gap(12)
+        p.windows.sortedBy { it.start }.forEach { w ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("${clock(w.start)}–${clock(w.end)}", style = HL.type.body, color = c.ink, modifier = Modifier.weight(1.3f))
+                Text("${w.beats} beats", style = HL.type.small, color = c.inkSoft, modifier = Modifier.weight(1f))
+                Text("${w.hrPpg} / ${fmtInt(w.hrWatch)}", style = HL.type.small, color = c.inkSoft, modifier = Modifier.weight(1f))
+                Text(if (w.status == "unreliable") "noisy" else "%.3f".format(w.nrmssd), style = HL.type.label,
+                    color = when (w.status) { "regular" -> c.ok; "unreliable" -> c.inkSoft; "possible_af" -> c.pulse; else -> c.warn }, textAlign = TextAlign.End, modifier = Modifier.weight(0.8f))
+            }
+            HorizontalDivider(color = c.line)
+        }
+        Gap(4)
+        MutedText("Columns: still stretch, beats found, heart rate from beats / from the watch, irregularity.")
+    }
+    p.notes.forEach { Gap(4); MutedText(it) }
 }
 
 // ---- Synced watch workouts ----
@@ -281,6 +484,19 @@ fun WorkoutScreen(controller: HeartlineController, route: Route.Workout, nav: Na
             Triple("Ascent", d.ascentM?.roundToInt()?.toString() ?: "–", "m"), Triple("Descent", d.descentM?.roundToInt()?.toString() ?: "–", "m"), Triple("Load", d.load?.roundToInt()?.toString() ?: "–", null),
             Triple("Training effect", one(d.trainingEffect), null), Triple("Recovery", d.recoveryHours?.let { "$it h" } ?: "–", null),
         ))
+        // A capture recorded over this workout has far finer data: offer it here.
+        val captures by controller.captures.collectAsStateWithLifecycle()
+        captures.firstOrNull { it.start < w.start + w.durationS && it.start + it.durationS > w.start }?.let { cap ->
+            Gap(20)
+            Panel(wash = true) {
+                Text("Raw-sensor analysis available", style = HL.type.bodyStrong, color = c.ink)
+                Gap(4)
+                MutedText("A Heartline capture was running during this workout" + (cap.sets?.let { ", with $it sets found" } ?: "") +
+                    ". It has every set and rep, rest recovery, heart-rate kinetics and a pulse regularity check.")
+                Gap(10)
+                PillButton("Open the capture", { nav.push(Route.CaptureResult(cap.id)) }, style = ButtonStyle.QUIET)
+            }
+        }
         if (w.route.size >= 2) {
             Gap(20)
             Panel(padding = PaddingValues(12.dp)) {

@@ -48,7 +48,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-private val axisStyle = TextStyle(fontFamily = TextFamily, fontSize = 10.sp)
+internal val axisStyle = TextStyle(fontFamily = TextFamily, fontSize = 10.sp)
 private val hhmm = DateTimeFormatter.ofPattern("HH:mm")
 
 internal fun DrawScope.label(tm: TextMeasurer, text: String, x: Float, y: Float, color: Color, alignEnd: Boolean = false, center: Boolean = false) {
