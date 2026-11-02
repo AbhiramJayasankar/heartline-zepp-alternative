@@ -218,6 +218,7 @@ class WatchConnection(
                 watchEvents.emit(n.value.copyOf())
             }
             Uuids.RAW_DATA -> {
+                probeSink?.invoke(n.value)
                 val r = recording ?: return
                 val packet = parseRaw(n.value)
                 // Raw packets are saved to the recording; ones the parser doesn't know are logged so they can be studied.
@@ -297,8 +298,38 @@ class WatchConnection(
             throw e
         }
     }
-    private suspend fun rawBegin(c: GattClient, sensors: Set<RawSensor>) {
-        for (cmd in rawStartCommands(rawMask(sensors))) { c.write(Uuids.RAW_CTRL, cmd); delay(400) }
+    private suspend fun rawBegin(c: GattClient, sensors: Set<RawSensor>, commands: () -> List<ByteArray> = { rawStartCommands(rawMask(sensors)) }) {
+        for (cmd in commands()) { c.write(Uuids.RAW_CTRL, cmd); delay(400) }
+    }
+    @Volatile private var probeSink: ((ByteArray) -> Unit)? = null
+
+    /**
+     * Starts the raw stream with an arbitrary sensor [mask] for [seconds] and reports what came back: packet types,
+     * counts, sizes and a sample of each. Used to find what the undocumented mask bits switch on.
+     */
+    suspend fun probeRawMask(mask: Int, seconds: Long = 8): String = actions.withLock {
+        val c = requireClient()
+        check(recording == null) { "Stop raw streaming first" }
+        val packets = java.util.concurrent.ConcurrentLinkedQueue<ByteArray>()
+        probeSink = { packets.add(it) }
+        try {
+            c.enableNotification(Uuids.RAW_DATA); c.enableNotification(Uuids.RAW_CTRL)
+            rawBegin(c, setOf()) { rawStartCommands(mask) }
+            delay(seconds * 1000)
+        } finally {
+            withContext(NonCancellable) {
+                runCatching { c.write(Uuids.RAW_CTRL, RAW_STOP); c.enableNotification(Uuids.RAW_CTRL, false); c.enableNotification(Uuids.RAW_DATA, false) }
+                probeSink = null
+            }
+        }
+        val byType = packets.groupBy { it[0].toInt() and 255 }
+        val summary = if (byType.isEmpty()) "mask 0x%02x: nothing".format(mask) else "mask 0x%02x: ".format(mask) + byType.entries.sortedBy { it.key }.joinToString("; ") { (t, list) ->
+            "type 0x%02x x%d (%.0f/s, %s bytes)".format(t, list.size, list.size / seconds.toDouble(), list.map { it.size }.distinct().sorted().take(3).joinToString("/"))
+        }
+        BleLog.note("probe $summary")
+        byType.values.forEach { list -> BleLog.note("probe sample: " + list.first().joinToString("") { "%02x".format(it) }) }
+        log("info", "Sensor probe, $summary")
+        summary
     }
     suspend fun stopRaw(): File? = actions.withLock { wantRaw = false; val file = recording?.file; stopRawLocked(requireClient()); file }
     private suspend fun stopRawLocked(c: GattClient) {

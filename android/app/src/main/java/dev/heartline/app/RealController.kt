@@ -317,6 +317,14 @@ class RealController(
     // ---- end Task E ----
 
 
+    override val probe = MutableStateFlow<List<String>>(emptyList())
+    override fun probeUnknownSensors() = action { w ->
+        probe.value = listOf("Probing…")
+        // 0x04 and 0x80 are unmapped; 0x06 and 0x82 pair them with the green pulse to see if they change it.
+        val results = listOf(0x04, 0x80, 0x06, 0x82).map { mask -> runCatching { w.probeRawMask(mask) }.getOrElse { e -> "mask 0x%02x: failed, ${e.message}".format(mask) } }
+        probe.value = results
+    }
+
     fun forwardNotification(title: String, body: String, kind: NotificationKind, app: String) {
         val s = service.value ?: return
         if (s.watch.connection.value.state != ConnectionState.CONNECTED) return

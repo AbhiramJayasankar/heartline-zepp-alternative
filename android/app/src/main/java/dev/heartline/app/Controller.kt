@@ -87,6 +87,10 @@ interface HeartlineController {
     fun stopCapture()
     suspend fun captureDetail(id: String): CaptureAnalysisUi?
     fun deleteCapture(id: String)
+
+    /** Tries the raw-stream mask bits nobody has mapped yet; one line of results per bit. */
+    val probe: StateFlow<List<String>>
+    fun probeUnknownSensors()
 }
 
 data class SeriesPoint(val t: Double, val v: Double)

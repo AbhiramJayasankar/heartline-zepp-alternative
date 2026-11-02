@@ -192,6 +192,8 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override fun stopCapture() { captureRun.value = null }
     override suspend fun captureDetail(id: String): CaptureAnalysisUi? = demoCapture()
     override fun deleteCapture(id: String) = captures.update { l -> l.filter { it.id != id } }
+    override val probe = MutableStateFlow<List<String>>(emptyList())
+    override fun probeUnknownSensors() { probe.value = listOf("mask 0x04: nothing", "mask 0x80: nothing") }
 
     private fun addEvent(msg: String) = events.update { listOf(EventUi(now(), false, false, msg)) + it }
 
