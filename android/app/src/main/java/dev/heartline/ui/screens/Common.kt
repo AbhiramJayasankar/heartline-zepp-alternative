@@ -43,12 +43,15 @@ import java.time.format.DateTimeFormatter
 
 val Gutter = 20.dp
 
+/** Tabs keep one scroll position each, so coming back from a sub-screen lands where you left. Sub-screens get null. */
+val LocalTabScroll = androidx.compose.runtime.staticCompositionLocalOf<ScrollState?> { null }
+
 /**
  * A full-height scrolling page. Headers may draw behind the status bar at rest; once the page scrolls,
  * a paper scrim fades in under the status bar so content never runs into the clock and icons.
  */
 @Composable
-fun ScrollPage(state: ScrollState = rememberScrollState(), content: @Composable ColumnScope.() -> Unit) {
+fun ScrollPage(state: ScrollState = LocalTabScroll.current ?: rememberScrollState(), content: @Composable ColumnScope.() -> Unit) {
     val scrolled by remember(state) { derivedStateOf { state.value > 0 } }
     val alpha by animateFloatAsState(if (scrolled) 0.96f else 0f, label = "scrim")
     Box(Modifier.fillMaxSize()) {

@@ -83,6 +83,7 @@ fun WatchScreen(controller: HeartlineController, nav: Navigator) {
     val busy = conn.state in setOf(LinkState.SCANNING, LinkState.CONNECTING, LinkState.AUTHENTICATING)
 
     Screen("Watch") {
+        KeepRunningBanner(controller) { nav.push(Route.KeepRunning) }
         Panel {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -118,9 +119,15 @@ fun WatchScreen(controller: HeartlineController, nav: Navigator) {
         Gap(18)
         NavRow("Sensors lab", "Raw pulse, motion, compass, GPS and microphone, live") { nav.push(Route.Sensors) }
         NavRow("Watch settings", "All-day heart rate, stress, alerts, display") { nav.push(Route.WatchSettings) }
+        NavRow("Alarms", "Vibration alarms on the watch") { nav.push(Route.Alarms) }
+        NavRow("Weather", "Forecast for the watch's weather app") { nav.push(Route.Weather) }
+        NavRow("Calendar", "Upcoming events as watch reminders") { nav.push(Route.Reminders) }
+        NavRow("Music and find phone", "Control music, make a lost phone ring") { nav.push(Route.PhoneLink) }
         NavRow("Phone notifications", if (prefs.forwarding.enabled) "Forwarding to your wrist" else "Off") { nav.push(Route.Forwarding) }
+        NavRow("Keep running", "Battery and permissions for the background connection") { nav.push(Route.KeepRunning) }
         NavRow("Your profile", "Used for zones, VO2max and calories") { nav.push(Route.Profile) }
         NavRow("App settings", "Theme and units") { nav.push(Route.Preferences) }
+        NavRow("Health Connect", "Share heart rate, sleep and steps with other apps") { nav.push(Route.HealthConnect) }
         NavRow("Data", "Import from the PC dashboard, export, backup") { nav.push(Route.Data) }
         NavRow("Activity log", "Connection steps, syncs and errors") { nav.push(Route.Events) }
     }

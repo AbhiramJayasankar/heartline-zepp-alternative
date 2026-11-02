@@ -66,6 +66,12 @@ sealed interface Route {
     data object Profile : Route
     data object Preferences : Route
     data object Events : Route
+    data object KeepRunning : Route
+    data object Weather : Route
+    data object Alarms : Route
+    data object Reminders : Route
+    data object PhoneLink : Route
+    data object HealthConnect : Route
 }
 
 class Navigator {
@@ -87,6 +93,7 @@ fun AppRoot(controller: HeartlineController) {
     BackHandler(enabled = nav.stack.isNotEmpty()) { nav.pop() }
     val c = HL.colors
     val top = nav.stack.lastOrNull()
+    val tabScroll = remember { Tab.entries.associateWith { androidx.compose.foundation.ScrollState(0) } }
 
     Scaffold(
         containerColor = c.paper,
@@ -112,8 +119,11 @@ fun AppRoot(controller: HeartlineController) {
         },
     ) { inner ->
         Box(Modifier.fillMaxSize().background(c.paper).padding(inner).then(if (top != null) Modifier.navigationBarsPadding() else Modifier)) {
+            Column(Modifier.fillMaxSize()) {
+            dev.heartline.ui.screens.FindPhoneBanner(controller)
             AnimatedContent(targetState = top ?: tab, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "screen") { target ->
                 Column(Modifier.fillMaxSize()) {
+                    androidx.compose.runtime.CompositionLocalProvider(dev.heartline.ui.screens.LocalTabScroll provides (target as? Tab)?.let { tabScroll[it] }) {
                     when (target) {
                         Tab.TODAY -> TodayScreen(controller, onOpenHeart = { tab = Tab.HEART }, onOpenActivity = { tab = Tab.ACTIVITY })
                         Tab.HEART -> HeartScreen(controller, nav)
@@ -130,9 +140,17 @@ fun AppRoot(controller: HeartlineController) {
                         Route.Profile -> ProfileScreen(controller, nav)
                         Route.Preferences -> PreferencesScreen(controller, nav)
                         Route.Events -> EventsScreen(controller, nav)
+                        Route.KeepRunning -> dev.heartline.ui.screens.KeepRunningScreen(controller, nav)
+                        Route.Weather -> dev.heartline.ui.screens.WeatherScreen(controller, nav)
+                        Route.Alarms -> dev.heartline.ui.screens.AlarmsScreen(controller, nav)
+                        Route.Reminders -> dev.heartline.ui.screens.RemindersScreen(controller, nav)
+                        Route.PhoneLink -> dev.heartline.ui.screens.PhoneLinkScreen(controller, nav)
+                        Route.HealthConnect -> dev.heartline.ui.screens.HealthConnectScreen(controller, nav)
                         else -> Unit
                     }
+                    }
                 }
+            }
             }
         }
     }

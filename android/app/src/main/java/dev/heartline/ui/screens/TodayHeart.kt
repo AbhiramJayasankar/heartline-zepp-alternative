@@ -95,8 +95,8 @@ fun TodayScreen(controller: HeartlineController, onOpenHeart: () -> Unit, onOpen
             Text(t?.readinessLabel ?: "Readiness", style = HL.type.label, color = c.inkSoft)
             val ready = t?.readiness
             Text(
-                ready?.toString() ?: "–",
-                style = HL.type.hero,
+                ready?.toString() ?: "Not yet",
+                style = if (ready == null) HL.type.title.copy(fontSize = 44.sp) else HL.type.hero,
                 color = when {
                     ready == null -> c.inkSoft
                     ready >= 70 -> c.ok
@@ -217,8 +217,8 @@ fun HeartScreen(controller: HeartlineController, nav: Navigator) {
     ScrollPage {
         Column(Modifier.fillMaxWidth().paper().statusBarsPadding().padding(horizontal = Gutter).padding(top = 14.dp, bottom = 22.dp)) {
             Row(verticalAlignment = Alignment.Bottom) {
-                Text(hr.bpm?.toString() ?: "–", style = HL.type.hero, color = if (hr.streaming) c.ink else c.inkSoft)
-                Text(" bpm", style = HL.type.section, color = c.pulse, modifier = Modifier.padding(bottom = 16.dp))
+                Text(hr.bpm?.toString() ?: "No reading", style = if (hr.bpm == null) HL.type.title.copy(fontSize = 44.sp) else HL.type.hero, color = if (hr.streaming) c.ink else c.inkSoft)
+                if (hr.bpm != null) Text(" bpm", style = HL.type.section, color = c.pulse, modifier = Modifier.padding(bottom = 16.dp))
             }
             MutedText(
                 when {

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Heartline icon: one heartbeat crossing the round watch face, ending in the live dot. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <path android:strokeColor="#FFFFFF" android:strokeAlpha="0.55" android:strokeWidth="3.5" android:pathData="M54,27 a27,27 0 1,1 -0.01,0 z" />
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="5" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M8,60 H33 L37,55.5 L40.5,60 H45 L50,28 L56,80 L60.5,54 L64,60 H71 L74.5,56 L77.5,60 H80" />
+    <path android:fillColor="#FFFFFF" android:pathData="M80,60 m-5.5,0 a5.5,5.5 0 1,0 11,0 a5.5,5.5 0 1,0 -11,0" />
+</vector>

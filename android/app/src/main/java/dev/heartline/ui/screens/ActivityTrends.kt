@@ -156,6 +156,14 @@ fun WorkoutScreen(controller: HeartlineController, route: Route.Workout, nav: Na
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Stat("Steps", fmtInt(w.steps)); Stat("Distance", w.distanceM?.let { "%.2f".format(it / 1000.0) } ?: "–", unit = "km"); Stat("Duration", fmtHm(w.durationS / 60))
         }
+        if (w.route.size >= 2) {
+            Gap(18)
+            Panel(padding = androidx.compose.foundation.layout.PaddingValues(12.dp)) {
+                Text("Route", style = HL.type.label, color = HL.colors.inkSoft)
+                Gap(6)
+                dev.heartline.ui.components.RouteMap(w.route)
+            }
+        }
         Gap(18)
         Panel {
             Text("Heart rate through the workout", style = HL.type.label, color = HL.colors.inkSoft)

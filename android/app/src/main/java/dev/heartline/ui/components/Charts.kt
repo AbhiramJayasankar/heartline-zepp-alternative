@@ -51,7 +51,7 @@ import java.time.format.DateTimeFormatter
 private val axisStyle = TextStyle(fontFamily = TextFamily, fontSize = 10.sp)
 private val hhmm = DateTimeFormatter.ofPattern("HH:mm")
 
-private fun DrawScope.label(tm: TextMeasurer, text: String, x: Float, y: Float, color: Color, alignEnd: Boolean = false, center: Boolean = false) {
+internal fun DrawScope.label(tm: TextMeasurer, text: String, x: Float, y: Float, color: Color, alignEnd: Boolean = false, center: Boolean = false) {
     val r = tm.measure(text, axisStyle.copy(color = color))
     val dx = when {
         alignEnd -> -r.size.width.toFloat()
