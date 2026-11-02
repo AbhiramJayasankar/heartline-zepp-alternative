@@ -3,6 +3,9 @@ package dev.heartline.data
 import kotlinx.coroutines.flow.Flow
 
 class MetaRepository(private val db: HeartlineDatabase) {
+    suspend fun delete(key: String) = db.write(setOf("meta")) {
+        it.delete("meta", "key = ?", arrayOf(key)); Unit
+    }
     suspend fun set(key: String, value: String) = db.write(setOf("meta")) {
         it.upsert("meta", values("key" to key, "value" to value)); Unit
     }

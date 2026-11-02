@@ -243,6 +243,7 @@ class WatchConnection(
     suspend fun readBattery() = actions.withLock { batteryState.value = parseBattery(requireClient().read(Uuids.BATTERY)) }
     suspend fun setLiveHr(on: Boolean) = actions.withLock {
         wantHr = on
+        if (!on && link.value.state != ConnectionState.CONNECTED) { hrState.update { it.copy(streaming = false) }; return@withLock }
         val c = requireClient()
         if (on == hrState.value.streaming) return@withLock
         ping?.cancel()
@@ -300,7 +301,12 @@ class WatchConnection(
     private suspend fun rawBegin(c: GattClient, sensors: Set<RawSensor>) {
         for (cmd in rawStartCommands(rawMask(sensors))) { c.write(Uuids.RAW_CTRL, cmd); delay(400) }
     }
-    suspend fun stopRaw(): File? = actions.withLock { wantRaw = false; val file = recording?.file; stopRawLocked(requireClient()); file }
+    suspend fun stopRaw(): File? = actions.withLock {
+        wantRaw = false
+        val file = recording?.file
+        if (link.value.state == ConnectionState.CONNECTED) stopRawLocked(requireClient()) else closeRecording()
+        file
+    }
     private suspend fun stopRawLocked(c: GattClient) {
         watchdog?.cancel(); watchdog = null
         if (recording == null) return

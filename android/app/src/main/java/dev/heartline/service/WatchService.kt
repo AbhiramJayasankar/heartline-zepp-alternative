@@ -21,6 +21,8 @@ class WatchService : Service() {
         private set
     lateinit var phoneFeatures: PhoneFeatures
         private set
+    lateinit var captureRunner: CaptureRunner
+        private set
     private lateinit var calls: CallForwarder
     private lateinit var agenda: WatchAgendaSync
     inner class LocalBinder : Binder() { val service get() = this@WatchService }
@@ -29,6 +31,7 @@ class WatchService : Service() {
     override fun onCreate() {
         super.onCreate()
         watch = WatchConnection(this, scope, app.watchStore)
+        captureRunner = CaptureRunner(scope, app.db, watch, app.settings, java.io.File(filesDir, "raw"))
         app.settings.watch.value.mac?.let { CompanionLink.observe(this, it) }
         phoneFeatures = PhoneFeatures(this, scope, app.db, watch, app.settings)
         watch.onSuccessfulSync = { dev.heartline.app.HealthConnectExporter.get(this).afterSync() }

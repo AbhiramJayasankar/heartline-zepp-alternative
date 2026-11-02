@@ -65,6 +65,7 @@ class EventRepository(db: HeartlineDatabase) {
 }
 
 class MetaRepository(db: HeartlineDatabase) {
+    suspend fun delete(key: String)
     suspend fun set(key: String, value: String)
     suspend fun get(key: String): String?
     suspend fun all(): Map<String, String?>

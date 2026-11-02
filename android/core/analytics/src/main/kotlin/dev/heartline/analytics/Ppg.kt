@@ -50,6 +50,8 @@ fun readRecordingCsv(reader: Reader): Recording {
     val p = ArrayList<Double>()
     val at = ArrayList<Double>()
     val a = ArrayList<FloatArray>()
+    val gt = ArrayList<Double>(); val g = ArrayList<FloatArray>()
+    val mt = ArrayList<Double>(); val m = ArrayList<FloatArray>()
     lines.lineSequence().filter { it.isNotBlank() }.forEach { line ->
         val row = csvFields(line)
         fun field(name: String) = row.getOrElse(columns.getValue(name)) { "" }
@@ -59,9 +61,22 @@ fun readRecordingCsv(reader: Reader): Recording {
                 at.add(field("ts").toDouble())
                 a.add(floatArrayOf(field("ax").toFloat(), field("ay").toFloat(), field("az").toFloat()))
             }
+            "gyro", "mag" -> if (field("ax").isNotEmpty()) {
+                val times = if (field("kind") == "gyro") gt else mt
+                val values = if (field("kind") == "gyro") g else m
+                times.add(field("ts").toDouble())
+                values.add(floatArrayOf(field("ax").toFloat(), field("ay").toFloat(), field("az").toFloat()))
+            }
         }
     }
-    return makeRecording(pt.toDoubleArray(), p.toDoubleArray(), at.toDoubleArray(), a.toTypedArray())
+    val legacy = makeRecording(pt.toDoubleArray(), p.toDoubleArray(), at.toDoubleArray(), a.toTypedArray())
+    val start = pt.firstOrNull() ?: listOfNotNull(at.firstOrNull(), gt.firstOrNull(), mt.firstOrNull()).minOrNull() ?: 0.0
+    return legacy.copy(start = start,
+        accT = if (p.size >= 2) legacy.accT else at.map { it - start }.toDoubleArray(),
+        acc = if (p.size >= 2) legacy.acc else a.toTypedArray(),
+        accArrivalT = at.map { it - start }.toDoubleArray(),
+        gyroT = gt.map { it - start }.toDoubleArray(), gyro = g.toTypedArray(),
+        magT = mt.map { it - start }.toDoubleArray(), mag = m.toTypedArray())
 }
 
 private fun csvFields(line: String): List<String> {

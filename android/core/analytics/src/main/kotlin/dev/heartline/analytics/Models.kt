@@ -6,6 +6,13 @@ data class Recording(
     val ppg: DoubleArray,
     val accT: DoubleArray,
     val acc: Array<FloatArray>,
+    val gyroT: DoubleArray = doubleArrayOf(),
+    val gyro: Array<FloatArray> = emptyArray(),
+    val magT: DoubleArray = doubleArrayOf(),
+    val mag: Array<FloatArray> = emptyArray(),
+    // Preserve arrival clocks for capture gaps; the legacy PPG/check clock stays burst-retimed.
+    val accArrivalT: DoubleArray = accT,
+    val captureDurationS: Double? = null,
 ) {
     val durationS: Double get() = if (ppgT.size > 1) ppgT.last() else 0.0
     val fs: Double get() = if (ppgT.size > 2) median(DoubleArray(ppgT.size - 1) {
