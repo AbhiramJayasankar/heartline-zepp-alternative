@@ -258,13 +258,14 @@ class RealController(
         return if (wav.isFile) FileProvider.getUriForFile(context, "${context.packageName}.recordings", wav) else null
     }
     // ---- Task A: weather on the watch, find phone, music controls. Replace these stubs. ----
-    override val weather = MutableStateFlow(WeatherUi())
-    override val phoneLink = MutableStateFlow(PhoneLinkUi())
-    override suspend fun searchPlaces(query: String): List<PlaceUi> = emptyList()
-    override fun setWeather(enabled: Boolean, place: PlaceUi?) {}
-    override fun refreshWeather() {}
-    override fun setMusicControl(enabled: Boolean) {}
-    override fun stopFindPhone() {}
+    private val taskA = TaskAController(context, scope, db, service) { ensureService() }
+    override val weather = taskA.weather
+    override val phoneLink = taskA.phoneLink
+    override suspend fun searchPlaces(query: String): List<PlaceUi> = taskA.searchPlaces(query)
+    override fun setWeather(enabled: Boolean, place: PlaceUi?) = taskA.setWeather(enabled, place)
+    override fun refreshWeather() = taskA.refreshWeather()
+    override fun setMusicControl(enabled: Boolean) = taskA.setMusicControl(enabled)
+    override fun stopFindPhone() = taskA.stopFindPhone()
     // ---- end Task A ----
 
 

@@ -46,6 +46,8 @@ class WatchConnection(
     val rawUpdates = rawEvents.asSharedFlow()
     private val gpsState = MutableStateFlow<GpsState?>(null)
     val gps = gpsState.asStateFlow()
+    private val watchEvents = MutableSharedFlow<ByteArray>(extraBufferCapacity = 64)
+    val deviceEvents = watchEvents.asSharedFlow()
     private val actions = Mutex()
     private val syncLock = Mutex()
     private val replies = mutableMapOf<UUID, Channel<GattNotification>>()
@@ -177,7 +179,10 @@ class WatchConnection(
                 if (bpm > 0) { val ts = System.currentTimeMillis() / 1000.0; persistence.heartRate(ts, bpm); hrState.update { it.copy(bpm = bpm, ts = ts.toLong()) } }
             }
             Uuids.REALTIME_STEPS -> parseRealtimeSteps(n.value)?.let { stepsState.value = it }
-            Uuids.DEVICE_EVENT -> log("info", "Watch event: ${deviceEventName(n.value).replace('_', ' ')}")
+            Uuids.DEVICE_EVENT -> {
+                log("info", "Watch event: ${deviceEventName(n.value).replace('_', ' ')}")
+                watchEvents.emit(n.value.copyOf())
+            }
             Uuids.RAW_DATA -> {
                 val r = recording ?: return
                 val packet = parseRaw(n.value)
@@ -287,9 +292,18 @@ class WatchConnection(
         log("info", "Sent notification: $title")
     }
     suspend fun endCall() { callEnd?.cancel(); callEnd = null; actions.withLock { chunks(requireClient(), CALL_END) } }
-    private suspend fun chunks(c: GattClient, payload: ByteArray) {
+    suspend fun sendWeather(weather: WatchWeather, fahrenheit: Boolean = false) = actions.withLock {
+        val c = requireClient()
+        for (packet in weatherPackets(weather, fahrenheit)) chunks(c, packet.payload, packet.type)
+    }
+    suspend fun sendMusic(music: WatchMusic, volumePercent: Int) = actions.withLock {
+        val c = requireClient()
+        chunks(c, musicPayload(music), 3); chunks(c, musicVolumePayload(volumePercent), 3)
+    }
+    suspend fun acknowledgeFindPhone() = actions.withLock { requireClient().write(Uuids.CONFIG, FIND_PHONE_ACK) }
+    private suspend fun chunks(c: GattClient, payload: ByteArray, type: Int = 0) {
         // watch.py:notify: keep MTU 23 here even after negotiating 247 for raw data.
-        for (chunk in chunkedWrites(payload, mtu = 23)) c.write(Uuids.CHUNKED, chunk)
+        for (chunk in chunkedWrites(payload, mtu = 23, type = type)) c.write(Uuids.CHUNKED, chunk)
     }
     suspend fun syncTime() = actions.withLock {
         val c = requireClient(); c.write(Uuids.CURRENT_TIME, currentTimeBytes(ZonedDateTime.now()), true)
