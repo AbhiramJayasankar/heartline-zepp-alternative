@@ -127,7 +127,8 @@ class RealController(
     override fun activityDay(date: LocalDate): Flow<ActivityDayUi> {
         val from = date.atStartOfDay(zone).toEpochSecond().toDouble()
         val to = date.plusDays(1).atStartOfDay(zone).toEpochSecond().toDouble() - 1
-        return combine(db.activity.observeRange(from, to), db.health.observeWorkouts(from, to), today) { rows, workouts, _ ->
+        return combine(db.activity.observeRange(from, to), db.health.observeWorkouts(from, to), today,
+            db.health.observeRawFetches(-Double.MAX_VALUE).map { withContext(Dispatchers.Default) { storedWorkoutRoutes(it) } }) { rows, workouts, _, routes ->
             val minutes = mappedMinutes(rows, db.activity.prevKind(from))
             val hr = minutes.mapNotNull { it.hr }
             val sleepFrom = from - 86400
@@ -136,7 +137,9 @@ class RealController(
             ActivityDayUi(date, minutes, minutes.sumOf { it.steps }, minutes.count { it.steps > 0 || it.state == MinuteState.ACTIVE },
                 minutes.count { it.state in setOf(MinuteState.SLEEP_DEEP, MinuteState.SLEEP_LIGHT, MinuteState.SLEEP_REM) },
                 minutes.count { it.state !in setOf(MinuteState.NOT_WORN, MinuteState.CHARGING) }, hr.minOrNull(), hr.takeIf { it.isNotEmpty() }?.average()?.toInt(), hr.maxOrNull(),
-                daily.days.lastOrNull { it.date == date.toString() }?.sleepUi(), workouts.map { it.ui() })
+                daily.days.lastOrNull { it.date == date.toString() }?.sleepUi(), workouts.map { workout ->
+                    workout.ui().copy(route = routes[workout.start].orEmpty())
+                })
         }
     }
     override suspend fun checkDetail(id: String): SessionUi? = withContext(Dispatchers.IO) {
@@ -273,11 +276,12 @@ class RealController(
 
 
     // ---- Task B: alarms and calendar reminders. Replace these stubs. ----
-    override val alarms = MutableStateFlow<List<AlarmUi>>(emptyList())
-    override val reminders = MutableStateFlow(ReminderSyncUi())
-    override fun saveAlarm(alarm: AlarmUi) {}
-    override fun deleteAlarm(slot: Int) {}
-    override fun setReminderSync(enabled: Boolean, calendars: Set<Long>) {}
+    private val agenda = AgendaController(context, scope, db)
+    override val alarms = agenda.alarms
+    override val reminders = agenda.reminders
+    override fun saveAlarm(alarm: AlarmUi) = agenda.saveAlarm(alarm)
+    override fun deleteAlarm(slot: Int) = agenda.deleteAlarm(slot)
+    override fun setReminderSync(enabled: Boolean, calendars: Set<Long>) = agenda.setReminderSync(enabled, calendars)
     // ---- end Task B ----
 
 

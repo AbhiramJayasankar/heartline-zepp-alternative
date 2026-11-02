@@ -340,6 +340,32 @@ class WatchConnection(
         persistence.settingWritten(key, valid)
         log("info", "Set $key to $valid")
     }
+    suspend fun writeAlarm(command: ByteArray) = actions.withLock {
+        require(command.size == 5 && command[0] == 2.toByte())
+        val c = requireClient()
+        route(setOf(Uuids.CONFIG)) { channel ->
+            c.enableNotification(Uuids.CONFIG)
+            try {
+                c.write(Uuids.CONFIG, command)
+                withTimeout(3000) {
+                    while (true) {
+                        val answer = reply(c, channel, 3000).value
+                        if (answer.size < 2 || answer[0] != 0x10.toByte() || answer[1] != 2.toByte()) continue
+                        check(alarmWriteAccepted(answer)) { "Watch rejected alarm slot ${command[1].toInt() and 15}" }
+                        break
+                    }
+                }
+            } finally {
+                withContext(NonCancellable) { if (!c.disconnected.isCompleted) c.enableNotification(Uuids.CONFIG, false) }
+            }
+        }
+    }
+    suspend fun writeCalendarReminder(payload: ByteArray) = actions.withLock {
+        require(payload.size >= 20 && payload[0] == 0x0b.toByte())
+        val c = requireClient()
+        // HuamiSupport.sendCalendarEventsAsReminders/writeToChunkedOld: type 2 has no notification extra header.
+        for (chunk in chunkedWrites(payload, mtu = 23, type = 2)) c.write(Uuids.CHUNKED, chunk)
+    }
     private suspend fun fetch(type: FetchType, since: Long): HistoryFetch {
         val c = requireClient()
         return route(setOf(Uuids.ACT_CTRL, Uuids.ACT_DATA)) { channel ->

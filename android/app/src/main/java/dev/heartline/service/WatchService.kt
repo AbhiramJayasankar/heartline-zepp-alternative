@@ -22,6 +22,7 @@ class WatchService : Service() {
     lateinit var phoneFeatures: PhoneFeatures
         private set
     private lateinit var calls: CallForwarder
+    private lateinit var agenda: WatchAgendaSync
     inner class LocalBinder : Binder() { val service get() = this@WatchService }
     private val binder = LocalBinder()
 
@@ -30,6 +31,7 @@ class WatchService : Service() {
         watch = WatchConnection(this, scope, app.watchStore)
         phoneFeatures = PhoneFeatures(this, scope, app.db, watch, app.settings)
         calls = CallForwarder(this, scope, app.settings, watch)
+        agenda = WatchAgendaSync(this, scope, app.db, watch)
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Watch connection", NotificationManager.IMPORTANCE_LOW).apply {
             setSound(null, null); enableVibration(false); setShowBadge(false)
@@ -82,6 +84,7 @@ class WatchService : Service() {
     }
     fun refreshCalls() { scope.launch { calls.refresh() } }
     override fun onDestroy() {
+        agenda.close()
         calls.close()
         // Keep the dispatcher alive until ATT and recording resources have been closed.
         scope.launch { try { phoneFeatures.close(); watch.disconnect() } finally { scope.cancel() } }
