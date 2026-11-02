@@ -257,6 +257,45 @@ class RealController(
         val wav = File(csv.parentFile, csv.nameWithoutExtension + ".wav")
         return if (wav.isFile) FileProvider.getUriForFile(context, "${context.packageName}.recordings", wav) else null
     }
+    // ---- Task A: weather on the watch, find phone, music controls. Replace these stubs. ----
+    override val weather = MutableStateFlow(WeatherUi())
+    override val phoneLink = MutableStateFlow(PhoneLinkUi())
+    override suspend fun searchPlaces(query: String): List<PlaceUi> = emptyList()
+    override fun setWeather(enabled: Boolean, place: PlaceUi?) {}
+    override fun refreshWeather() {}
+    override fun setMusicControl(enabled: Boolean) {}
+    override fun stopFindPhone() {}
+    // ---- end Task A ----
+
+
+
+
+
+    // ---- Task B: alarms and calendar reminders. Replace these stubs. ----
+    override val alarms = MutableStateFlow<List<AlarmUi>>(emptyList())
+    override val reminders = MutableStateFlow(ReminderSyncUi())
+    override fun saveAlarm(alarm: AlarmUi) {}
+    override fun deleteAlarm(slot: Int) {}
+    override fun setReminderSync(enabled: Boolean, calendars: Set<Long>) {}
+    // ---- end Task B ----
+
+
+
+
+
+    // ---- Task C: Health Connect and background state. Replace these stubs. ----
+    override val healthConnect = MutableStateFlow(HealthConnectUi())
+    override val background = MutableStateFlow(BackgroundUi())
+    override val healthConnectPermissions: Set<String> = emptySet()
+    override fun setHealthConnect(enabled: Boolean) {}
+    override fun exportHealthConnectNow() {}
+    override fun refreshBackground() {}
+    // ---- end Task C ----
+
+
+
+
+
     fun forwardNotification(title: String, body: String, kind: NotificationKind, app: String) {
         val s = service.value ?: return
         if (s.watch.connection.value.state != ConnectionState.CONNECTED) return

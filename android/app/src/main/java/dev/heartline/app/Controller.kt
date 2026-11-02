@@ -50,7 +50,58 @@ interface HeartlineController {
     fun importPcData(uri: Uri)
     fun exportData(uri: Uri)
     fun recordingAudio(file: String): Uri?
+
+    // Weather on the watch, find phone, music controls
+    val weather: StateFlow<WeatherUi>
+    val phoneLink: StateFlow<PhoneLinkUi>
+    /** Free-text place search (Open-Meteo geocoding); empty query returns nothing. */
+    suspend fun searchPlaces(query: String): List<PlaceUi>
+    fun setWeather(enabled: Boolean, place: PlaceUi?)
+    fun refreshWeather()
+    fun setMusicControl(enabled: Boolean)
+    fun stopFindPhone()
+
+    // Alarms and calendar reminders on the watch
+    val alarms: StateFlow<List<AlarmUi>>
+    val reminders: StateFlow<ReminderSyncUi>
+    fun saveAlarm(alarm: AlarmUi)
+    fun deleteAlarm(slot: Int)
+    /** Call after READ_CALENDAR is granted (or to turn sync off); [calendars] are CalendarContract ids. */
+    fun setReminderSync(enabled: Boolean, calendars: Set<Long>)
+
+    // Health Connect and staying alive in the background
+    val healthConnect: StateFlow<HealthConnectUi>
+    val background: StateFlow<BackgroundUi>
+    /** Health Connect permission strings the UI must request with PermissionController's contract. */
+    val healthConnectPermissions: Set<String>
+    fun setHealthConnect(enabled: Boolean)
+    fun exportHealthConnectNow()
+    /** Re-reads battery-optimisation, notification-access and permission state (call on resume). */
+    fun refreshBackground()
 }
+
+data class PlaceUi(val name: String, val region: String?, val lat: Double, val lon: Double)
+data class WeatherUi(
+    val enabled: Boolean = false, val place: PlaceUi? = null, val tempC: Int? = null, val condition: String? = null,
+    val highC: Int? = null, val lowC: Int? = null, val updatedAt: Long? = null, val sentToWatchAt: Long? = null, val error: String? = null,
+)
+data class PhoneLinkUi(val findPhoneRinging: Boolean = false, val musicEnabled: Boolean = false, val musicAccess: Boolean = false, val nowPlaying: String? = null)
+
+/** The watch has a fixed number of alarm slots; [slot] is 0-based. */
+data class AlarmUi(val slot: Int, val enabled: Boolean, val hour: Int, val minute: Int, val days: Set<java.time.DayOfWeek>, val smart: Boolean = false)
+data class CalendarUi(val id: Long, val name: String, val account: String?)
+data class ReminderUi(val title: String, val start: Long)
+data class ReminderSyncUi(
+    val enabled: Boolean = false, val permission: Boolean = false, val calendars: List<CalendarUi> = emptyList(),
+    val selected: Set<Long> = emptySet(), val upcoming: List<ReminderUi> = emptyList(), val lastSync: Long? = null, val maxSlots: Int = 10,
+)
+
+enum class HealthConnectStatus { UNAVAILABLE, NEEDS_INSTALL, NEEDS_PERMISSION, READY }
+data class HealthConnectUi(val status: HealthConnectStatus = HealthConnectStatus.UNAVAILABLE, val enabled: Boolean = false, val lastExport: Long? = null, val lastResult: String? = null)
+data class BackgroundUi(
+    val batteryUnrestricted: Boolean = false, val notificationAccess: Boolean = false, val miui: Boolean = false,
+    val bluetoothOn: Boolean = true, val postNotifications: Boolean = true,
+)
 
 enum class LinkState { DISCONNECTED, SCANNING, CONNECTING, AUTHENTICATING, CONNECTED, ERROR }
 
@@ -91,7 +142,8 @@ data class TrendsUi(
 
 enum class MinuteState { NOT_WORN, SLEEP_LIGHT, SLEEP_DEEP, SLEEP_REM, ACTIVE, IDLE, CHARGING, UNKNOWN }
 data class MinuteUi(val ts: Long, val state: MinuteState, val steps: Int, val hr: Int?)
-data class WorkoutUi(val start: Long, val durationS: Int, val type: String, val avgHr: Int?, val maxHr: Int?, val calories: Int?, val steps: Int?, val distanceM: Int?, val track: List<HrPoint>)
+data class RoutePoint(val t: Int, val lat: Double, val lon: Double, val altM: Double? = null)
+data class WorkoutUi(val start: Long, val durationS: Int, val type: String, val avgHr: Int?, val maxHr: Int?, val calories: Int?, val steps: Int?, val distanceM: Int?, val track: List<HrPoint>, val route: List<RoutePoint> = emptyList())
 data class ActivityDayUi(
     val date: LocalDate, val minutes: List<MinuteUi>, val steps: Int, val activeMinutes: Int, val sleepMinutes: Int,
     val wornMinutes: Int, val hrMin: Int?, val hrAvg: Int?, val hrMax: Int?, val sleep: SleepNightUi?, val workouts: List<WorkoutUi>,

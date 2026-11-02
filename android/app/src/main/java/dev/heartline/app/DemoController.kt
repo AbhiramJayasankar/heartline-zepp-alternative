@@ -157,6 +157,35 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override fun exportData(uri: Uri) = addEvent("Exported data")
     override fun recordingAudio(file: String): Uri? = null
 
+    private val bengaluru = PlaceUi("Bengaluru", "Karnataka, India", 12.97, 77.59)
+    override val weather = MutableStateFlow(WeatherUi(true, bengaluru, 24, "Partly cloudy", 29, 19, now() - 1200, now() - 1180))
+    override val phoneLink = MutableStateFlow(PhoneLinkUi(musicEnabled = true, musicAccess = true, nowPlaying = "Kesariya, Arijit Singh"))
+    override suspend fun searchPlaces(query: String): List<PlaceUi> =
+        if (query.isBlank()) emptyList() else listOf(bengaluru, PlaceUi("Bengaluru Rural", "Karnataka, India", 13.28, 77.53)).filter { it.name.contains(query, true) }
+    override fun setWeather(enabled: Boolean, place: PlaceUi?) = weather.update { it.copy(enabled = enabled, place = place ?: it.place) }
+    override fun refreshWeather() = weather.update { it.copy(updatedAt = now(), sentToWatchAt = now()) }
+    override fun setMusicControl(enabled: Boolean) = phoneLink.update { it.copy(musicEnabled = enabled) }
+    override fun stopFindPhone() = phoneLink.update { it.copy(findPhoneRinging = false) }
+
+    override val alarms = MutableStateFlow(listOf(
+        AlarmUi(0, true, 6, 30, setOf(java.time.DayOfWeek.MONDAY, java.time.DayOfWeek.TUESDAY, java.time.DayOfWeek.WEDNESDAY, java.time.DayOfWeek.THURSDAY, java.time.DayOfWeek.FRIDAY), smart = true),
+        AlarmUi(1, false, 8, 0, setOf(java.time.DayOfWeek.SATURDAY, java.time.DayOfWeek.SUNDAY)),
+    ))
+    override val reminders = MutableStateFlow(ReminderSyncUi(
+        enabled = true, permission = true, calendars = listOf(CalendarUi(1, "Personal", "you@example.com"), CalendarUi(2, "Holidays in India", null)),
+        selected = setOf(1L), upcoming = listOf(ReminderUi("Dentist", now() + 26 * 3600), ReminderUi("Team sync", now() + 50 * 3600)), lastSync = now() - 600,
+    ))
+    override fun saveAlarm(alarm: AlarmUi) = alarms.update { list -> (list.filter { it.slot != alarm.slot } + alarm).sortedBy { it.slot } }
+    override fun deleteAlarm(slot: Int) = alarms.update { list -> list.filter { it.slot != slot } }
+    override fun setReminderSync(enabled: Boolean, calendars: Set<Long>) = reminders.update { it.copy(enabled = enabled, selected = calendars) }
+
+    override val healthConnect = MutableStateFlow(HealthConnectUi(HealthConnectStatus.READY, true, now() - 3600, "Wrote 1,212 heart rate samples, 3 nights of sleep and 7 days of steps"))
+    override val background = MutableStateFlow(BackgroundUi(batteryUnrestricted = false, notificationAccess = true, miui = true))
+    override val healthConnectPermissions: Set<String> = emptySet()
+    override fun setHealthConnect(enabled: Boolean) = healthConnect.update { it.copy(enabled = enabled) }
+    override fun exportHealthConnectNow() = healthConnect.update { it.copy(lastExport = now()) }
+    override fun refreshBackground() {}
+
     private fun addEvent(msg: String) = events.update { listOf(EventUi(now(), false, false, msg)) + it }
 
     // ---------- synthetic content ----------
@@ -244,7 +273,8 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
         return ActivityDayUi(
             date, mins, mins.sumOf { it.steps }, mins.count { it.state == MinuteState.ACTIVE }, 420, 1395, 51, 71, 162,
             SleepNightUi(start, start + 7 * 3600, 84, 248, 92, 18),
-            listOf(WorkoutUi(start + 18 * 3600, 2700, "Strength training", 118, 162, 312, 980, null, track)),
+            listOf(WorkoutUi(start + 18 * 3600, 2700, "Outdoor run", 148, 172, 412, 5980, 5210, track,
+                (0..180).map { i -> val a = i / 180.0 * 2 * Math.PI; RoutePoint(i * 15, 12.9716 + 0.006 * Math.sin(a) + 0.0015 * Math.sin(3 * a), 77.5946 + 0.009 * Math.cos(a), 900.0 + 6 * Math.sin(2 * a)) })),
         )
     }
 
