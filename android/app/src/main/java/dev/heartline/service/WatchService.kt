@@ -19,6 +19,8 @@ class WatchService : Service() {
     private val app get() = application as HeartlineApp
     lateinit var watch: WatchConnection
         private set
+    lateinit var phoneFeatures: PhoneFeatures
+        private set
     private lateinit var calls: CallForwarder
     inner class LocalBinder : Binder() { val service get() = this@WatchService }
     private val binder = LocalBinder()
@@ -26,6 +28,7 @@ class WatchService : Service() {
     override fun onCreate() {
         super.onCreate()
         watch = WatchConnection(this, scope, app.watchStore)
+        phoneFeatures = PhoneFeatures(this, scope, app.db, watch, app.settings)
         calls = CallForwarder(this, scope, app.settings, watch)
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Watch connection", NotificationManager.IMPORTANCE_LOW).apply {
@@ -59,6 +62,7 @@ class WatchService : Service() {
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(ID, notification("Starting"), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+        if (intent?.action == FindPhone.STOP) { phoneFeatures.stopFindPhone(); return START_STICKY }
         if (intent?.action != IDLE && KeyStore(this).load() != null && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
             app.settings.watch.value.mac?.let { mac -> scope.launch { watch.connect(mac) } }
         }
@@ -80,7 +84,7 @@ class WatchService : Service() {
     override fun onDestroy() {
         calls.close()
         // Keep the dispatcher alive until ATT and recording resources have been closed.
-        scope.launch { try { watch.disconnect() } finally { scope.cancel() } }
+        scope.launch { try { phoneFeatures.close(); watch.disconnect() } finally { scope.cancel() } }
         super.onDestroy()
     }
     companion object {
