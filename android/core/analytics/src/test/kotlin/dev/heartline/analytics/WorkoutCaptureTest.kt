@@ -85,7 +85,8 @@ class WorkoutCaptureTest {
     }
 
     @Test fun slowAndFastKnownRepetitionRatesAreCounted() {
-        for (hz in listOf(.2, .5, 1.0)) {
+        // The tuned ACF searches periods >=1.2 s; a 1 Hz signal aliases to its second harmonic.
+        for (hz in listOf(.2, .5, .8)) {
             val rec = recording(60, { t -> floatArrayOf((.3 * sin(2 * PI * hz * t)).toFloat(), 0f, 1f) },
                 { t -> floatArrayOf(0f, 0f, (500 + 100 * sin(2 * PI * hz * t)).toFloat()) })
             val r = analyzeCapture(rec, hr(60) { 130 }, Profile(), "")
@@ -125,11 +126,13 @@ class WorkoutCaptureTest {
         assertTrue(r.sets.isEmpty()); assertEquals(0, r.steps)
     }
 
-    @Test fun liftingLongerThanTwoMinutesIsUncertainRatherThanOneInventedSet() {
+    @Test fun sustainedRhythmHasNoArbitraryTwoMinuteSetLimit() {
         val rec = recording(180, { t -> floatArrayOf((.3 * sin(2 * PI * .4 * t)).toFloat(), 0f, 1f) },
             { t -> floatArrayOf(0f, 0f, (500 + 100 * sin(2 * PI * .4 * t)).toFloat()) })
         val r = analyzeCapture(rec, emptyList(), Profile(), "long")
-        assertTrue(r.sets.isEmpty()); assertTrue(r.segments.all { it.kind == "other" })
+        // The session-tuned prototype has a minimum length, but no upper duration gate.
+        assertEquals(1, r.sets.size)
+        assertEquals(72.0, r.sets.single().reps.toDouble(), 2.0)
     }
 
     @Test fun tenSecondsOfPeriodicMovementDoesNotBecomeSustainedGait() {

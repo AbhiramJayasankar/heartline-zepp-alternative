@@ -42,23 +42,19 @@ fun analyzeCapture(rec: Recording, hr: List<Pair<Double, Int>>, profile: Profile
     }
     val motion = captureMotion(rec, duration)
     val segments = motion.segments.map { it.copy(avgHr = avg(it.start, it.end)) }
-    val sets = segments.filter { it.kind == "lifting" }.map { s ->
-        val peaks = motion.repTimes.filter { it >= s.start && it < s.end }
-        CaptureSet(s.start, s.end, peaks.size, s.avgHr, hrs(s.start, s.end).maxOrNull(),
-            if (peaks.size > 1) (peaks.last() - peaks.first()) / (peaks.size - 1) else null)
+    val sets = motion.sets.map { s ->
+        CaptureSet(s.start, s.end, s.reps, avg(s.start, s.end), hrs(s.start, s.end).maxOrNull(), s.tempoS)
     }
-    val rests = sets.zipWithNext().flatMap { (a, b) ->
-        segments.filter { it.kind == "rest" && it.start >= a.end && it.end <= b.start }.map { rest ->
-            val first = near(rest.start); val last = near(rest.end - 1)
-            val at60 = if (rest.end - rest.start >= 60) near(rest.start + 60) else null
-            CaptureRest(rest.start, rest.end, first, last, if (first != null && at60 != null) first - at60 else null)
-        }
+    val rests = sets.zipWithNext().mapNotNull { (a, b) ->
+        if (b.start <= a.end) return@mapNotNull null
+        val first = near(a.end); val last = near(b.start - 1)
+        val at60 = if (b.start - a.end >= 60) near(a.end + 60) else null
+        CaptureRest(a.end, b.start, first, last, if (first != null && at60 != null) first - at60 else null)
     }
     val calories = captureCalories(valid, profile)
     val notes = mutableListOf("Heart rate comes from the watch's live HR_MEASURE notifications; moving PPG is not used for heart rate.")
     if (valid.size < duration * .9) notes += "Live heart rate covers ${if (n == 0) 0 else valid.size * 100 / n}% of the capture; missing intervals are excluded from load and calories."
-    if (motion.missingS > 1) notes += "Motion data is missing for approximately ${motion.missingS.roundToInt()} seconds; gaps are not classified as rest."
-    if (rec.gyro.isEmpty()) notes += "No gyroscope samples were available; lifting detection is less certain."
+    if (motion.missingS > 1) notes += "Motion data is missing for approximately ${motion.missingS.roundToInt()} seconds; missing motion is labelled other."
     if (rec.mag.isNotEmpty()) notes += "Compass samples were recorded; uncalibrated magnetic values are not used to identify exercises."
     notes += "Movement labels, repetitions and steps are wrist-motion estimates; the watch does not announce workout start or stop."
     if (calories != null) notes += "Calories are estimated from heart rate, age, sex and weight; resistance exercise and recovery can be poorly represented."

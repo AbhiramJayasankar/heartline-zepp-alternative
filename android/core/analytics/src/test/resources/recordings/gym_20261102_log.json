@@ -1,0 +1,282 @@
+[
+  {
+    "row": 39,
+    "exercise": "Assisted pull-up (machine)",
+    "type": "bodyweight",
+    "set": 1,
+    "start": null,
+    "end": "2026-11-02T22:13:41+05:30",
+    "reps": 4.0,
+    "load_kg": 40.0
+  },
+  {
+    "row": 40,
+    "exercise": "Assisted pull-up (machine)",
+    "type": "bodyweight",
+    "set": 2,
+    "start": "2026-11-02T22:15:00+05:30",
+    "end": "2026-11-02T22:15:48+05:30",
+    "reps": 8.0,
+    "load_kg": 60.0
+  },
+  {
+    "row": 41,
+    "exercise": "Assisted pull-up (machine)",
+    "type": "bodyweight",
+    "set": 3,
+    "start": "2026-11-02T22:17:25+05:30",
+    "end": "2026-11-02T22:18:18+05:30",
+    "reps": 8.0,
+    "load_kg": 60.0
+  },
+  {
+    "row": 42,
+    "exercise": "Assisted pull-up (machine)",
+    "type": "bodyweight",
+    "set": 4,
+    "start": "2026-11-02T22:20:05+05:30",
+    "end": "2026-11-02T22:20:57+05:30",
+    "reps": 8.0,
+    "load_kg": 60.0
+  },
+  {
+    "row": 43,
+    "exercise": "Assisted pull-up (machine)",
+    "type": "bodyweight",
+    "set": 5,
+    "start": "2026-11-02T22:24:03+05:30",
+    "end": "2026-11-02T22:24:56+05:30",
+    "reps": 8.0,
+    "load_kg": 60.0
+  },
+  {
+    "row": 44,
+    "exercise": "Lat pulldown",
+    "type": "strength",
+    "set": 0,
+    "start": "2026-11-02T22:26:39+05:30",
+    "end": "2026-11-02T22:27:50+05:30",
+    "reps": 12.0,
+    "load_kg": 19.5
+  },
+  {
+    "row": 45,
+    "exercise": "Lat pulldown",
+    "type": "strength",
+    "set": 1,
+    "start": "2026-11-02T22:29:30+05:30",
+    "end": "2026-11-02T22:30:17+05:30",
+    "reps": 7.0,
+    "load_kg": 39.0
+  },
+  {
+    "row": 46,
+    "exercise": "Lat pulldown",
+    "type": "strength",
+    "set": 2,
+    "start": "2026-11-02T22:32:27+05:30",
+    "end": "2026-11-02T22:33:36+05:30",
+    "reps": 10.0,
+    "load_kg": 32.5
+  },
+  {
+    "row": 47,
+    "exercise": "Lat pulldown",
+    "type": "strength",
+    "set": 3,
+    "start": "2026-11-02T22:36:11+05:30",
+    "end": "2026-11-02T22:37:27+05:30",
+    "reps": 12.0,
+    "load_kg": 32.5
+  },
+  {
+    "row": 48,
+    "exercise": "Lat pulldown",
+    "type": "strength",
+    "set": 4,
+    "start": "2026-11-02T22:40:14+05:30",
+    "end": "2026-11-02T22:41:20+05:30",
+    "reps": 8.5,
+    "load_kg": 39.0
+  },
+  {
+    "row": 49,
+    "exercise": "Preacher curl (machine)",
+    "type": "strength",
+    "set": 1,
+    "start": "2026-11-02T22:44:05+05:30",
+    "end": "2026-11-02T22:44:57+05:30",
+    "reps": 8.0,
+    "load_kg": 15.0
+  },
+  {
+    "row": 50,
+    "exercise": "Preacher curl (machine)",
+    "type": "strength",
+    "set": 2,
+    "start": "2026-11-02T22:46:32+05:30",
+    "end": "2026-11-02T22:47:23+05:30",
+    "reps": 10.0,
+    "load_kg": 15.0
+  },
+  {
+    "row": 51,
+    "exercise": "Preacher curl (machine)",
+    "type": "strength",
+    "set": 3,
+    "start": "2026-11-02T22:50:24+05:30",
+    "end": "2026-11-02T22:51:24+05:30",
+    "reps": 12.0,
+    "load_kg": 20.0
+  },
+  {
+    "row": 52,
+    "exercise": "Preacher curl (machine)",
+    "type": "strength",
+    "set": 4,
+    "start": "2026-11-02T22:54:34+05:30",
+    "end": "2026-11-02T22:55:23+05:30",
+    "reps": 6.0,
+    "load_kg": 25.0
+  },
+  {
+    "row": 53,
+    "exercise": "Rear delt machine",
+    "type": "strength",
+    "set": 0,
+    "start": "2026-11-02T23:01:29+05:30",
+    "end": "2026-11-02T23:02:36+05:30",
+    "reps": 12.0,
+    "load_kg": 10.0
+  },
+  {
+    "row": 54,
+    "exercise": "Rear delt machine",
+    "type": "strength",
+    "set": 1,
+    "start": "2026-11-02T23:06:51+05:30",
+    "end": "2026-11-02T23:08:01+05:30",
+    "reps": 12.0,
+    "load_kg": 20.0
+  },
+  {
+    "row": 55,
+    "exercise": "Rear delt machine",
+    "type": "strength",
+    "set": 2,
+    "start": "2026-11-02T23:10:01+05:30",
+    "end": "2026-11-02T23:11:00+05:30",
+    "reps": 12.0,
+    "load_kg": 25.0
+  },
+  {
+    "row": 56,
+    "exercise": "Rear delt machine",
+    "type": "strength",
+    "set": 3,
+    "start": "2026-11-02T23:13:18+05:30",
+    "end": "2026-11-02T23:14:18+05:30",
+    "reps": 9.75,
+    "load_kg": 30.0
+  },
+  {
+    "row": 57,
+    "exercise": "Leg raises (dip bar / hanging)",
+    "type": "bodyweight",
+    "set": 1,
+    "start": "2026-11-02T23:16:10+05:30",
+    "end": "2026-11-02T23:16:48+05:30",
+    "reps": 8.0,
+    "load_kg": null
+  },
+  {
+    "row": 58,
+    "exercise": "Leg raises (dip bar / hanging)",
+    "type": "bodyweight",
+    "set": 2,
+    "start": "2026-11-02T23:18:33+05:30",
+    "end": "2026-11-02T23:19:19+05:30",
+    "reps": 8.0,
+    "load_kg": null
+  },
+  {
+    "row": 59,
+    "exercise": "Leg raises (dip bar / hanging)",
+    "type": "bodyweight",
+    "set": 3,
+    "start": "2026-11-02T23:20:56+05:30",
+    "end": "2026-11-02T23:21:30+05:30",
+    "reps": 8.0,
+    "load_kg": null
+  },
+  {
+    "row": 60,
+    "exercise": "Treadmill (incline walk)",
+    "type": "cardio",
+    "set": 1,
+    "start": "2026-11-02T23:22:37+05:30",
+    "end": "2026-11-02T23:32:40+05:30",
+    "reps": null,
+    "load_kg": null
+  },
+  {
+    "row": 61,
+    "exercise": "Forearm curl (machine)",
+    "type": "strength",
+    "set": 1,
+    "start": "2026-11-02T23:35:01+05:30",
+    "end": "2026-11-02T23:36:05+05:30",
+    "reps": 12.0,
+    "load_kg": 20.0
+  },
+  {
+    "row": 62,
+    "exercise": "Forearm curl (machine)",
+    "type": "strength",
+    "set": 2,
+    "start": "2026-11-02T23:37:49+05:30",
+    "end": "2026-11-02T23:38:32+05:30",
+    "reps": 12.0,
+    "load_kg": 20.0
+  },
+  {
+    "row": 63,
+    "exercise": "Forearm curl (machine)",
+    "type": "strength",
+    "set": 3,
+    "start": "2026-11-02T23:40:58+05:30",
+    "end": "2026-11-02T23:41:43+05:30",
+    "reps": 10.0,
+    "load_kg": 20.0
+  },
+  {
+    "row": 64,
+    "exercise": "Forearm curl, reverse (machine)",
+    "type": "strength",
+    "set": 1,
+    "start": "2026-11-02T23:44:05+05:30",
+    "end": "2026-11-02T23:44:55+05:30",
+    "reps": 9.0,
+    "load_kg": 10.0
+  },
+  {
+    "row": 65,
+    "exercise": "Forearm curl, reverse (machine)",
+    "type": "strength",
+    "set": 2,
+    "start": "2026-11-02T23:46:42+05:30",
+    "end": "2026-11-02T23:47:15+05:30",
+    "reps": 6.0,
+    "load_kg": 10.0
+  },
+  {
+    "row": 66,
+    "exercise": "Forearm curl, reverse (machine)",
+    "type": "strength",
+    "set": 3,
+    "start": "2026-11-02T23:49:44+05:30",
+    "end": "2026-11-02T23:50:31+05:30",
+    "reps": 8.0,
+    "load_kg": 5.0
+  }
+]
