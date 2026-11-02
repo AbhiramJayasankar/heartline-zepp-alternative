@@ -89,4 +89,12 @@ class MappingTest {
         assertEquals("not a date", chargedLabel("not a date"))
         assertEquals(null, chargedLabel(null))
     }
+
+    @Test fun exportLabelsSingularise() {
+        assertEquals("night of sleep", singular("nights of sleep"))
+        assertEquals("oxygen reading", singular("oxygen readings"))
+        assertEquals("HRV measurement", singular("HRV measurements"))
+        assertEquals("daily resting heart rate", singular("daily resting heart rates"))
+        assertEquals("skin temperature bucket", singular("skin temperature buckets"))
+    }
 }

@@ -147,7 +147,8 @@ internal class HealthConnectExporter(private val context: Application, private v
             }
             val written = counts.filterValues { it > 0 }
             val result = if (written.isEmpty()) "Health Connect is up to date." else "Wrote " + written.entries.joinToString(", ") { (label, count) ->
-                "${java.text.NumberFormat.getIntegerInstance(java.util.Locale.US).format(count)} $label"
+                // Labels are plural; a count of one drops the trailing "s" from the noun ("1 oxygen reading").
+                "${java.text.NumberFormat.getIntegerInstance(java.util.Locale.US).format(count)} ${if (count == 1) singular(label) else label}"
             } + "."
             db.meta.set("health_connect_last_export", now.toString())
             db.meta.set("health_connect_last_result", result)
@@ -161,4 +162,12 @@ internal class HealthConnectExporter(private val context: Application, private v
             db.events.add("warn", result)
         }
     }
+}
+
+/** "nights of sleep" -> "night of sleep", "HRV measurements" -> "HRV measurement". */
+internal fun singular(label: String): String {
+    val words = label.split(" ").toMutableList()
+    val i = words.indexOfFirst { it.endsWith("s") && it.length > 3 && it != "HRV" }
+    if (i >= 0) words[i] = words[i].removeSuffix("s")
+    return words.joinToString(" ")
 }
