@@ -2,19 +2,17 @@ package dev.heartline.analytics
 
 import kotlin.math.*
 
-internal data class CaptureMotionResult(val points: List<CapturePoint>, val segments: List<CaptureSegment>, val repTimes: List<Double>, val missingS: Double)
+internal data class CaptureMotionResult(val points: List<CapturePoint>, val segments: List<CaptureSegment>, val sets: List<RhythmSet>, val missingS: Double)
 private data class Period(val hz: Double, val score: Double, val fraction: Double)
-private data class MotionBin(val start: Double, val end: Double, var kind: String, val cadence: Int?, val repAxis: Int)
+private data class MotionBin(val start: Double, val end: Double, var kind: String, val cadence: Int?)
 private const val FS = 25.0
 
 internal fun captureMotion(rec: Recording, duration: Double): CaptureMotionResult {
     val n = ceil(duration * FS).toInt()
     val acc = resampleVectors(rec.accArrivalT, rec.acc, n)
-    val gyro = resampleVectors(rec.gyroT, rec.gyro, n)
     val norm = magnitude(acc).map { it - 1 }.toDoubleArray()
     val hp = filterRuns(norm, .1, 8.0)
     val accAxes = acc.map { filterRuns(it, .1, 8.0) }
-    val gyroAxes = (gyro + listOf(magnitude(gyro))).map { filterRuns(it, .1, 8.0) }
     val bins = ArrayList<MotionBin>()
     val points = ArrayList<CapturePoint>()
     for (i in 0 until ceil(duration / 5).toInt()) {
@@ -22,31 +20,20 @@ internal fun captureMotion(rec: Recording, duration: Double): CaptureMotionResul
         val a = (start * FS).toInt(); val b = min(n, ceil(end * FS).toInt())
         val central = hp.copyOfRange(a, b)
         if (central.isEmpty() || central.count { it.isFinite() } < central.size * .8) {
-            bins += MotionBin(start, end, "other", null, 0); continue
+            bins += MotionBin(start, end, "other", null); continue
         }
         val rms = rms(central)
         points += CapturePoint(start, rms)
         val axisRms = accAxes.maxOf { rms(it.copyOfRange(a, b)) }
-        if (rms < .03 && axisRms < .065) { bins += MotionBin(start, end, "rest", null, 0); continue }
+        if (rms < .03 && axisRms < .065) { bins += MotionBin(start, end, "rest", null); continue }
         val wa = max(0, ((start - 2.5) * FS).toInt()); val wb = min(n, ((end + 2.5) * FS).toInt())
         val gait = period(hp.copyOfRange(wa, wb), 1.4, 3.5, bandScore = true)
         if (rms >= .045 && gait != null && gait.score >= .25 && gait.fraction >= .15) {
             val cadence = (gait.hz * 60).roundToInt()
-            bins += MotionBin(start, end, if (cadence > 140 || rms > .65) "running" else "walking", cadence, 0)
+            bins += MotionBin(start, end, if (cadence > 140 || rms > .65) "running" else "walking", cadence)
             continue
         }
-        val la = max(0, ((start - 5.5) * FS).toInt()); val lb = min(n, ((end + 5.5) * FS).toInt())
-        val candidates = accAxes.mapIndexedNotNull { axis, values ->
-            period(values.copyOfRange(la, lb), .15, 1.2)?.let { axis to it }
-        }
-        val lift = candidates.maxByOrNull { it.second.score * it.second.fraction }
-        val gp = gyroAxes.mapNotNull { period(it.copyOfRange(la, lb), .15, 2.4) }
-        val corroborated = lift != null && (rec.gyro.isEmpty() || gp.any {
-            it.score > .55 && (abs(it.hz - lift.second.hz) < .12 || abs(it.hz - 2 * lift.second.hz) < .15)
-        })
-        bins += MotionBin(start, end,
-            if (lift != null && lift.second.score > .65 && lift.second.fraction > .65 && axisRms > .045 && corroborated) "lifting" else "other",
-            null, lift?.first ?: 0)
+        bins += MotionBin(start, end, "other", null)
     }
     // Brief wrist turns can obscure footfalls. Bridge at most ten seconds between consistent gait estimates.
     for (i in 1 until bins.lastIndex) {
@@ -63,27 +50,28 @@ internal fun captureMotion(rec: Recording, duration: Double): CaptureMotionResul
     }
     for (run in runs()) {
         val span = run.last().end - run.first().start
-        if ((run.first().kind in setOf("walking", "running") && span < 20) || (run.first().kind == "lifting" && span !in 8.0..120.0))
+        if (run.first().kind in setOf("walking", "running") && span < 20)
             run.forEach { it.kind = "other" }
     }
-    val repTimes = ArrayList<Double>()
-    val segments = runs().map { run ->
-        val start = run.first().start; val end = run.last().end; var kind = run.first().kind
-        if (kind == "lifting") {
-            val axis = run.groupingBy { it.repAxis }.eachCount().maxBy { it.value }.key
-            val a = (start * FS).toInt(); val b = min(n, (end * FS).toInt())
-            val signal = accAxes[axis].copyOfRange(a, b)
-            if (signal.all { it.isFinite() } && signal.size > 25) {
-                val filtered = zeroPhase(signal, butterworth(FS, .15, 1.2))
-                val f = period(signal, .15, 1.2)?.hz ?: .5
-                val peaks = findPeaks(filtered, max(1, (FS / f * .65).toInt()), max(.025, rms(filtered) * .6))
-                if (peaks.size >= 3) repTimes += peaks.map { start + it / FS } else kind = "other"
-            } else kind = "other"
-        }
+    val base = runs().map { run ->
+        val start = run.first().start; val end = run.last().end; val kind = run.first().kind
         val cadence = run.mapNotNull { it.cadence }.takeIf { it.isNotEmpty() }?.average()?.roundToInt()
         CaptureSegment(start, end, kind, null, if (kind in setOf("walking", "running")) cadence else null)
     }
-    return CaptureMotionResult(points, segments, repTimes, (n - hp.count { it.isFinite() }) / FS)
+    val sets = captureRhythm(rec, base.filter { it.kind in setOf("walking", "running") }, duration)
+    // Overlay one-second rhythm boundaries on the existing five-second gait/stillness timeline.
+    val edges = (base.flatMap { listOf(it.start, it.end) } + sets.flatMap { listOf(it.start, it.end) }).distinct().sorted()
+    val segments = ArrayList<CaptureSegment>()
+    for ((a, b) in edges.zipWithNext()) {
+        val original = base.firstOrNull { a >= it.start && a < it.end } ?: continue
+        val segment = if (sets.any { a >= it.start && a < it.end }) CaptureSegment(a, b, "lifting", null, null)
+            else original.copy(start = a, end = b)
+        val last = segments.lastOrNull()
+        if (last != null && last.kind == segment.kind && last.cadenceSpm == segment.cadenceSpm && last.end == a)
+            segments[segments.lastIndex] = last.copy(end = b)
+        else segments += segment
+    }
+    return CaptureMotionResult(points, segments, sets, (n - hp.count { it.isFinite() }) / FS)
 }
 
 private fun magnitude(axes: List<DoubleArray>) = DoubleArray(axes.first().size) { i -> sqrt(axes.sumOf { it[i] * it[i] }) }
