@@ -46,7 +46,7 @@ class CaptureRunner(
                     if (it.due(now())) finish("The service restarted after the planned end; recording may be incomplete.", it.start + it.plannedS)
                     else { save(); if (watch.ready.value) resumeStreams() }
                 }
-                for (s in stored.filter { it.end != null && db.meta.get(CAPTURE_RESULT + it.id) == null }) {
+                for (s in stored.filter { it.end != null && (db.meta.get(CAPTURE_RESULT + it.id) == null || db.meta.get(CAPTURE_ENGINE + it.id) != CAPTURE_ENGINE_VERSION) }) {
                     try { analyze(s) } catch (e: CancellationException) { throw e }
                     catch (e: Exception) { db.events.add("warn", "Capture ${s.id} needs analysis retry: ${e.message}") }
                 }
@@ -161,10 +161,12 @@ class CaptureRunner(
             analysis.copy(notes = notes).captureUi(s.id).captureJson()
         }
         db.meta.set(CAPTURE_RESULT + s.id, result)
+        db.meta.set(CAPTURE_ENGINE + s.id, CAPTURE_ENGINE_VERSION)
     }
 
     suspend fun detail(id: String): CaptureAnalysisUi? = lock.withLock {
-        db.meta.get(CAPTURE_RESULT + id)?.let(::captureFromJson) ?: db.meta.get(CAPTURE_SESSION + id)?.let {
+        db.meta.get(CAPTURE_RESULT + id)?.takeIf { db.meta.get(CAPTURE_ENGINE + id) == CAPTURE_ENGINE_VERSION }
+            ?.let(::captureFromJson) ?: db.meta.get(CAPTURE_SESSION + id)?.let {
             val s = captureSession(it)
             if (s.end == null) null else { analyze(s); db.meta.get(CAPTURE_RESULT + id)?.let(::captureFromJson) }
         }
@@ -178,7 +180,7 @@ class CaptureRunner(
             check(!file.exists() || file.delete()) { "Unable to delete recording $name" }
             db.recordings.delete(name)
         }
-        db.meta.delete(CAPTURE_RESULT + id); db.meta.delete(CAPTURE_SESSION + id)
+        db.meta.delete(CAPTURE_RESULT + id); db.meta.delete(CAPTURE_SESSION + id); db.meta.delete(CAPTURE_ENGINE + id)
     } } catch (e: CancellationException) { throw e }
     catch (e: Exception) { db.events.add("error", "Unable to delete capture: ${e.message}") } } }
 

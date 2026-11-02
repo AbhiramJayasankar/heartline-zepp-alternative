@@ -45,7 +45,8 @@ internal class CaptureController(
         service.value?.captureRunner?.stop()
     }
     suspend fun detail(id: String): CaptureAnalysisUi? {
-        db.meta.get(CAPTURE_RESULT + id)?.let { return withContext(Dispatchers.Default) { captureFromJson(it) } }
+        db.meta.get(CAPTURE_RESULT + id)?.takeIf { db.meta.get(CAPTURE_ENGINE + id) == CAPTURE_ENGINE_VERSION }
+            ?.let { return withContext(Dispatchers.Default) { captureFromJson(it) } }
         return ensureService().captureRunner.detail(id)
     }
     fun delete(id: String) { scope.launch {
