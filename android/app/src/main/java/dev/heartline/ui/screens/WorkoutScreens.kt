@@ -57,6 +57,8 @@ import dev.heartline.ui.components.paper
 import dev.heartline.ui.components.segmentColor
 import dev.heartline.ui.theme.HL
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import java.time.LocalDate
 import kotlin.math.roundToInt
 
@@ -87,6 +89,14 @@ fun CaptureScreen(controller: HeartlineController, nav: Navigator) {
     var minutes by rememberSaveable { mutableIntStateOf(60) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(r != null) { while (r != null) { delay(1000); now = System.currentTimeMillis() } }
+    // When a capture ends, open its report as soon as the analysis lands.
+    var endedAt by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(r) { if (r != null) endedAt = r.startedAt else if (endedAt != null) {
+        val started = endedAt!!
+        val item = withTimeoutOrNull(30_000) { controller.captures.first { l -> l.any { it.start >= started - 5 } }.first { it.start >= started - 5 } }
+        endedAt = null
+        if (item != null) nav.replace(Route.CaptureResult(item.id))
+    } }
     Screen("Workout capture", onBack = { nav.pop() }, subtitle = "Records everything the watch can stream for the whole session, then breaks it down: sets, reps, rest, heart-rate recovery, zones and load.") {
         if (r == null) {
             Text("What are you doing?", style = HL.type.label, color = c.inkSoft)

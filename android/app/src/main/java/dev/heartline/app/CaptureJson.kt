@@ -22,7 +22,7 @@ internal fun captureFromJson(json: String): CaptureAnalysisUi = JSONObject(json)
     fun JSONArray.int(i: Int): Int? = if (isNull(i)) null else getInt(i)
     fun JSONArray.double(i: Int): Double? = if (isNull(i)) null else getDouble(i)
     CaptureAnalysisUi(o.getString("id"), o.getString("label"), o.getLong("start"), o.getInt("duration"), int("avg"), int("max"), int("min"),
-        rows("zones") { ZoneTimeUi(it.getInt(0), "Zone ${it.getInt(0)}", it.getInt(1), it.int(2), it.getInt(3)) }, double("load"), int("calories"), int("steps"),
+        rows("zones") { ZoneTimeUi(it.getInt(0), zoneName(it.getInt(0)), it.getInt(1), it.int(2), it.getInt(3)) }, double("load"), int("calories"), int("steps"),
         rows("hr") { SeriesPoint(it.getDouble(0), it.getDouble(1)) }, rows("motion") { SeriesPoint(it.getDouble(0), it.getDouble(1)) },
         rows("segments") { SegmentUi(it.getDouble(0), it.getDouble(1), it.getString(2), it.int(3), it.int(4)) },
         rows("sets") { SetUi(it.getDouble(0), it.getDouble(1), it.getInt(2), it.int(3), it.int(4), it.double(5)) },

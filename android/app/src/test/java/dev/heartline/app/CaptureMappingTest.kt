@@ -16,7 +16,7 @@ class CaptureMappingTest {
         val ui = result.captureUi("id")
         assertEquals("id", ui.id); assertEquals("Gym", ui.label); assertEquals(1000L, ui.start); assertEquals(120, ui.durationS)
         assertEquals(130, ui.avgHr); assertEquals(160, ui.maxHr); assertEquals(80, ui.minHr)
-        assertEquals(ZoneTimeUi(5, "Zone 5", 171, null, 30), ui.zones.single())
+        assertEquals(ZoneTimeUi(5, "Max", 171, null, 30), ui.zones.single())
         assertEquals(4.5, ui.load!!, 0.0); assertEquals(70, ui.calories); assertEquals(15, ui.steps)
         assertEquals(SeriesPoint(5.0, 130.0), ui.hr.single()); assertEquals(SeriesPoint(5.0, .12), ui.motion.single())
         assertEquals(SegmentUi(0.0, 30.0, "lifting", 130, null), ui.segments.single())
