@@ -118,7 +118,7 @@ class ControlsTest {
     @Test fun settingsDefinitionsExactlyMatchPython() {
         val expected = oracle["setting_specs"].arr().map { it.obj() }
         // Android-only settings added after the Python port.
-        val ported = SETTINGS.filter { it.key != "connected_advertising" }
+        val ported = SETTINGS.filter { it.key != "connected_advertising" && !it.androidOnly }
         assertEquals(expected.map { it["key"] }, ported.map { it.key })
         ported.zip(expected).forEach { (s, e) ->
             assertEquals(e["label"], s.label)
@@ -127,15 +127,16 @@ class ControlsTest {
             assertEquals((e["min"] as? Number)?.toInt(), s.min)
             assertEquals((e["max"] as? Number)?.toInt(), s.max)
             val options = (e["options"] as? List<*>) ?: emptyList<Any>()
-            assertEquals(options.map { it.obj()["label"] }, s.options.map { it.label })
-            assertEquals(options.map { it.obj()["value"].toString() }, s.options.map { it.value.toString() })
+            // Android may append choices (dnd "scheduled"); the Python ones must come first, unchanged.
+            assertEquals(options.map { it.obj()["label"] }, s.options.take(options.size).map { it.label })
+            assertEquals(options.map { it.obj()["value"].toString() }, s.options.take(options.size).map { it.value.toString() })
         }
     }
     @Test fun settingsValidationUsesPythonMessages() {
         fun message(key: String, value: Any) = assertFailsWith<IllegalArgumentException> { settingCommand(key, value) }.message
         assertEquals("hr_interval must be one of [0, 1, 5, 10, 30]", message("hr_interval", 7))
         assertEquals("Unknown setting factory_reset", message("factory_reset", true))
-        assertEquals("dnd must be one of ['off', 'auto']", message("dnd", "on"))
+        assertEquals("dnd must be one of ['off', 'auto', 'scheduled']", message("dnd", "on"))
         assertEquals("hr_alert_threshold must be between 100 and 180", message("hr_alert_threshold", 99))
         assertEquals("hr_alert_threshold must be between 100 and 180", message("hr_alert_threshold", 181))
         assertEquals("invalid literal for int() with base 10: 'nope'", message("hr_alert_threshold", "nope"))

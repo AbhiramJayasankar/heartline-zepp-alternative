@@ -291,7 +291,7 @@ data class SensorsUi(
 )
 
 data class RecordingUi(val file: String, val start: Long, val durationS: Double, val sensors: Set<Sensor>, val hasAudio: Boolean)
-data class WatchSettingUi(val key: String, val label: String, val type: String, val value: Any?, val options: List<Pair<Any, String>>, val min: Int?, val max: Int?)
+data class WatchSettingUi(val key: String, val label: String, val type: String, val value: Any?, val options: List<Pair<Any, String>>, val min: Int?, val max: Int?, val section: String = "Health")
 data class EventUi(val ts: Long, val warn: Boolean, val error: Boolean, val message: String)
 enum class NotifyKind { MESSAGE, CALL, GENERIC }
 

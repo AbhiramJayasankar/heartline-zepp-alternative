@@ -3,12 +3,25 @@ package dev.heartline.protocol
 import java.math.BigDecimal
 import java.math.BigInteger
 
-enum class SettingTarget { CONFIG, HR }
+/** CONFIG (0003) replies `10 cmd status`; HR goes to the heart-rate control point; USER is the user-settings characteristic (0008). */
+enum class SettingTarget { CONFIG, HR, USER }
 data class SettingOption(val value: Any, val label: String)
 data class SettingDef(
     val key: String, val label: String, val type: String, val options: List<SettingOption> = emptyList(),
     val min: Int? = null, val max: Int? = null, val target: SettingTarget = SettingTarget.CONFIG,
+    /** Groups rows on the settings screen. */ val section: String = "Health",
+    /** Added after the Python port, so the parity tests skip it. */ val androidOnly: Boolean = false,
 )
+
+/** Times of day in half-hour steps, as "HH:MM", for the schedule settings. */
+val HALF_HOURS: List<SettingOption> = (0 until 48).map { i -> "%02d:%02d".format(i / 2, i % 2 * 30).let { SettingOption(it, it) } }
+
+/** Gadgetbridge AmazfitGTR2eCoordinator.getSupportedLanguageSettings; "auto" follows the phone. */
+val WATCH_LANGUAGES: List<SettingOption> = listOf(
+    "auto" to "Same as phone", "en_US" to "English", "es_ES" to "Español", "de_DE" to "Deutsch", "it_IT" to "Italiano",
+    "fr_FR" to "Français", "pt_BR" to "Português (Brasil)", "tr_TR" to "Türkçe", "cs_CZ" to "Čeština", "ru_RU" to "Русский",
+    "zh_CN" to "简体中文", "zh_TW" to "繁體中文",
+).map { (v, l) -> SettingOption(v, l) }
 
 /** Same labels, choices and write targets as health.SETTINGS; these values cannot be read back. */
 val SETTINGS: List<SettingDef> = listOf(
@@ -25,10 +38,51 @@ val SETTINGS: List<SettingDef> = listOf(
     SettingDef("goal_notification", "Step goal notification", "bool"),
     SettingDef("lift_wrist", "Lift wrist to wake", "bool"),
     SettingDef("inactivity_warnings", "Move reminders (9:00-21:00, after 60 min)", "bool"),
-    SettingDef("dnd", "Do not disturb", "enum", listOf(SettingOption("off", "Off"), SettingOption("auto", "Automatic (while asleep)"))),
+    SettingDef("dnd", "Do not disturb", "enum", listOf(SettingOption("off", "Off"), SettingOption("auto", "Automatic (while asleep)"), SettingOption("scheduled", "Between set times"))),
     SettingDef("time_24h", "24-hour clock", "bool"),
     SettingDef("metric_units", "Metric units", "bool"),
+    // Gadgetbridge HuamiSupport settings the GTR 2e supports, beyond the Python port.
+    SettingDef("lift_wrist_when", "Lift to wake: when", "enum", listOf(SettingOption("always", "Always"), SettingOption("scheduled", "Between set times")),
+        section = "Display", androidOnly = true),
+    SettingDef("lift_wrist_start", "Lift to wake from", "enum", HALF_HOURS, section = "Display", androidOnly = true),
+    SettingDef("lift_wrist_end", "Lift to wake until", "enum", HALF_HOURS, section = "Display", androidOnly = true),
+    SettingDef("lift_wrist_sensitive", "More sensitive lift to wake", "bool", section = "Display", androidOnly = true),
+    SettingDef("dnd_start", "Scheduled do not disturb from", "enum", HALF_HOURS, section = "Do not disturb", androidOnly = true),
+    SettingDef("dnd_end", "Scheduled do not disturb until", "enum", HALF_HOURS, section = "Do not disturb", androidOnly = true),
+    SettingDef("dnd_lift_wrist", "Lift to wake still works during do not disturb", "bool", section = "Do not disturb", androidOnly = true),
+    SettingDef("inactivity_minutes", "Move reminder after sitting for", "enum",
+        listOf(30, 45, 60, 90, 120).map { SettingOption(it, "$it minutes") }, section = "Move reminders", androidOnly = true),
+    SettingDef("inactivity_start", "Move reminders from", "enum", HALF_HOURS, section = "Move reminders", androidOnly = true),
+    SettingDef("inactivity_end", "Move reminders until", "enum", HALF_HOURS, section = "Move reminders", androidOnly = true),
+    SettingDef("inactivity_quiet", "Pause move reminders for a while each day", "bool", section = "Move reminders", androidOnly = true),
+    SettingDef("inactivity_quiet_start", "Pause from", "enum", HALF_HOURS, section = "Move reminders", androidOnly = true),
+    SettingDef("inactivity_quiet_end", "Pause until", "enum", HALF_HOURS, section = "Move reminders", androidOnly = true),
+    SettingDef("disconnect_alert", "Vibrate when the phone disconnects", "enum",
+        listOf(SettingOption("off", "Off"), SettingOption("on", "Always"), SettingOption("scheduled", "Between set times")), section = "Connection", androidOnly = true),
+    SettingDef("disconnect_start", "Disconnect alert from", "enum", HALF_HOURS, section = "Connection", androidOnly = true),
+    SettingDef("disconnect_end", "Disconnect alert until", "enum", HALF_HOURS, section = "Connection", androidOnly = true),
+    SettingDef("language", "Watch language", "enum", WATCH_LANGUAGES, section = "Watch", androidOnly = true),
+    SettingDef("wear_location", "Worn on", "enum", listOf(SettingOption("left", "Left wrist"), SettingOption("right", "Right wrist")),
+        target = SettingTarget.USER, section = "Watch", androidOnly = true),
+    SettingDef("step_goal", "Daily step goal", "int", min = 1000, max = 50000, target = SettingTarget.USER, section = "Watch", androidOnly = true),
 )
+
+/** Sections for the settings that predate [SettingDef.section]. */
+fun settingSection(def: SettingDef): String = when (def.key) {
+    "lift_wrist" -> "Display"
+    "dnd" -> "Do not disturb"
+    "inactivity_warnings" -> "Move reminders"
+    "expose_hr", "connected_advertising" -> "Connection"
+    "time_24h", "metric_units", "goal_notification" -> "Watch"
+    else -> def.section
+}
+
+private val HH_MM = Regex("""\d{2}:\d{2}""")
+
+private fun hm(v: Any?, default: String): Pair<Int, Int> {
+    val t = (v as? String)?.takeIf { it.matches(HH_MM) } ?: default
+    return t.substring(0, 2).toInt() to t.substring(3, 5).toInt()
+}
 
 private fun truthy(value: Any?): Boolean = when (value) {
     null -> false
@@ -101,13 +155,79 @@ fun settingCommand(key: String, value: Any, current: Map<String, Any?> = emptyMa
         "expose_hr" -> bytes(6, 0x1F, 0, b(v))
         "connected_advertising" -> bytes(6, 1, 0, b(v))
         "goal_notification" -> bytes(6, 6, 0, b(v))
-        "lift_wrist" -> if (truthy(v)) bytes(6, 5, 0, 1, 0, 0, 0, 0) else bytes(6, 5, 0, 0)
-        "inactivity_warnings" -> if (truthy(v)) bytes(8, 1, 0x3C, 0, 9, 0, 0x15, 0, 0, 0, 0, 0)
-            else bytes(8, 0, 0x3C, 0, 4, 0, 0x15, 0, 0, 0, 0, 0)
-        "dnd" -> bytes(9, if (v == "auto") 0x83 else 0x82)
+        // HuamiSupport.setActivateDisplayOnLiftWrist: on 06 05 00 01 + 00 00 00 00, scheduled the same with start/end times.
+        "lift_wrist", "lift_wrist_when", "lift_wrist_start", "lift_wrist_end" -> {
+            val m = current + (key to v)
+            if (!truthy(m["lift_wrist"] ?: true)) bytes(6, 5, 0, 0)
+            else if (m["lift_wrist_when"] == "scheduled") {
+                val (sh, sm) = hm(m["lift_wrist_start"], "08:00"); val (eh, em) = hm(m["lift_wrist_end"], "22:00")
+                bytes(6, 5, 0, 1, sh, sm, eh, em)
+            } else bytes(6, 5, 0, 1, 0, 0, 0, 0)
+        }
+        "lift_wrist_sensitive" -> bytes(6, 0x23, 0, b(v))
+        // HuamiSupport.setInactivityWarnings: threshold, then one or two active intervals around an optional pause.
+        "inactivity_warnings", "inactivity_minutes", "inactivity_start", "inactivity_end", "inactivity_quiet", "inactivity_quiet_start", "inactivity_quiet_end" -> {
+            val m = current + (key to v)
+            if (!truthy(m["inactivity_warnings"] ?: true)) bytes(8, 0, 0x3C, 0, 4, 0, 0x15, 0, 0, 0, 0, 0)
+            else {
+                val minutes = (m["inactivity_minutes"] as? Number)?.toInt() ?: (m["inactivity_minutes"] as? String)?.toIntOrNull() ?: 60
+                val (sh, sm) = hm(m["inactivity_start"], "09:00"); val (eh, em) = hm(m["inactivity_end"], "21:00")
+                if (truthy(m["inactivity_quiet"])) {
+                    val (qh, qm) = hm(m["inactivity_quiet_start"], "12:00"); val (rh, rm) = hm(m["inactivity_quiet_end"], "14:00")
+                    bytes(8, 1, minutes, 0, sh, sm, qh, qm, rh, rm, eh, em)
+                } else bytes(8, 1, minutes, 0, sh, sm, eh, em, 0, 0, 0, 0)
+            }
+        }
+        // HuamiSupport.setDoNotDisturb: 09 82 off, 09 83 automatic, 09 81 hh mm hh mm scheduled; clearing 0x80 lets lift-to-wake work.
+        "dnd", "dnd_start", "dnd_end", "dnd_lift_wrist" -> {
+            val m = current + (key to v)
+            val mode = m["dnd"] ?: "off"
+            val data = when (mode) {
+                "auto" -> bytes(9, 0x83)
+                "scheduled" -> { val (sh, sm) = hm(m["dnd_start"], "22:00"); val (eh, em) = hm(m["dnd_end"], "07:00"); bytes(9, 0x81, sh, sm, eh, em) }
+                else -> bytes(9, 0x82)
+            }
+            if (mode != "off" && truthy(m["dnd_lift_wrist"])) data[1] = (data[1].toInt() and 0x7F).toByte()
+            data
+        }
+        // HuamiSupport.setDisconnectNotification: 06 0c 00 on/off, then start/end times when scheduled.
+        "disconnect_alert", "disconnect_start", "disconnect_end" -> {
+            val m = current + (key to v)
+            when (m["disconnect_alert"] ?: "off") {
+                "on" -> bytes(6, 0x0C, 0, 1, 0, 0, 0, 0)
+                "scheduled" -> { val (sh, sm) = hm(m["disconnect_start"], "08:00"); val (eh, em) = hm(m["disconnect_end"], "22:00"); bytes(6, 0x0C, 0, 1, sh, sm, eh, em) }
+                else -> bytes(6, 0x0C, 0, 0, 0, 0, 0, 0)
+            }
+        }
+        // HuamiSupport.setLanguage (COMMAND_SET_LANGUAGE_NEW_TEMPLATE): 06 17 00 then the locale as ASCII, e.g. en_US.
+        "language" -> {
+            val tag = if (v == "auto") phoneLocaleTag() else v.toString()
+            val out = bytes(6, 0x17, 0, 0, 0, 0, 0, 0)
+            tag.toByteArray(Charsets.US_ASCII).take(5).forEachIndexed { i, c -> out[3 + i] = c }
+            out
+        }
+        // HuamiService.WEAR_LOCATION_LEFT_WRIST / RIGHT_WRIST, written to the user-settings characteristic.
+        "wear_location" -> if (v == "right") bytes(0x20, 0, 0, 0x82) else bytes(0x20, 0, 0, 2)
+        // HuamiSupport.setFitnessGoal: 10 00 00, the goal as u16, 00 00.
+        "step_goal" -> integer(v).toInt().let { bytes(0x10, 0, 0, it and 255, (it shr 8) and 255, 0, 0) }
         "time_24h" -> bytes(6, 2, 0, b(v))
         "metric_units" -> bytes(6, 3, 0, if (truthy(v)) 0 else 1)
         else -> error("Unknown setting $key")
     }
     return target to command
+}
+
+/** The phone's locale as the watch expects it, e.g. en_US (HuamiSupport.setLanguage "auto"). */
+fun phoneLocaleTag(locale: java.util.Locale = java.util.Locale.getDefault()): String =
+    locale.language + "_" + (locale.country.ifEmpty { locale.language }).uppercase()
+
+/**
+ * HuamiSupport.setUserInfo: 4f 00 00, birth year u16, month, day, sex (0 male, 1 female, 2 other), height cm u16,
+ * weight kg x 200 u16, then a user id u32. The watch uses these for calories, distance and heart-rate zones.
+ */
+fun userInfoCommand(birthYear: Int, birthMonth: Int, birthDay: Int, sex: String?, heightCm: Int, weightKg: Double, userId: Int): ByteArray {
+    val s = when (sex?.lowercase()) { "male" -> 0; "female" -> 1; else -> 2 }
+    val w = (weightKg * 200).toInt()
+    return bytes(0x4F, 0, 0, birthYear and 255, (birthYear shr 8) and 255, birthMonth, birthDay, s, heightCm and 255, (heightCm shr 8) and 255,
+        w and 255, (w shr 8) and 255, userId and 255, (userId shr 8) and 255, (userId shr 16) and 255, (userId ushr 24) and 255)
 }

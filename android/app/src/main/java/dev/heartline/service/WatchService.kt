@@ -50,6 +50,8 @@ class WatchService : Service() {
         scope.launch {
             watch.ready.collectLatest { connected ->
                 if (connected) coroutineScope {
+                    // Zepp sends the profile on every connection; resend when it changes.
+                    launch { app.settings.profile.collect { p -> userInfo(p)?.let { runCatching { watch.writeUserInfo(it) } } } }
                     // The watch drops idle links every minute or two, so schedule from the last sync, not from each reconnect.
                     launch { periodic(15 * 60_000L, "activity_last_sync") { watch.syncActivity() } }
                     launch { periodic(60 * 60_000L, "health_last_sync") { watch.syncHealth() } }
@@ -59,6 +61,12 @@ class WatchService : Service() {
             }
         }
         scope.launch { app.settings.notificationForwarding.collect { calls.refresh() } }
+    }
+    /** The profile as the watch's user info, once age, height and weight are set; the birthday is 1 January of the birth year. */
+    private fun userInfo(p: dev.heartline.data.model.Profile): ByteArray? {
+        val age = p.age ?: return null; val h = p.heightCm ?: return null; val w = p.weightKg ?: return null
+        if (age !in 5..120 || h !in 50.0..250.0 || w !in 20.0..300.0) return null
+        return dev.heartline.protocol.userInfoCommand(java.time.LocalDate.now().year - age, 1, 1, p.sex?.name, h.toInt(), w, "heartline".hashCode())
     }
     private suspend fun periodic(interval: Long, lastKey: String, action: suspend () -> Unit) {
         val last = app.db.meta.get(lastKey)?.toDoubleOrNull()?.let { (it * 1000).toLong() }

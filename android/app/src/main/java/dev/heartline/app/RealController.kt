@@ -71,7 +71,8 @@ class RealController(
             }.combine(settings.watch) { p, w -> p.copy(watchMac = w.mac, hasKey = keys.load() != null) }.collect { prefs.value = it }
         }
         scope.launch { settings.lastWrittenWatchSettings.collect { values ->
-            watchSettings.value = SETTINGS.map { s -> WatchSettingUi(s.key, s.label, s.type, values[s.key]?.let { settingValue(s.key, it) }, s.options.map { it.value to it.label }, s.min, s.max) }
+            watchSettings.value = SETTINGS.map { s -> WatchSettingUi(s.key, s.label, s.type, values[s.key]?.let { settingValue(s.key, it) }, s.options.map { it.value to it.label }, s.min, s.max,
+                dev.heartline.protocol.settingSection(s)) }
         } }
         scope.launch { db.events.observeRecent(200).collect { list -> events.value = list.map { EventUi(it.ts.toLong(), it.level == "warn", it.level == "error", it.msg) } } }
         scope.launch { db.meta.observeAll().collect { meta -> sync.update { it.copy(lastActivity = meta["activity_last_sync"]?.toDoubleOrNull()?.toLong(), lastHealth = meta["health_last_sync"]?.toDoubleOrNull()?.toLong()) } } }

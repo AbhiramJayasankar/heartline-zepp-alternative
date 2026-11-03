@@ -441,6 +441,7 @@ class WatchConnection(
         val valid = validateSetting(key, value)
         val (target, cmd) = settingCommand(key, valid, persistence.settingValues())
         if (target == SettingTarget.HR) c.write(Uuids.HR_CONTROL, cmd, true)
+        else if (target == SettingTarget.USER) c.write(Uuids.USER_SETTINGS, cmd, true)
         else route(setOf(Uuids.CONFIG)) { channel ->
             c.enableNotification(Uuids.CONFIG)
             try {
@@ -451,6 +452,12 @@ class WatchConnection(
         }
         persistence.settingWritten(key, valid)
         log("info", "Set $key to $valid")
+    }
+    /** Height, weight, age and sex for the watch's own calorie, distance and heart-rate zone estimates ([userInfoCommand]). */
+    suspend fun writeUserInfo(command: ByteArray) = actions.withLock {
+        require(command.isNotEmpty() && command[0] == 0x4F.toByte())
+        requireClient().write(Uuids.USER_SETTINGS, command, true)
+        log("info", "Sent user info to the watch")
     }
     suspend fun writeAlarm(command: ByteArray) = actions.withLock {
         require(command.size == 5 && command[0] == 2.toByte())

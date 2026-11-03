@@ -318,7 +318,11 @@ fun WatchSettingsScreen(controller: HeartlineController, nav: Navigator) {
     val conn by controller.connection.collectAsStateWithLifecycle()
     val connected = conn.state == LinkState.CONNECTED
     Screen("Watch settings", onBack = { nav.pop() }, subtitle = "Changes go straight to the watch. It doesn't report settings back, so these show what Heartline last set.") {
-        settings.forEach { s -> SettingRow(s, connected) { controller.applyWatchSetting(s.key, it) } }
+        // Rows keep their order within a section; sections appear in the order of their first row.
+        settings.groupBy { it.section }.forEach { (section, rows) ->
+            Gap(18); SectionTitle(section); Gap(4)
+            rows.forEach { s -> SettingRow(s, connected) { controller.applyWatchSetting(s.key, it) } }
+        }
     }
 }
 
@@ -344,7 +348,7 @@ private fun SettingRow(s: WatchSettingUi, enabled: Boolean, onChange: (Any) -> U
             else -> {
                 var text by remember(s.value) { mutableStateOf(s.value?.toString() ?: "") }
                 OutlinedTextField(
-                    text, { text = it.filter(Char::isDigit).take(3); text.toIntOrNull()?.let { v -> if ((s.min == null || v >= s.min) && (s.max == null || v <= s.max)) onChange(v) } },
+                    text, { text = it.filter(Char::isDigit).take((s.max ?: 999).toString().length); text.toIntOrNull()?.let { v -> if ((s.min == null || v >= s.min) && (s.max == null || v <= s.max)) onChange(v) } },
                     singleLine = true, enabled = enabled, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.width(96.dp),
                 )
             }

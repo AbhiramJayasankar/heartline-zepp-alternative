@@ -13,6 +13,8 @@ object Uuids {
     val ACT_CTRL: UUID = huami("0004")
     val ACT_DATA: UUID = huami("0005")
     val CONFIG: UUID = huami("0003")
+    /** User settings: user info (4f), step goal (10), wear location (20). Gadgetbridge HuamiService.UUID_CHARACTERISTIC_8_USER_SETTINGS. */
+    val USER_SETTINGS: UUID = huami("0008")
     val REALTIME_STEPS: UUID = huami("0007")
     val DEVICE_EVENT: UUID = huami("0010")
     /** Watch workout lifecycle (Gadgetbridge HuamiWorkoutStatus): `11 status`, 02 start, 03 pause, 04 resume, 05 end. */
