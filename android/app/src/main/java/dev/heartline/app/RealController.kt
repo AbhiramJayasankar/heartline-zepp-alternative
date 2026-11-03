@@ -298,6 +298,8 @@ class RealController(
     override fun setMusicControl(enabled: Boolean) = taskA.setMusicControl(enabled)
     private val customize = WatchCustomizeController(scope, db) { block -> action(block) }
     override val watchMenu = customize.watchMenu
+    override val autoCapture = db.meta.observe(dev.heartline.service.WatchService.AUTO_CAPTURE).map { it == "true" }.stateIn(scope, SharingStarted.Eagerly, false)
+    override fun setAutoCapture(enabled: Boolean) { scope.launch { db.meta.set(dev.heartline.service.WatchService.AUTO_CAPTURE, enabled.toString()) } }
     override fun setWatchMenu(apps: List<MenuAppUi>) { customize.setWatchMenu(apps) }
     override fun sendWatchMenu() = customize.sendWatchMenu()
     override val vibrations = customize.vibrations

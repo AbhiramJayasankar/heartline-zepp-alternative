@@ -453,6 +453,19 @@ class WatchConnection(
         persistence.settingWritten(key, valid)
         log("info", "Set $key to $valid")
     }
+    /** One CONFIG command that the watch answers with `10 cmd status` (like [applySetting], without storing a setting). */
+    suspend fun writeConfig(cmd: ByteArray, what: String) = actions.withLock {
+        val c = requireClient()
+        route(setOf(Uuids.CONFIG)) { channel ->
+            c.enableNotification(Uuids.CONFIG)
+            try {
+                c.write(Uuids.CONFIG, cmd)
+                val answer = reply(c, channel, 3000).value
+                check(answer.size >= 2 && answer[0] == 0x10.toByte() && answer[1] == cmd[0]) { "Watch did not accept $what" }
+            } finally { c.enableNotification(Uuids.CONFIG, false) }
+        }
+        log("info", "Sent $what")
+    }
     /** Height, weight, age and sex for the watch's own calorie, distance and heart-rate zone estimates ([userInfoCommand]). */
     suspend fun writeUserInfo(command: ByteArray) = actions.withLock {
         require(command.isNotEmpty() && command[0] == 0x4F.toByte())

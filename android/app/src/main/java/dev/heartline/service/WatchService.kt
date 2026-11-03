@@ -50,6 +50,16 @@ class WatchService : Service() {
         scope.launch {
             watch.ready.collectLatest { connected ->
                 if (connected) coroutineScope {
+                    launch { phoneFeatures.sendSilentState() }
+                    // A workout opened on the watch starts a capture when the owner has turned that on.
+                    launch {
+                        watch.deviceEvents.collect { data ->
+                            val w = dev.heartline.protocol.watchWorkoutStart(data) ?: return@collect
+                            app.db.events.add("info", "Watch started a workout: ${w.name}" + if (w.needsGps) " (asks for phone GPS)" else "")
+                            if (app.db.meta.get(AUTO_CAPTURE) == "true" && captureRunner.run.value == null)
+                                runCatching { captureRunner.start(w.name, 180) }.onFailure { app.db.events.add("warn", "Auto capture did not start: ${it.message}") }
+                        }
+                    }
                     // Zepp sends the profile on every connection; resend when it changes.
                     launch { app.settings.profile.collect { p -> userInfo(p)?.let { runCatching { watch.writeUserInfo(it) } } } }
                     // The watch drops idle links every minute or two, so schedule from the last sync, not from each reconnect.
@@ -106,6 +116,8 @@ class WatchService : Service() {
         super.onDestroy()
     }
     companion object {
+        /** meta key: start a capture when a workout is opened on the watch. */
+        const val AUTO_CAPTURE = "auto_capture_watch_workouts"
         const val IDLE = "dev.heartline.IDLE"
         private const val CHANNEL = "watch_connection"
         private const val ID = 1

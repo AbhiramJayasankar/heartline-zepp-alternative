@@ -167,6 +167,8 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override fun setWeather(enabled: Boolean, place: PlaceUi?) = weather.update { it.copy(enabled = enabled, place = place ?: it.place) }
     override fun refreshWeather() = weather.update { it.copy(updatedAt = now(), sentToWatchAt = now()) }
     override fun setMusicControl(enabled: Boolean) = phoneLink.update { it.copy(musicEnabled = enabled) }
+    override val autoCapture = MutableStateFlow(false)
+    override fun setAutoCapture(enabled: Boolean) { autoCapture.value = enabled }
     override val watchMenu = MutableStateFlow(WatchCustomizeController.parseMenu(null))
     override fun setWatchMenu(apps: List<MenuAppUi>) { watchMenu.value = apps }
     override fun sendWatchMenu() = addEvent("Sent the watch app list")

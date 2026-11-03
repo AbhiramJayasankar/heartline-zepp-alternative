@@ -98,6 +98,9 @@ interface HeartlineController {
     val captures: StateFlow<List<CaptureItemUi>>
     /** Streams pulse, motion, gyroscope and compass plus the watch's own live heart rate until [minutes] pass or [stopCapture]. */
     fun startCapture(label: String, minutes: Int)
+    /** Start a capture automatically when a workout is opened on the watch (if the watch reports it). */
+    val autoCapture: StateFlow<Boolean>
+    fun setAutoCapture(enabled: Boolean)
     fun stopCapture()
     suspend fun captureDetail(id: String): CaptureAnalysisUi?
     fun deleteCapture(id: String)

@@ -1,5 +1,7 @@
 package dev.heartline.ui.screens
 
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Switch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -118,6 +120,15 @@ fun CaptureScreen(controller: HeartlineController, nav: Navigator) {
             Gap(24)
             PillButton("Start capture", { controller.startCapture(label, minutes) }, Modifier.fillMaxWidth(), style = ButtonStyle.PULSE, enabled = conn.state == LinkState.CONNECTED)
             if (conn.state != LinkState.CONNECTED) { Gap(6); MutedText("Connect the watch first.") }
+            Gap(20)
+            val auto by controller.autoCapture.collectAsStateWithLifecycle()
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Start with the watch", style = HL.type.bodyStrong, color = c.ink)
+                    MutedText("Begin a capture when you open a workout on the watch, named after it.")
+                }
+                Switch(auto, { controller.setAutoCapture(it) }, colors = SwitchDefaults.colors(checkedTrackColor = c.ok, checkedThumbColor = c.surface, uncheckedTrackColor = c.gridMajor, uncheckedThumbColor = c.surface, uncheckedBorderColor = c.gridMajor))
+            }
             Gap(24)
             Panel {
                 Text("Before you start", style = HL.type.bodyStrong, color = c.ink)
