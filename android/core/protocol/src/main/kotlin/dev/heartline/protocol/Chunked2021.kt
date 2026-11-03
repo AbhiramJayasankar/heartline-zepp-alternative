@@ -60,14 +60,33 @@ class Chunked2021Decoder {
 
 /** Alexa on endpoint 0x0011 (Gadgetbridge ZeppOsAlexaService). */
 object Alexa {
-    const val START = 0x01; const val END = 0x02; const val START_ACK = 0x03; const val VOICE = 0x05
-    const val REPLY_COMPLEX = 0x08; const val REPLY_SIMPLE = 0x09; const val ERROR = 0x0f
+    const val START = 0x01; const val END = 0x02; const val START_ACK = 0x03; const val VOICE = 0x05; const val TRIGGERED = 0x06
+    const val REPLY_COMPLEX = 0x08; const val REPLY_SIMPLE = 0x09; const val VOICE_MORE = 0x0b; const val ERROR = 0x0f
+    const val LANGUAGES_REQUEST = 0x10; const val LANGUAGES_RESPONSE = 0x11; const val SET_LANGUAGE = 0x12; const val SET_LANGUAGE_ACK = 0x13
+    const val CAPABILITIES_REQUEST = 0x20; const val CAPABILITIES_RESPONSE = 0x21
     val startAck: ByteArray get() = bytes(START_ACK, 0)
+    /**
+     * Opus packets in one voice message: `05 | u32 length | (u8 size, packet)*`. On the GTR 2e every packet is SILK
+     * narrowband, 20 ms, mono (TOC 0x08), the same as the raw mic stream; a message carries ten of them.
+     */
+    fun voicePackets(payload: ByteArray): List<ByteArray> {
+        if (payload.size < 5 || payload.u8(0) != VOICE) return emptyList()
+        val end = minOf(payload.size, 5 + (payload.u8(1) or (payload.u8(2) shl 8) or (payload.u8(3) shl 16) or (payload.u8(4) shl 24)))
+        val out = ArrayList<ByteArray>()
+        var i = 5
+        while (i < end) {
+            val n = payload.u8(i)
+            if (n == 0 || i + 1 + n > end) break
+            out += payload.copyOfRange(i + 1, i + 1 + n); i += 1 + n
+        }
+        return out
+    }
     fun replySimple(text: String): ByteArray = bytes(REPLY_SIMPLE) + text.toByteArray(Charsets.UTF_8) + bytes(0)
     /** A title / subtitle / body card. */
     fun replyRich(title: String, subtitle: String, text: String): ByteArray {
         val body = title.toByteArray(Charsets.UTF_8) + bytes(0) + subtitle.toByteArray(Charsets.UTF_8) + bytes(0) + text.toByteArray(Charsets.UTF_8) + bytes(0)
         return bytes(REPLY_COMPLEX, 6, 0, body.size and 255, (body.size shr 8) and 255, (body.size shr 16) and 255, (body.size shr 24) and 255) + body
     }
+    fun setLanguage(tag: String): ByteArray = bytes(SET_LANGUAGE) + tag.replace('_', '-').toByteArray(Charsets.UTF_8) + bytes(0)
     fun error(code: Int, message: String): ByteArray = bytes(ERROR, code) + message.toByteArray(Charsets.UTF_8) + bytes(0)
 }

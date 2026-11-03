@@ -35,4 +35,13 @@ class Chunked2021Test {
         val reply = Alexa.replySimple("Hi")
         assertContentEquals(hex("09 48 69 00"), reply)
     }
+
+    @Test fun splitsVoiceIntoOpusPackets() {
+        // Start of a voice message captured on 2026-11-03 21:40:52, cut to its first two packets.
+        val packets = hex("0e 0885908d40b5056b3a135c604bb0") + hex("03 08bce2")
+        val payload = hex("05") + byteArrayOf(packets.size.toByte(), 0, 0, 0) + packets
+        val out = Alexa.voicePackets(payload)
+        assertEquals(listOf(14, 3), out.map { it.size })
+        assertEquals(0x08, out[1][0].toInt())
+    }
 }
