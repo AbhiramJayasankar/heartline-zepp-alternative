@@ -447,12 +447,20 @@ class WatchConnection(
             try {
                 c.write(Uuids.CONFIG, cmd)
                 val answer = reply(c, channel, 3000).value
-                check(answer.size >= 2 && answer[0] == 0x10.toByte() && answer[1] == cmd[0]) { "Watch did not accept $key" }
+                checkConfigReply(answer, cmd, key)
             } finally { c.enableNotification(Uuids.CONFIG, false) }
         }
         persistence.settingWritten(key, valid)
         log("info", "Set $key to $valid")
     }
+    /**
+     * The watch answers a CONFIG write with `10 cmd ... status`, echoing any sub-command first (language: `10 06 17 00 01`);
+     * status 01 is success (Gadgetbridge's HuamiService.SUCCESS).
+     */
+    private fun checkConfigReply(answer: ByteArray, cmd: ByteArray, what: String) =
+        check(answer.size >= 3 && answer[0] == 0x10.toByte() && answer[1] == cmd[0] && answer.last() == 1.toByte()) {
+            "Watch did not accept $what (reply ${answer.joinToString("") { "%02x".format(it) }})"
+        }
     /** One CONFIG command that the watch answers with `10 cmd status` (like [applySetting], without storing a setting). */
     suspend fun writeConfig(cmd: ByteArray, what: String) = actions.withLock {
         val c = requireClient()
@@ -461,7 +469,7 @@ class WatchConnection(
             try {
                 c.write(Uuids.CONFIG, cmd)
                 val answer = reply(c, channel, 3000).value
-                check(answer.size >= 2 && answer[0] == 0x10.toByte() && answer[1] == cmd[0]) { "Watch did not accept $what" }
+                checkConfigReply(answer, cmd, what)
             } finally { c.enableNotification(Uuids.CONFIG, false) }
         }
         log("info", "Sent $what")
