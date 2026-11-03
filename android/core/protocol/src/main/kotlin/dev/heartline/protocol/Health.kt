@@ -86,7 +86,8 @@ fun parseHealth(type: FetchType, data: ByteArray, startEpoch: Long?, endEpoch: L
     FetchType.SPO2 -> parseSpo2(data)
     FetchType.SPO2_SLEEP -> parseSpo2Sleep(data)
     FetchType.TEMPERATURE -> parseTemperature(data, startEpoch, endEpoch)
-    FetchType.STATISTICS, FetchType.SLEEP_RESPIRATORY_RATE, FetchType.RESTING_HR, FetchType.MAX_HR,
+    FetchType.STATISTICS -> parseStatistics(data, endEpoch)
+    FetchType.SLEEP_RESPIRATORY_RATE, FetchType.RESTING_HR, FetchType.MAX_HR,
     FetchType.SLEEP_SESSION, FetchType.HRV -> rawHealth(type, data, endEpoch)
     else -> throw IllegalArgumentException("${type.key} has a dedicated parser")
 }

@@ -33,7 +33,8 @@ class WatchStatisticsTest {
     }
 
     @Test fun statisticsKeepsRawAndAddsMarks() {
-        val rows = parseStatistics(frame, 1793700000)
+        // Through the fetch dispatcher, as the sync calls it (it used to skip the decoding).
+        val rows = parseHealth(FetchType.STATISTICS, frame, null, 1793700000)
         assertEquals(listOf("statistics", "watch_workout"), rows.map { it.type })
     }
 }

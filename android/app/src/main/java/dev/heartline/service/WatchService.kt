@@ -37,6 +37,7 @@ class WatchService : Service() {
         watch.onSuccessfulSync = { dev.heartline.app.HealthConnectExporter.get(this).afterSync() }
         calls = CallForwarder(this, scope, app.settings, watch)
         agenda = WatchAgendaSync(this, scope, app.db, watch)
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) { backfillWatchWorkouts() }
         AlexaBridge(scope, watch, app.db, java.io.File(filesDir, "alexa"), VoskSpeech(this), SampleAssistant(app.db)).start()
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Watch connection", NotificationManager.IMPORTANCE_LOW).apply {
@@ -74,6 +75,17 @@ class WatchService : Service() {
         scope.launch { app.settings.notificationForwarding.collect { calls.refresh() } }
     }
     /** The profile as the watch's user info, once age, height and weight are set; the birthday is 1 January of the birth year. */
+    /** Once: workout starts and ends from event logs fetched before they were decoded. */
+    private suspend fun backfillWatchWorkouts() {
+        if (app.db.meta.get("watch_workout_backfill") == "1") return
+        val rows = app.db.health.rawFetches(0.0).filter { it.type == "statistics" && it.data != null }
+            .flatMap { dev.heartline.protocol.watchWorkoutMarks(dev.heartline.protocol.parseStatisticsEvents(it.data!!)) }
+            .map { dev.heartline.data.model.HealthPoint(it.type, it.ts, it.value, org.json.JSONObject(it.extra).toString()) }
+        if (rows.isNotEmpty()) app.db.health.upsert(rows)
+        app.db.meta.set("watch_workout_backfill", "1")
+        app.db.events.add("info", "Found ${rows.size} watch workout starts and ends in saved event logs")
+    }
+
     /** The capture this service started for a watch workout, so the workout's end can stop it. */
     private var autoCaptureStartedAt: Long? = null
 
