@@ -25,7 +25,10 @@ import java.io.File
  *
  * The working sequence (2026-11-03): ack the start, take the live voice, send 06 (triggered) when speech ends, which
  * turns "Listening" into "Thinking", then a simple reply (09), which the watch shows. It waits ~40 s for the reply
- * before "I didn't hear you clearly". The card (08 06) is acked but never shown; neither is one without its length.
+ * before "I didn't hear you clearly". A reply tour (2026-11-03) found nothing else it shows: a ~700-character simple
+ * reply with newlines scrolls in full (a trailing byte after it is ignored and does not reopen the mic); the 08 cards
+ * (subtype 06 as Gadgetbridge sends it, 1-byte or big-endian subtype, subtypes 03 to 05, 07, no length) are ignored or
+ * answered "not support this function"; weather (08/01) and reminders (08/02) are ignored; commands 07, 0c, 0d, 0e too.
  *
  * With acks in the wrong layout the watch buffered 2 s, timed out and restarted every 10 s; with the right ones it
  * does not, so every start is answered. The small Alexa button shown under a reply does not send a new start: the
@@ -182,29 +185,11 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
 
     private var repliedAt = 0L
     private var tourJob: Job? = null
-    private val tourFile get() = File(folder, ".tour")
 
     private suspend fun reply() {
         replied = true; repliedAt = System.currentTimeMillis()
-        val step = runCatching { tourFile.readText().trim().toInt() }.getOrDefault(0)
-        if (step < AlexaReplyTour.stops.size) {
-            tourFile.writeText("${step + 1}")
-            tourJob = scope.launch { tour(AlexaReplyTour.stops[step], step) }
-            return
-        }
         // The simple reply (09) shows on the GTR 2e; the card (08 06) is acked but left on "Thinking".
         watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple("Heard %.1f s. Speech-to-text and AI answers are coming next.".format(packets * 0.02)))
-    }
-
-    /** One stop of [AlexaReplyTour]: lettered candidates 3 s apart, then the plain fallback. */
-    private suspend fun tour(stop: AlexaReplyTour.Stop, step: Int) {
-        db.events.add("info", "Alexa reply tour ${step + 1}/${AlexaReplyTour.stops.size}: ${stop.title}")
-        for (c in stop.candidates) {
-            watch.send2021(Endpoint2021.ALEXA, c.payload); repliedAt = System.currentTimeMillis()
-            db.events.add("info", "Alexa reply tour: sent ${c.letter} (${c.what})")
-            delay(3000)
-        }
-        stop.fallback?.let { watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple(it)); repliedAt = System.currentTimeMillis(); db.events.add("info", "Alexa reply tour: sent the fallback") }
     }
 
     private suspend fun closeDecoder() {
