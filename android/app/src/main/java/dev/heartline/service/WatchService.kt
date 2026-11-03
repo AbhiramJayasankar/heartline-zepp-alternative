@@ -51,6 +51,7 @@ class WatchService : Service() {
             watch.ready.collectLatest { connected ->
                 if (connected) coroutineScope {
                     launch { phoneFeatures.sendSilentState() }
+                    launch { followWatchWorkouts() }
                     // A workout opened on the watch starts a capture when the owner has turned that on.
                     launch {
                         watch.deviceEvents.collect { data ->
@@ -73,6 +74,35 @@ class WatchService : Service() {
         scope.launch { app.settings.notificationForwarding.collect { calls.refresh() } }
     }
     /** The profile as the watch's user info, once age, height and weight are set; the birthday is 1 January of the birth year. */
+    /** The capture this service started for a watch workout, so the workout's end can stop it. */
+    private var autoCaptureStartedAt: Long? = null
+
+    /**
+     * Starts and ends of watch workouts arrive through the quick sync's statistics fetch (a few minutes late), as
+     * "watch_workout" rows. With auto capture on, a fresh start begins a capture named after the workout, and the
+     * matching end stops a capture this started.
+     */
+    private suspend fun followWatchWorkouts() {
+        val since = System.currentTimeMillis() / 1000.0 - 15 * 60
+        app.db.health.observeSeries("watch_workout", since).collect { rows ->
+            val last = rows.maxByOrNull { it.ts } ?: return@collect
+            val now = System.currentTimeMillis() / 1000
+            val name = runCatching { org.json.JSONObject(last.extra ?: "{}").optString("type", "Workout") }.getOrDefault("Workout")
+            val start = runCatching { org.json.JSONObject(last.extra ?: "{}").optString("event") }.getOrNull() == "start"
+            if (app.db.meta.get(AUTO_CAPTURE) != "true") return@collect
+            if (start && now - last.ts < 15 * 60 && captureRunner.run.value == null && autoCaptureStartedAt != last.ts) {
+                autoCaptureStartedAt = last.ts
+                runCatching { captureRunner.start(name, 180) }
+                    .onSuccess { app.db.events.add("info", "Started a capture for the watch's $name") }
+                    .onFailure { app.db.events.add("warn", "Auto capture did not start: ${it.message}") }
+            } else if (!start && autoCaptureStartedAt != null && last.ts > autoCaptureStartedAt!! && captureRunner.run.value != null) {
+                autoCaptureStartedAt = null
+                captureRunner.stop()
+                app.db.events.add("info", "The watch's $name ended; stopped its capture")
+            }
+        }
+    }
+
     private fun userInfo(p: dev.heartline.data.model.Profile): ByteArray? {
         val age = p.age ?: return null; val h = p.heightCm ?: return null; val w = p.weightKg ?: return null
         if (age !in 5..120 || h !in 50.0..250.0 || w !in 20.0..300.0) return null

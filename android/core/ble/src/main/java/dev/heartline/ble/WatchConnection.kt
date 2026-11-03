@@ -608,4 +608,5 @@ class WatchConnection(
 private val handledNotifications = setOf(Uuids.CHUNKED_2021_READ, Uuids.AUTH, Uuids.RAW_CTRL, Uuids.RAW_DATA, Uuids.ACT_CTRL, Uuids.ACT_DATA, Uuids.CONFIG,
     Uuids.REALTIME_STEPS, Uuids.DEVICE_EVENT, Uuids.CHUNKED, Uuids.HR_MEASURE, Uuids.WORKOUT_STATUS, Uuids.BATTERY)
 
-val QUICK_TYPES = listOf(FetchType.TEMPERATURE, FetchType.STRESS, FetchType.SPO2)
+/** Statistics carries the watch's workout start/end events (see watchWorkoutMarks), used to start captures. */
+val QUICK_TYPES = listOf(FetchType.TEMPERATURE, FetchType.STRESS, FetchType.SPO2, FetchType.STATISTICS)

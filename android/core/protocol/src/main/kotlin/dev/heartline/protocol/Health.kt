@@ -70,7 +70,9 @@ fun parseTemperature(data: ByteArray, startEpoch: Long?, endEpoch: Long): List<H
 }
 
 /** Opaque blobs are stored losslessly as hex, like watch._parse_health's raw_fetches path. */
-fun parseStatistics(data: ByteArray, fetchedAt: Long): List<HealthPoint> = rawHealth(FetchType.STATISTICS, data, fetchedAt)
+/** Kept raw (the event log is mostly unidentified), plus the workout starts and ends it reveals ([watchWorkoutMarks]). */
+fun parseStatistics(data: ByteArray, fetchedAt: Long): List<HealthPoint> =
+    rawHealth(FetchType.STATISTICS, data, fetchedAt) + watchWorkoutMarks(parseStatisticsEvents(data))
 
 private fun rawHealth(type: FetchType, data: ByteArray, fetchedAt: Long): List<HealthPoint> =
     if (data.isEmpty()) emptyList() else listOf(HealthPoint(type.key, fetchedAt, null, mapOf("raw" to data.hex())))

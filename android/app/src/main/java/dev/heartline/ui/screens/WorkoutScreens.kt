@@ -125,7 +125,7 @@ fun CaptureScreen(controller: HeartlineController, nav: Navigator) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Start with the watch", style = HL.type.bodyStrong, color = c.ink)
-                    MutedText("Begin a capture when you open a workout on the watch, named after it.")
+                    MutedText("When you start a workout on the watch, a capture named after it begins within about 5 minutes and stops when the workout ends.")
                 }
                 Switch(auto, { controller.setAutoCapture(it) }, colors = SwitchDefaults.colors(checkedTrackColor = c.ok, checkedThumbColor = c.surface, uncheckedTrackColor = c.gridMajor, uncheckedThumbColor = c.surface, uncheckedBorderColor = c.gridMajor))
             }
