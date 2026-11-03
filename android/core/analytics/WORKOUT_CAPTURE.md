@@ -12,6 +12,42 @@ The CSV reader also retains accelerometer arrival timestamps for capture analysi
 use the CSV's `ax,ay,az` columns, in the existing raw integer units; acceleration is already in g.
 Motion-only CSVs can be analyzed without PPG.
 
+### Watch-clock CSVs (Task H)
+
+New recordings append `wts` (unwrapped watch seconds) to `ts,kind,ppg,ax,ay,az`.
+Type-7 stamps follow their data packet and anchor its **last** sample. The recorder measures
+periods independently per sensor; PPG nominally runs at 25/50 Hz and accel at 26.16 Hz.
+Gyro/mag rates are measured rather than asserted. `ts` remains epoch seconds through a robust
+running affine watch/phone fit. Unstamped packets retain arrival-based fallback with empty `wts`.
+See `../../docs/raw-stream-bits.md` for pairing, wraps, rate switching and fit limits.
+
+`readRecordingCsv` puts watch-relative times on a shared origin aligned with the file's epoch
+start and marks `Recording.watchClock`. Empty `wts` cells use nearby epoch/watch anchors.
+Watch-clock PPG bypasses both `retime` and `capturePpgClock`; accel bypasses motion retiming.
+The motion and rep grids remain 25 Hz, with true sensor times as interpolation inputs. New
+rep grids use relative seconds; the epoch-rounded increment below remains for legacy files.
+Reconnect files retain their independent epoch offsets, even across a watch-clock reboot.
+
+PPG processing has no assumption of 25 input samples/second. Beat detection interpolates actual
+sample times to the existing 100 Hz analysis grid; filter coefficients, refractory distances,
+templates and parabolic peak refinement refer to that grid, independently of input rate.
+HRV uses the resulting beat times. Capture pulse coverage gates use seconds for watch-clock
+files, including runs whose rate changes. Its 25 Hz excerpt is a downsampled display waveform,
+not an asserted sensor rate. `Recording.fs` measures the median reciprocal sample interval.
+
+Only the new format excludes PPG LED warm-up from analysis: the first 0.4 s after each run
+start/gap and low settling values below 40% of the following second's median during the first
+2 s. Raw CSV values are retained. Interpolated beats across missing coverage cannot qualify.
+Files without a `wts` column take the original code paths, including all legacy clocks, gates,
+filter/template behavior and warm-up handling. Real-session/golden fixtures are unchanged;
+`CAPTURE_ENGINE_VERSION` stays **3** because existing capture analyses do not change.
+
+Fast PPG is requested by default through the connection's single `FAST_PPG_ENABLED` flag.
+No PPG within about 5 s triggers one logged restart without 0x80. The 2026-11-03 probe fixture
+measures 25.1002 Hz (0x02), 50.1446 Hz PPG / 26.2076 Hz accel (0x83), and 26.1559 Hz accel
+(0x81). 0x82 changes from 25.1276 to 50.1557 Hz during the run, averaging 39.4849 Hz;
+there are no data/stamp counter gaps. Mixed-sensor fast masks still need a watch check.
+
 Gait/intensity analysis retimes each contiguous stream separately to remove overlapping packet arrival
 stamps. A gap over one second breaks retiming, so it cannot be stretched into artificial samples.
 Vectors are linearly resampled at 25 Hz only across intervals at most 500 ms apart. Missing data

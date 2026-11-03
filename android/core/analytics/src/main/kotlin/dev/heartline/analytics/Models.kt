@@ -15,6 +15,8 @@ data class Recording(
     val captureDurationS: Double? = null,
     // Capture regularity needs packet arrival gaps; keep the legacy check-session PPG clock intact.
     val ppgArrivalT: DoubleArray = ppgT,
+    /** New raw CSVs have sensor-clock times; never reconstruct these from sample index. */
+    val watchClock: Boolean = false,
 ) {
     val durationS: Double get() = if (ppgT.size > 1) ppgT.last() else 0.0
     val fs: Double get() = if (ppgT.size > 2) median(DoubleArray(ppgT.size - 1) {

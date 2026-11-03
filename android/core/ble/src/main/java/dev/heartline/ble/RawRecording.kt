@@ -6,8 +6,8 @@ import java.io.File
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
-/** server/watch.py:_open_raw_file/_on_raw, including 25 Hz packet-relative timestamps. */
-internal class RawRecording(folder: File, val sensors: Set<RawSensor>, private val level: (Float) -> Unit) : AutoCloseable {
+/** Preserve every raw value; analysis removes LED warm-up, never the recording. */
+internal class RawRecording(folder: File, val sensors: Set<RawSensor>, fastPpg: Boolean, private val level: (Float) -> Unit) : AutoCloseable {
     val start = System.currentTimeMillis() / 1000.0
     val file: File
     private val csv: java.io.BufferedWriter
@@ -18,6 +18,9 @@ internal class RawRecording(folder: File, val sensors: Set<RawSensor>, private v
     var lastMic = System.nanoTime()
     var lastKick = lastMic
     val hasAudio: Boolean get() = mic != null
+    var ppgPackets = 0L
+        private set
+    private val clock = RawSampleClock(fastPpg, ::writeTimed)
     init {
         folder.mkdirs()
         var stamp = LocalDateTime.now()
@@ -28,27 +31,34 @@ internal class RawRecording(folder: File, val sensors: Set<RawSensor>, private v
         }
         file = candidate
         csv = file.bufferedWriter()
-        Csv.writeRow(csv, listOf("ts", "kind", "ppg", "ax", "ay", "az"))
+        Csv.writeRow(csv, listOf("ts", "kind", "ppg", "ax", "ay", "az", "wts"))
         nmea = if (RawSensor.GPS in sensors) File(folder, file.nameWithoutExtension + ".nmea").bufferedWriter() else null
         mic = try { if (RawSensor.MIC in sensors) MicDecoder(File(folder, file.nameWithoutExtension + ".wav"), onLevel = level) else null }
             catch (e: Throwable) { csv.close(); nmea?.close(); throw e }
     }
     fun feed(packet: RawPacket) {
         val now = System.currentTimeMillis() / 1000.0
-        fun rows(kind: String, values: List<List<Any?>>) = values.forEachIndexed { i, v ->
-            val ts = Math.rint((now - (values.size - 1 - i) / RAW_RATE_HZ) * 1000) / 1000
-            Csv.writeRow(csv, listOf(ts, kind) + v)
-        }
+        if (packet is RawPacket.Ppg && packet.values.isNotEmpty()) ppgPackets++
+        clock.feed(packet, now)
         when (packet) {
-            is RawPacket.Ppg -> rows("ppg", packet.values.map { listOf(it, null, null, null) })
-            is RawPacket.Accel -> rows("accel", packet.samples.map { listOf(null, it.x, it.y, it.z) })
-            is RawPacket.Gyro -> rows("gyro", packet.samples.map { listOf(null, it.x, it.y, it.z) })
-            is RawPacket.Mag -> rows("mag", packet.samples.map { listOf(null, it.x, it.y, it.z) })
             is RawPacket.GpsText -> { nmea?.write(packet.text); gps.feed(packet.text) }
             is RawPacket.Mic -> { lastMic = System.nanoTime(); splitter.feed(packet).forEach { mic?.feed(it) } }
             else -> Unit
         }
     }
-    fun flush() { csv.flush(); nmea?.flush() }
-    override fun close() { try { mic?.close() } finally { try { nmea?.close() } finally { csv.close() } } }
+    private fun writeTimed(timed: TimedRawPacket) {
+        fun rows(kind: String, values: List<List<Any?>>) = values.forEachIndexed { i, v ->
+            Csv.writeRow(csv, listOf(timed.epoch[i], kind) + v + listOf(timed.watch?.get(i)))
+        }
+        when (val p = timed.packet) {
+            is RawPacket.Ppg -> rows("ppg", p.values.map { listOf(it, null, null, null) })
+            is RawPacket.Accel -> rows("accel", p.samples.map { listOf(null, it.x, it.y, it.z) })
+            is RawPacket.Gyro -> rows("gyro", p.samples.map { listOf(null, it.x, it.y, it.z) })
+            is RawPacket.Mag -> rows("mag", p.samples.map { listOf(null, it.x, it.y, it.z) })
+            else -> Unit
+        }
+    }
+    fun restartClock(fastPpg: Boolean) = clock.restart(fastPpg)
+    fun flush() { clock.expire(System.currentTimeMillis() / 1000.0); csv.flush(); nmea?.flush() }
+    override fun close() { try { clock.flush(); mic?.close() } finally { try { nmea?.close() } finally { csv.close() } } }
 }

@@ -13,22 +13,23 @@ private const val RHYTHM_FS = 25.0
  * Run the prototype independently across coverage gaps; never interpolate a reconnect into an exercise. */
 internal fun captureRhythm(rec: Recording, gait: List<CaptureSegment>, duration: Double = Double.POSITIVE_INFINITY): List<RhythmSet> {
     val out = ArrayList<RhythmSet>()
+    val clock = if (rec.watchClock) rec.accT else rec.accArrivalT
     var first = 0
     fun process(end: Int) {
         if (end - first < 2) return
-        val origin = rec.accArrivalT[first]
-        val count = ceil((rec.accArrivalT[end - 1] - origin) * RHYTHM_FS).toInt()
+        val origin = clock[first]
+        val count = ceil((clock[end - 1] - origin) * RHYTHM_FS).toInt()
         if (count < 250) return
         val axes = List(3) { DoubleArray(count) }
         var j = first
         // numpy.arange(epochStart, epochEnd, .04) uses the rounded epoch-sized increment.
         // Preserve it here: millisecond-scale drift can move a near-threshold ACF run boundary.
         val epochOrigin = rec.start + origin
-        val step = (epochOrigin + 1 / RHYTHM_FS) - epochOrigin
+        val step = if (rec.watchClock) 1 / RHYTHM_FS else (epochOrigin + 1 / RHYTHM_FS) - epochOrigin
         for (i in 0 until count) {
-            val at = (epochOrigin + i * step) - rec.start
-            while (j < end - 2 && rec.accArrivalT[j + 1] <= at) j++
-            val a = rec.accArrivalT[j]; val b = rec.accArrivalT[j + 1]
+            val at = if (rec.watchClock) origin + i * step else (epochOrigin + i * step) - rec.start
+            while (j < end - 2 && clock[j + 1] <= at) j++
+            val a = clock[j]; val b = clock[j + 1]
             val mix = if (b <= a) 0.0 else ((at - a) / (b - a)).coerceIn(0.0, 1.0)
             for (k in 0..2) axes[k][i] = rec.acc[j][k] + mix * (rec.acc[j + 1][k].toDouble() - rec.acc[j][k])
         }
@@ -51,9 +52,9 @@ internal fun captureRhythm(rec: Recording, gait: List<CaptureSegment>, duration:
                 DoubleArray(3) { mean(gravity[it].copyOfRange(a * 25, b * 25)) }, peaks.axis)
         }
     }
-    for (i in rec.accArrivalT.indices) {
-        val valid = rec.accArrivalT[i].isFinite() && rec.accArrivalT[i] in 0.0..duration && rec.acc[i].all { it.isFinite() }
-        if (!valid || (i > first && rec.accArrivalT[i] - rec.accArrivalT[i - 1] > .5)) {
+    for (i in clock.indices) {
+        val valid = clock[i].isFinite() && clock[i] in 0.0..duration && rec.acc[i].all { it.isFinite() }
+        if (!valid || (i > first && clock[i] - clock[i - 1] > .5)) {
             process(i)
             first = if (valid) i else i + 1
         }

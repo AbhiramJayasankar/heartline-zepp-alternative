@@ -21,7 +21,10 @@ class RawAudioTest {
         assertEquals((-0.0f).toRawBits(), actual.x.toRawBits())
     }
     @Test fun unknownAndShortPackets() {
-        assertEquals(RawPacket.Unknown(7, 11), parseRaw(hex("070000f781c22500000000")))
+        assertEquals(RawPacket.Timestamp(0, 0, 633504247), parseRaw(hex("070000f781c22500000000")))
+        assertEquals(RawPacket.Timestamp(1, 132, 230846468), parseRaw(hex("0784010470c20d00000000")))
+        assertEquals(RawPacket.Timestamp(6, 255, 4294967295L), parseRaw(hex("07ff06ffffffff")))
+        assertEquals(RawPacket.Unknown(7, 6), parseRaw(hex("070001000000")))
         assertEquals(RawPacket.Unknown(-1, 0), parseRaw(byteArrayOf()))
         assertEquals(RawPacket.Unknown(1, 1), parseRaw(bytes(1)))
         assertEquals(emptyList(), (parseRaw(hex("0000ffff")) as RawPacket.Accel).samples)
@@ -32,6 +35,13 @@ class RawAudioTest {
         assertEquals(0x58, rawMask(setOf(RawSensor.GPS, RawSensor.GYRO, RawSensor.MAG)))
         assertEquals(3, rawMask(emptySet()))
         assertEquals(0x7B, rawMask(RawSensor.entries.toSet()))
+        assertEquals(0x83, rawMask(setOf(RawSensor.ACCEL, RawSensor.PPG), fastPpg = true))
+        assertEquals(0x82, rawMask(setOf(RawSensor.PPG), fastPpg = true))
+        assertEquals(1, rawMask(setOf(RawSensor.ACCEL), fastPpg = true))
+        assertEquals(26.16, rawNominalRateHz(0))
+        assertEquals(50.0, rawNominalRateHz(1, true))
+        assertNull(rawNominalRateHz(4))
+        assertNull(rawNominalRateHz(6))
         assertEquals(listOf("015819", "015800000019", "02"), rawStartCommands(0x58).map { it.hex() })
         assertEquals(listOf("010319", "010300000019", "02"), rawStartCommands().map { it.hex() })
         assertContentEquals(bytes(3), RAW_STOP)
@@ -63,7 +73,7 @@ class RawAudioTest {
                 is RawPacket.GpsText -> { assertEquals("gps", row["kind"]); assertEquals(values.single(), actual.text, packet) }
                 is RawPacket.Mic -> { assertEquals("mic", row["kind"]); assertEquals(packet, (bytes(5, actual.counter) + actual.payload).hex()) }
                 is RawPacket.Unknown -> assertEquals("other", row["kind"])
-                is RawPacket.Timestamp -> fail("Python does not decode timestamps")
+                is RawPacket.Timestamp -> assertEquals("other", row["kind"])
             }
         }
     }

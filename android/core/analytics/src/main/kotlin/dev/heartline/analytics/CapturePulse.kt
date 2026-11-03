@@ -8,7 +8,7 @@ internal fun captureStillWindows(rec: Recording, duration: Int): List<Pair<Int, 
     if (rec.acc.isEmpty() || rec.gyro.isEmpty() || duration == 0) return emptyList()
     val sum = DoubleArray(duration); val sum2 = DoubleArray(duration); val count = IntArray(duration)
     for (i in rec.acc.indices) {
-        val s = floor(rec.accArrivalT[i]).toInt()
+        val s = floor((if (rec.watchClock) rec.accT else rec.accArrivalT)[i]).toInt()
         if (s !in sum.indices || rec.acc[i].any { !it.isFinite() }) continue
         val v = sqrt(rec.acc[i].sumOf { it.toDouble().pow(2) })
         sum[s] += v; sum2[s] += v * v; count[s]++
@@ -57,9 +57,9 @@ internal fun capturePpgClock(times: DoubleArray): DoubleArray {
 }
 
 internal fun capturePulse(rec: Recording, hr: IntArray): CapturePulse? {
-    if (rec.ppg.size < 500 || rec.gyro.isEmpty()) return null
+    if ((if (rec.watchClock) rec.durationS < 20 else rec.ppg.size < 500) || rec.gyro.isEmpty()) return null
     val windows = captureStillWindows(rec, hr.size).sortedByDescending { it.second - it.first }.take(40)
-    val clock = capturePpgClock(rec.ppgArrivalT)
+    val clock = if (rec.watchClock) rec.ppgT else capturePpgClock(rec.ppgArrivalT)
     val output = ArrayList<CapturePulseWindow>()
     val pooled = ArrayList<Intervals>()
     val pairs = ArrayList<Pair<Double, Double>>()
@@ -68,7 +68,8 @@ internal fun capturePulse(rec: Recording, hr: IntArray): CapturePulse? {
     for ((a, originalEnd) in windows) {
         val b = min(originalEnd, a + 120)
         val lo = clock.lowerBound(a - 2.0); val hi = clock.lowerBound(b + 2.0)
-        if (hi - lo < 500 || (lo + 1 until hi).any { clock[it] - clock[it - 1] > .5 }) continue
+        if ((if (rec.watchClock) hi - lo < 2 || clock[hi - 1] - clock[lo] < 19 else hi - lo < 500) ||
+            (lo + 1 until hi).any { clock[it] - clock[it - 1] > .5 }) continue
         val raw = rec.ppg.copyOfRange(lo, hi)
         if (raw.count { !it.isFinite() || it < 100 || it > 65000 } > raw.size * .02) continue
         // Small saturated glitches are interpolated; larger saturation rejects the window.
@@ -76,7 +77,7 @@ internal fun capturePulse(rec: Recording, hr: IntArray): CapturePulse? {
         val start = clock[lo]
         val time = DoubleArray(hi - lo) { clock[lo + it] - start }
         val signal = interpolate(good.map { time[it] }.toDoubleArray(), good.map { raw[it] }.toDoubleArray(), time)
-        val slice = Recording(rec.start + start, time, signal, doubleArrayOf(), emptyArray())
+        val slice = Recording(rec.start + start, time, signal, doubleArrayOf(), emptyArray(), watchClock = rec.watchClock)
         val watch = (a until min(b, hr.size)).map { hr[it] }.filter { it > 0 }.takeIf { it.isNotEmpty() }?.average()
         val beats = detectBeats(slice, Motion(doubleArrayOf(), doubleArrayOf()), watch)
         val inside = beats.times.indices.filter { beats.times[it] + start >= a && beats.times[it] + start < b }
