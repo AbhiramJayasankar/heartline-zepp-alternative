@@ -12,6 +12,8 @@ android {
     defaultConfig {
         applicationId = "dev.heartline"
         minSdk = 31
+        // Vosk ships native code for six CPU types; keep the phone's (arm64) and the emulator's (x86_64).
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
