@@ -10,7 +10,7 @@ internal const val CAPTURE_SESSION = "capture_session_"
 internal const val CAPTURE_RESULT = "capture_result_"
 /** Stored analyses from an older engine are recomputed when opened. Bump when analysis changes. */
 internal const val CAPTURE_ENGINE = "capture_engine_"
-internal const val CAPTURE_ENGINE_VERSION = "3"
+internal const val CAPTURE_ENGINE_VERSION = "4"
 
 internal fun CaptureSession.json(): String = JSONObject().apply {
     put("id", id); put("label", label); put("start", start); put("end", end ?: JSONObject.NULL); put("planned", plannedS)

@@ -66,7 +66,21 @@ class GymRichCaptureTest {
         val expected = rows * cols / choose2(matches.size)
         val ari = (cells - expected) / ((rows + cols) / 2 - expected)
         val boundaries = (1 until matches.size).count { (labels[it] != labels[it - 1]) == (groups[it] != groups[it - 1]) }
-        assertEquals(21, matches.size)
+        val summary = buildString {
+            appendLine("analysisSeconds=$elapsed sets=${result.sets.size} ARI=$ari boundaries=$boundaries/${matches.size - 1}")
+            result.sets.forEach { s -> appendLine("set ${s.start}: group=${s.group} reps=${s.reps} arc=${median(s.repDetail.map { it.arcDeg }.toDoubleArray())} last=${s.repDetail.lastOrNull()?.arcDeg} slope=${s.slowdownS} partial=${s.partialLast} startHr=${s.startHr} rise=${s.hrRise} activity=${s.activity}") }
+            appendLine("recovery=${result.recovery}"); appendLine("floor=${result.floor} work=${result.workS} rest=${result.restS}")
+            appendLine("cardio=${result.cardio}"); appendLine("pulse=${result.pulse?.copy(pairs=emptyList(),excerpt=emptyList(),excerptBeats=emptyList())}")
+            appendLine("pairs=${result.pulse?.pairs?.size} excerpt=${result.pulse?.excerpt?.size} excerptBeats=${result.pulse?.excerptBeats?.size}")
+        }
+        File("build/gym_rich_metrics.txt").writeText(summary)
+        File("build/gym_group_features.csv").writeText("start,end,tempo,gx,gy,gz,ax,ay,az,exercise\n" +
+            captureRhythm(rec, result.segments.filter { it.kind == "walking" || it.kind == "running" }, rec.captureDurationS!!).joinToString("\n") { s ->
+                "${s.start},${s.end},${s.tempoS},${s.gravity.joinToString(",")},${s.axis.joinToString(",")},${matches.firstOrNull { it.first.start == s.start }?.second?.get("exercise") ?: "?"}"
+            })
+        println(summary)
+        // 22 since the slow band (2026-11-04) also finds the 10 kg x 9 reverse forearm curl.
+        assertEquals(22, matches.size)
         assertTrue("grouping ARI=$ari", ari >= .9)
         assertEquals("correct adjacent matched-set decisions", 20, boundaries)
         val preacher = matches.filter { (it.second["exercise"] as String).startsWith("Preacher") }
@@ -83,21 +97,8 @@ class GymRichCaptureTest {
         assertEquals(-6.0, delta(20), 3.0); assertEquals(-10.0, delta(60), 4.0)
         assertEquals(delta(60), delta(120), 4.0); assertTrue(delta(180) > delta(120) + 3)
         assertTrue(result.recovery.all { it.n >= 5 })
-        assertEquals(581, result.workS); assertEquals(4098, result.restS)
+        assertEquals(647, result.workS); assertEquals(4032, result.restS)
         assertEquals(22, result.floor.size); assertEquals(88.0, result.floor.first().v, 0.0)
-        val summary = buildString {
-            appendLine("analysisSeconds=$elapsed sets=${result.sets.size} ARI=$ari boundaries=$boundaries/${matches.size - 1}")
-            result.sets.forEach { s -> appendLine("set ${s.start}: group=${s.group} reps=${s.reps} arc=${median(s.repDetail.map { it.arcDeg }.toDoubleArray())} last=${s.repDetail.lastOrNull()?.arcDeg} slope=${s.slowdownS} partial=${s.partialLast} startHr=${s.startHr} rise=${s.hrRise} activity=${s.activity}") }
-            appendLine("recovery=${result.recovery}"); appendLine("floor=${result.floor} work=${result.workS} rest=${result.restS}")
-            appendLine("cardio=${result.cardio}"); appendLine("pulse=${result.pulse?.copy(pairs=emptyList(),excerpt=emptyList(),excerptBeats=emptyList())}")
-            appendLine("pairs=${result.pulse?.pairs?.size} excerpt=${result.pulse?.excerpt?.size} excerptBeats=${result.pulse?.excerptBeats?.size}")
-        }
-        File("build/gym_rich_metrics.txt").writeText(summary)
-        File("build/gym_group_features.csv").writeText("start,end,tempo,gx,gy,gz,ax,ay,az,exercise\n" +
-            captureRhythm(rec, result.segments.filter { it.kind == "walking" || it.kind == "running" }, rec.captureDurationS!!).joinToString("\n") { s ->
-                "${s.start},${s.end},${s.tempoS},${s.gravity.joinToString(",")},${s.axis.joinToString(",")},${matches.firstOrNull { it.first.start == s.start }?.second?.get("exercise") ?: "?"}"
-            })
-        println(summary)
         val cardio = result.cardio.single()
         assertEquals("Treadmill", cardio.name); assertEquals("walking", cardio.kind)
         assertEquals(179.0, cardio.steadyHr!!.toDouble(), 3.0); assertEquals(184.0, cardio.peakHr!!.toDouble(), 2.0)

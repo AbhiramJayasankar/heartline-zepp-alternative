@@ -70,4 +70,29 @@ class GymCaptureTest {
             assertEquals(pair.second.start, rest.end, 0.0)
         }
     }
+
+    /** 2026-11-03 push day on the watch clock (bench, triceps, chest fly, shoulder press; 18 of 19 logged sets captured). */
+    @Test fun pushDayFindsSlowSetsAndCountsRepsAgainstTheLog() {
+        val rec = GZIPInputStream(javaClass.getResourceAsStream("/recordings/gym_20261103.csv.gz")!!)
+            .bufferedReader().use(::readRecordingCsv)
+        assertTrue(rec.watchClock)
+        val result = analyzeCapture(rec, emptyList(), Profile(), "2026-11-03 push")
+        val logged = fixture("recordings/gym_20261103_log.json").array().map { it.obj() }
+        fun offset(value: Any?) = (value as? String)?.let { OffsetDateTime.parse(it).toEpochSecond() - rec.start }
+        val captured = logged.filter { offset(it["end"])!! > 0 }.toMutableList()
+        assertEquals(18, captured.size)
+        val errors = ArrayList<Double>(); var unmatched = 0
+        for (s in result.sets) {
+            val match = captured.maxByOrNull { min(s.end, offset(it["end"])!! + 8) - max(s.start, offset(it["start"])!! - 8) }
+                ?.takeIf { min(s.end, offset(it["end"])!! + 8) > max(s.start, offset(it["start"])!! - 8) }
+            if (match == null) { unmatched++; continue }
+            errors += s.reps - match["reps"].number(); captured.remove(match)
+        }
+        println("Push day: matched=${errors.size}/18 unmatched=$unmatched missed=${captured.map { "${it["exercise"]} ${it["load_kg"]}x${it["reps"]}" }} errors=$errors cardio=${result.cardio.map { it.start to it.end }}")
+        // Before 2026-11-04: 13/18, reps within two on 11/13, 3.5 minutes of walking between sets reported as cardio.
+        assertTrue("matched ${errors.size}", errors.size >= 14)
+        assertTrue("unlogged detections $unmatched", unmatched <= 1)
+        assertTrue("reps within two: $errors", errors.count { abs(it) <= 2 } >= errors.size - 1)
+        assertTrue("walking between sets is not cardio: ${result.cardio}", result.cardio.isEmpty())
+    }
 }

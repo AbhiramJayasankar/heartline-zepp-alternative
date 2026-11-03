@@ -2,8 +2,10 @@
 
 Run :core:analytics:test first, then `python core/analytics/tools/gym_compare.py` from android/.
 No scratch recordings or workout log are needed. numpy/scipy are verification-only prerequisites.
+After a deliberate change to gym_prototype.py, `--write` stores its output as the new oracle (then rerun the tests).
 """
 import csv
+import sys
 import datetime as dt
 import gzip
 import json
@@ -28,6 +30,11 @@ for span in np.split(accel, np.where(np.diff(accel[:, 0]) > .5)[0] + 1):
     for a, b in prototype.detect_sets(scores, excluded):
         reps, tempo = prototype.count_reps(span, origin, a, b)
         sets.append(dict(start=off + a, end=off + b, reps=reps, tempo=tempo))
+if '--write' in sys.argv:
+    reference['sets'] = sets
+    (resources / 'gym_20261102_python.json').write_text(json.dumps(reference, indent=2) + '\n')
+    print(f'Wrote {len(sets)} oracle sets; rerun :core:analytics:test, then this script without --write.')
+    sys.exit()
 assert sets == reference['sets'], 'Python output differs from the checked-in oracle.'
 with (root / 'build/gym_kotlin.csv').open() as source:
     kotlin = list(csv.DictReader(source))

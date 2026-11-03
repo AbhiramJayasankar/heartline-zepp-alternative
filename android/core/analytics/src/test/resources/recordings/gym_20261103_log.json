@@ -1,0 +1,192 @@
+[
+  {
+    "row": 67,
+    "exercise": "Bench press (barbell, flat)",
+    "type": "strength",
+    "set": 0,
+    "start": "2026-11-03T23:21:43.856+05:30",
+    "end": "2026-11-03T23:22:28.968+05:30",
+    "reps": 10.0,
+    "load_kg": 30.0
+  },
+  {
+    "row": 68,
+    "exercise": "Bench press (barbell, flat)",
+    "type": "strength",
+    "set": 1,
+    "start": "2026-11-03T23:23:51.047+05:30",
+    "end": "2026-11-03T23:24:38.086+05:30",
+    "reps": 10.0,
+    "load_kg": 35.0
+  },
+  {
+    "row": 69,
+    "exercise": "Bench press (barbell, flat)",
+    "type": "strength",
+    "set": 2,
+    "start": "2026-11-03T23:27:27.690+05:30",
+    "end": "2026-11-03T23:28:23.680+05:30",
+    "reps": 10.0,
+    "load_kg": 45.0
+  },
+  {
+    "row": 70,
+    "exercise": "Bench press (barbell, flat)",
+    "type": "strength",
+    "set": 3,
+    "start": "2026-11-03T23:31:37.851+05:30",
+    "end": "2026-11-03T23:32:28.163+05:30",
+    "reps": 7.0,
+    "load_kg": 50.0
+  },
+  {
+    "row": 71,
+    "exercise": "Bench press (barbell, flat)",
+    "type": "strength",
+    "set": 4,
+    "start": "2026-11-03T23:35:47.330+05:30",
+    "end": "2026-11-03T23:36:35.058+05:30",
+    "reps": 8.0,
+    "load_kg": 50.0
+  },
+  {
+    "row": 72,
+    "exercise": "Bench press (barbell, flat)",
+    "type": "strength",
+    "set": 5,
+    "start": "2026-11-03T23:39:04.606+05:30",
+    "end": "2026-11-03T23:39:43.369+05:30",
+    "reps": 4.0,
+    "load_kg": 50.0
+  },
+  {
+    "row": 73,
+    "exercise": "Bench press (barbell, flat)",
+    "type": "strength",
+    "set": 6,
+    "start": "2026-11-03T23:43:23.050+05:30",
+    "end": "2026-11-03T23:44:11.859+05:30",
+    "reps": 10.0,
+    "load_kg": 40.0
+  },
+  {
+    "row": 74,
+    "exercise": "Cable tricep pushdown",
+    "type": "strength",
+    "set": 0,
+    "start": "2026-11-03T23:46:01.599+05:30",
+    "end": "2026-11-03T23:46:58.506+05:30",
+    "reps": 9.0,
+    "load_kg": 20.0
+  },
+  {
+    "row": 75,
+    "exercise": "Cable tricep pushdown",
+    "type": "strength",
+    "set": 1,
+    "start": "2026-11-03T23:49:58.283+05:30",
+    "end": "2026-11-03T23:50:51.360+05:30",
+    "reps": 10.0,
+    "load_kg": 25.0
+  },
+  {
+    "row": 76,
+    "exercise": "Cable tricep pushdown",
+    "type": "strength",
+    "set": 2,
+    "start": "2026-11-03T23:53:28.141+05:30",
+    "end": "2026-11-03T23:54:16.918+05:30",
+    "reps": 10.0,
+    "load_kg": 30.0
+  },
+  {
+    "row": 77,
+    "exercise": "Cable tricep pushdown",
+    "type": "strength",
+    "set": 3,
+    "start": "2026-11-03T23:57:59.218+05:30",
+    "end": "2026-11-03T23:59:02.734+05:30",
+    "reps": 10.89,
+    "load_kg": 30.0
+  },
+  {
+    "row": 78,
+    "exercise": "Machine chest fly",
+    "type": "strength",
+    "set": 1,
+    "start": "2026-11-04T00:01:49.438+05:30",
+    "end": "2026-11-04T00:03:05.938+05:30",
+    "reps": 10.0,
+    "load_kg": 25.0
+  },
+  {
+    "row": 79,
+    "exercise": "Machine chest fly",
+    "type": "strength",
+    "set": 2,
+    "start": "2026-11-04T00:05:15.147+05:30",
+    "end": "2026-11-04T00:06:25.135+05:30",
+    "reps": 12.0,
+    "load_kg": 25.0
+  },
+  {
+    "row": 80,
+    "exercise": "Machine chest fly",
+    "type": "strength",
+    "set": 3,
+    "start": "2026-11-04T00:08:54.393+05:30",
+    "end": "2026-11-04T00:09:59.047+05:30",
+    "reps": 10.0,
+    "load_kg": 25.0
+  },
+  {
+    "row": 81,
+    "exercise": "Machine chest fly",
+    "type": "strength",
+    "set": 4,
+    "start": "2026-11-04T00:13:33.779+05:30",
+    "end": "2026-11-04T00:14:38.159+05:30",
+    "reps": 10.0,
+    "load_kg": 25.0
+  },
+  {
+    "row": 82,
+    "exercise": "Machine shoulder press (plate-loaded)",
+    "type": "strength",
+    "set": 0,
+    "start": "2026-11-04T00:16:37.698+05:30",
+    "end": "2026-11-04T00:17:21.931+05:30",
+    "reps": 12.0,
+    "load_kg": 0.0
+  },
+  {
+    "row": 83,
+    "exercise": "Machine shoulder press (plate-loaded)",
+    "type": "strength",
+    "set": 1,
+    "start": "2026-11-04T00:19:52.654+05:30",
+    "end": "2026-11-04T00:20:32.075+05:30",
+    "reps": 9.0,
+    "load_kg": 15.0
+  },
+  {
+    "row": 84,
+    "exercise": "Machine shoulder press (plate-loaded)",
+    "type": "strength",
+    "set": 2,
+    "start": "2026-11-04T00:22:42.835+05:30",
+    "end": "2026-11-04T00:23:14.034+05:30",
+    "reps": 6.0,
+    "load_kg": 20.0
+  },
+  {
+    "row": 85,
+    "exercise": "Machine shoulder press (plate-loaded)",
+    "type": "strength",
+    "set": 3,
+    "start": "2026-11-04T00:25:02.584+05:30",
+    "end": "2026-11-04T00:25:43.210+05:30",
+    "reps": 6.0,
+    "load_kg": 15.0
+  }
+]

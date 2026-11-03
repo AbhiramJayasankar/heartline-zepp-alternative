@@ -4,18 +4,23 @@ Set detection (per-second score, 25 Hz accelerometer, gravity included):
   1. Resample accel x/y/z to 25 Hz, band-pass 0.10-1.20 Hz (2nd-order Butterworth, zero-phase).
   2. For every second s, take the 20 s window starting at s-10 s. For each axis: normalised autocorrelation;
      score_axis = max ACF value at lags 1.5-8.0 s. periodicity[s] = max over axes.
+     A second band, 0.08-0.50 Hz at lags 2.0-8.0 s, scores slow heavy reps (4-5 s each) whose small rep motion is
+     otherwise lost in hand shake; periodicity[s] = max of both bands. (2026-11-04, from the 3 Nov bench sets.)
   3. Smooth periodicity with a 5 s moving average. "On" where > 0.45.
   4. Merge on-runs separated by gaps <= 6 s; keep runs >= 12 s. Exclude seconds already classed as walking/running.
-  Result on this session: recall 0.80, precision 0.84 (one 'false positive' is pull-up set 2 that has no logged start).
-  Misses: hanging leg raises and reverse wrist curls (wrist barely rotates).
+     Then join runs <= 15 s apart with no excluded second between: one set whose middle reps dipped below the
+     threshold (3 Nov chest fly, 2 Nov rear delt), never two sets, which are at least a minute apart.
+  Result on 2 Nov: recall 0.84 (21/25), 2 unlogged detections. On 3 Nov: 14/18, 1 unlogged.
+  Misses: hanging leg raises and reverse wrist curls (wrist barely rotates); slow 50 kg barbell bench and a 20 kg
+  machine press, whose reps move the wrist about as much as the shake under load.
 
 Rep counting for a detected set [a, b] (seconds):
-  1. Core = [a, b]; window = [a-10, b+10].
+  1. Core = [a, b]; window = [a-8, b+8] (detected runs end a rep or two inside the set).
   2. Accel band-passed 0.12-1.00 Hz. PCA on the core samples -> first principal direction v; y = (X - mean_core) . v.
   3. Period = lag of max ACF of y_core at 1.2-8.0 s.
   4. amp = 90th percentile of |y_core|. Count peaks of y and of -y over the window with
      min distance 0.55*period and prominence >= 0.9*amp; reps = max of the two counts.
-  Result: mean error +0.0 reps, mean |error| 0.9, within 2 reps on 19/20 detected sets.
+  Result over 2 and 3 Nov (35 matched sets): mean error -0.3 reps, mean |error| 1.0, within 2 reps on 91%.
 """
 import numpy as np
 from scipy.signal import butter, filtfilt, find_peaks
@@ -29,25 +34,31 @@ def resample(arr):
     return t, np.column_stack([np.interp(t, arr[:, 0], arr[:, i]) for i in (1, 2, 3)])
 
 
+BANDS = ((0.1, 1.2, 1.5), (0.08, 0.5, 2.0))  # (low Hz, high Hz, shortest lag s)
+
+
 def periodicity(accel):
     t, A = resample(accel)
-    b, c = butter(2, [0.1 / (FS / 2), 1.2 / (FS / 2)], 'band')
-    Af = filtfilt(b, c, A, axis=0)
-    T = int(len(Af) / FS); W = int(20 * FS); P = np.zeros(T)
+    filtered = []
+    for lo, hi, lag in BANDS:
+        b, c = butter(2, [lo / (FS / 2), hi / (FS / 2)], 'band')
+        filtered.append((filtfilt(b, c, A, axis=0), int(lag * FS)))
+    T = int(len(A) / FS); W = int(20 * FS); P = np.zeros(T)
     for s in range(T):
-        seg = Af[max(0, int((s - 10) * FS)):max(0, int((s - 10) * FS)) + W]
-        if len(seg) < W // 2: continue
         best = 0
-        for k in range(3):
-            x = seg[:, k] - seg[:, k].mean()
-            if x.std() < 1e-6: continue
-            ac = np.correlate(x, x, 'full')[len(x) - 1:]; ac /= ac[0]
-            best = max(best, ac[int(1.5 * FS):int(8 * FS)].max())
+        for Af, lag in filtered:
+            seg = Af[max(0, int((s - 10) * FS)):max(0, int((s - 10) * FS)) + W]
+            if len(seg) < W // 2: continue
+            for k in range(3):
+                x = seg[:, k] - seg[:, k].mean()
+                if x.std() < 0.002: continue  # 2 mg RMS: no motion, only filter ringing after a set
+                ac = np.correlate(x, x, 'full')[len(x) - 1:]; ac /= ac[0]
+                best = max(best, ac[lag:int(8 * FS)].max())
         P[s] = best
     return t[0], P
 
 
-def detect_sets(P, excluded=None, th=0.45, minlen=12, gap=6, smooth=5):
+def detect_sets(P, excluded=None, th=0.45, minlen=12, gap=6, smooth=5, join=15):
     p = uniform_filter1d(P, smooth)
     on = p > th
     if excluded is not None: on[excluded] = False
@@ -59,10 +70,15 @@ def detect_sets(P, excluded=None, th=0.45, minlen=12, gap=6, smooth=5):
             if j - i >= minlen: segs.append((i, j))
             i = j
         else: i += 1
-    return segs
+    joined = []
+    for a, b in segs:
+        if joined and a - joined[-1][1] <= join and (excluded is None or not excluded[joined[-1][1]:a].any()):
+            joined[-1] = (joined[-1][0], b)
+        else: joined.append((a, b))
+    return joined
 
 
-def count_reps(accel, t0, a, b, ext=10, promf=0.9):
+def count_reps(accel, t0, a, b, ext=8, promf=0.9):
     t, A = resample(accel)
     bb, cc = butter(2, [0.12 / (FS / 2), 1.0 / (FS / 2)], 'band')
     X = filtfilt(bb, cc, A, axis=0)

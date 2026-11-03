@@ -22,7 +22,10 @@ class CaptureRhythmTest {
         // 5-point smoothing preserves each central gap length for .9/0 plateaus (strict >.45).
         fun scores(gap: Int) = DoubleArray(50 + gap) { if (it in 25 until 25 + gap) 0.0 else .9 }
         assertEquals(listOf(0 to 55), rhythmRuns(scores(5)))
-        assertEquals(listOf(0 to 25, 31 to 56), rhythmRuns(scores(6)))
+        // Six off-seconds end the run; the two runs are then joined as one set (<= 15 s apart), sixteen are not.
+        assertEquals(listOf(0 to 56), rhythmRuns(scores(6)))
+        assertEquals(listOf(0 to 65), rhythmRuns(scores(15)))
+        assertEquals(listOf(0 to 25, 41 to 66), rhythmRuns(scores(16)))
     }
 
     @Test fun excludedGaitSecondsCannotBeBridgedIntoALiftingSet() {
@@ -56,10 +59,10 @@ class CaptureRhythmTest {
     }
 
     @Test fun repCountingUsesExtendedWindowAndAcfTempoInsteadOfCorePeakCount() {
-        // PCA projects a 4 s sinusoid identically in either orientation. Core=12..32; window=2..42.
+        // PCA projects a 4 s sinusoid identically in either orientation. Core=12..32; window=4..40 (peaks 5, 9 ... 37).
         val x = DoubleArray(50 * 25) { sin(2 * PI * it / (25 * 4)) }
         val (reps, period) = rhythmReps(listOf(x, DoubleArray(x.size), DoubleArray(x.size)), 12, 32)
-        assertEquals(10, reps)
+        assertEquals(9, reps)
         assertEquals(4.0, period, .08)
     }
 

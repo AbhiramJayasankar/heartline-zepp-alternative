@@ -63,18 +63,23 @@ internal fun captureRhythm(rec: Recording, gait: List<CaptureSegment>, duration:
     return out
 }
 
+/** Rhythm bands as (low Hz, high Hz, shortest lag in samples). The second scores slow heavy reps (4-5 s each, e.g.
+ * 50 kg bench on 2026-11-03) whose rep motion is about as small as the shake under load in the wider band. */
+private val RHYTHM_BANDS = listOf(Triple(.1, 1.2, 37), Triple(.08, .5, 50))
+
 internal fun rhythmPeriodicity(axes: List<DoubleArray>): DoubleArray {
-    val filtered = axes.map { zeroPhase(it, butterworth(RHYTHM_FS, .1, 1.2)) }
+    val bands = RHYTHM_BANDS.map { (lo, hi, lag) -> axes.map { zeroPhase(it, butterworth(RHYTHM_FS, lo, hi)) } to lag }
     return DoubleArray(axes.first().size / 25) { second ->
         val a = max(0, (second - 10) * 25)
         val b = min(axes.first().size, a + 500)
-        if (b - a < 250) 0.0 else filtered.maxOf { axis ->
+        if (b - a < 250) 0.0 else bands.maxOf { (filtered, lag) -> filtered.maxOf { axis ->
             val x = axis.copyOfRange(a, b)
             val mu = mean(x)
             for (i in x.indices) x[i] -= mu
             val energy = x.sumOf { it * it }
-            if (energy / x.size < 1e-12) 0.0 else acfMaximum(x, 37, 200).second.coerceAtLeast(0.0)
-        }
+            // Below 2 mg RMS there is no motion to score: only a filter's ringing after a set, which is perfectly regular.
+            if (energy / x.size < 4e-6) 0.0 else acfMaximum(x, lag, 200).second.coerceAtLeast(0.0)
+        } }
     }
 }
 
@@ -93,7 +98,8 @@ internal fun acfMaximum(x: DoubleArray, low: Int, high: Int): Pair<Int, Double> 
 
 /** scipy.ndimage.uniform_filter1d(size=5, mode=reflect), then the prototype's exact gap lookahead.
  * Its gap=6 bridges up to FIVE off-seconds (the current off-second belongs to the six-sample slice).
- * Coverage/gait exclusions are hard barriers, including inside a bridged run. */
+ * Coverage/gait exclusions are hard barriers, including inside a bridged run. Runs at most 15 s apart are then one
+ * set whose middle reps dipped below the threshold; separate sets are at least a minute apart. */
 internal fun rhythmRuns(scores: DoubleArray, excluded: BooleanArray = BooleanArray(scores.size)): List<Pair<Int, Int>> {
     if (scores.isEmpty()) return emptyList()
     fun reflect(index: Int): Int {
@@ -112,7 +118,14 @@ internal fun rhythmRuns(scores: DoubleArray, excluded: BooleanArray = BooleanArr
         if (j - i >= 12) out += i to j
         i = j
     }
-    return out
+    val joined = ArrayList<Pair<Int, Int>>()
+    for (run in out) {
+        val last = joined.lastOrNull()
+        if (last != null && run.first - last.second <= 15 && (last.second until run.first).none { excluded[it] })
+            joined[joined.lastIndex] = last.first to run.second
+        else joined += run
+    }
+    return joined
 }
 
 /** Core PCA == first right singular vector of centered XYZ. Count both signs so eigenvector sign is immaterial. */
@@ -127,8 +140,9 @@ internal fun rhythmReps(filtered: List<DoubleArray>, start: Int, end: Int): Rhyt
     val v = dominantDirection(cov)
     fun project(from: Int, to: Int) = DoubleArray(to - from) { i -> (0..2).sumOf { k -> (filtered[k][from + i] - mu[k]) * v[k] } }
     val core = project(a, b)
-    val offset = max(0, a - 250)
-    val window = project(offset, min(filtered.first().size, b + 250))
+    // Detected runs end a rep or two inside the set, so peaks are counted over 8 s either side.
+    val offset = max(0, a - 200)
+    val window = project(offset, min(filtered.first().size, b + 200))
     val period = acfMaximum(core, 30, 200).first / RHYTHM_FS
     val amplitude = percentile(DoubleArray(core.size) { abs(core[it]) }, 90.0)
     if (amplitude < 1e-6) return RhythmRepPeaks(0, period, intArrayOf(), 1, window, offset, v)

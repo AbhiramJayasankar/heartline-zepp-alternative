@@ -109,14 +109,17 @@ neither amplitude nor gyro corroboration gates a set. `CaptureRhythm.kt` impleme
    fewer than 250 samples gives zero. For each centered axis, normalize ACF by **full zero-lag
    energy**, then take the maximum over lags 37..199 (Python's `int(1.5*25):int(8*25)`). The
    per-second score is the maximum over the three axes. No detrending or overlap normalization.
+   Since 2026-11-04 a second band, 0.08–0.50 Hz at lags 50..199 (2–8 s), is scored the same way
+   and the score is the larger of the two; windows under 2 mg RMS score zero (see Engine 4).
 3. Five-second mean with SciPy's reflect edges, strictly >0.45. Exclude existing walking/running
    seconds. Merge short gaps with the prototype's six-sample lookahead and keep runs >=12 s.
    The actual Python slice bridges **five off-seconds**, despite the docstring's “gaps <=6”.
    Excluded gait seconds and coverage gaps are hard barriers, including during bridging.
+   Runs at most 15 s apart, with no excluded second between, are then joined into one set.
 4. For each set, band-pass acceleration at 0.12–1.00 Hz. Center XYZ by the core mean and find
    its first principal direction (3x3 covariance Jacobi eigendecomposition, equivalent to the
-   prototype's first right singular vector). Project the core and a window extended by 10 s
-   on each side, clipped to the same coverage span.
+   prototype's first right singular vector). Project the core and a window extended by 8 s
+   (10 s before 2026-11-04) on each side, clipped to the same coverage span.
 5. Tempo is the lag of the core's maximum normalized ACF over lags 30..199 /25 (1.2–8 s).
    Amplitude is the 90th percentile of absolute projected core values. On the extended window,
    count local maxima for both signal signs with distance `int(.55*period*25)` and prominence
@@ -402,7 +405,9 @@ undetected/extended rep time and are not manual-log workout totals.
 
 ### Cardio and watch comparison
 
-Merge existing walking/running segments across gaps <=20 s; require >=180 s. Split at overlapping
+Merge existing walking/running segments across gaps <=20 s; require >=180 s. A block under 6 min
+with a set ending within 30 s of its start and another starting within 30 s of its end, and no
+cardio workout on the watch over it, is walking during a rest and is dropped. Split at overlapping
 cardio-workout boundaries, so a watch name only applies to gait inside that workout. Keywords
 (case-insensitive) include treadmill, walk, run, cycl, bike, ellipt, row, stair and cardio. Gait,
 set exclusion and cadence classification are unchanged. Cadence is duration-weighted existing gait
@@ -532,3 +537,42 @@ CaptureMapping, CaptureJson, CaptureRunner, CaptureStorage, new CaptureActivity 
 Changed/added tests: CaptureMappingTest, new CaptureActivityTest/CaptureRichTest/GymRichCaptureTest;
 plus app's test-only JSON dependency, this document, the fixture tool and two compact fixtures.
 No commit, device interaction, protocol or UI change.
+
+## Engine 4: heavy sets, split sets and walking rests (2026-11-04)
+
+Tuned on the 3 Nov push day (19 logged sets, 18 inside a 64-minute watch-clock capture) and kept
+against 2 Nov. Engine 3 found 13/18 on 3 Nov, missing every 50 kg and 40 kg bench set and the
+20 kg machine press, over-counted bench and tricep sets by 2–3 reps, split the first chest-fly set
+in two (−4 reps each half) and reported 3.5 minutes of walking between tricep sets as cardio.
+
+What the data showed (scratch analysis, not in the repo):
+
+- The missed sets reached a smoothed score of 0.50–0.68 but held it for only 6–10 s, short of the
+  12 s run. Slow reps (4–5 s each) move the wrist about 0.1 g, the same as the shake under a heavy
+  bar, and unracking and re-racking add ±1 g spikes that dominate the normalised ACF window.
+- Lowering the threshold or the minimum run, loudness-normalising the signal (AGC or per-window
+  clipping), a gyro score, and a heart-rate rise gate each found 2–4 more sets but added as many
+  unlogged detections in rests on one day or the other, so none was adopted.
+- A second, slower band (0.08–0.50 Hz, lags 2–8 s) found 2 more sets over both days with no new
+  unlogged detection (2 Nov reverse forearm curl 10 x 9; 3 Nov bench 40 x 10).
+- The ±10 s rep window compensated for runs ending inside the set; ±8 s with split runs joined
+  (<= 15 s apart) gave the best counts.
+- Its filter rings after a set; in perfectly still synthetic data the ringing is a clean, tiny
+  sinusoid, so windows under 2 mg RMS now score zero (real rests are well above it).
+
+| | 2 Nov | 3 Nov (watch clock) |
+|---|---|---|
+| Sets found, engine 3 | 21/26 in capture, 2 unlogged | 13/18, 0 unlogged |
+| Sets found, engine 4 | 22/26, 2 unlogged | 14/18, 0 unlogged |
+| Reps within 1 / 2, engine 3 | 15/21, 19/21 | 4/13, 11/13 |
+| Reps within 1 / 2, engine 4 | 18/22, 18/22 | 11/14, 14/14 |
+| Cardio reported | treadmill only | none (was 3.5 min of rest walking) |
+
+Still missed: 50 kg bench x 7, x 8, x 4 and the 20 kg machine press x 6 on 3 Nov, and hanging leg
+raises on 2 Nov. Finding them needs a cue other than rhythm (for barbell work, the unrack/re-rack
+pair around a quiet stretch), which one session is too little to tune without false sets.
+
+`tools/gym_prototype.py` holds the reference; `python tools/gym_compare.py --write` rebuilds the
+2 Nov oracle after a deliberate change, then the Kotlin must match it exactly (it does: 24 sets, 0 s
+boundary difference, identical reps). `GymCaptureTest.pushDayFindsSlowSetsAndCountsRepsAgainstTheLog`
+runs the 3 Nov fixture (`gym_20261103.csv.gz`, accelerometer with watch clock, and its log).

@@ -67,7 +67,7 @@ internal fun captureCardio(segments: List<CaptureSegment>, activities: List<Capt
         val a = run.first().start; val b = run.last().end
         val edges = (listOf(a, b) + cardioActivities.flatMap { listOf(it.start, it.end) }.filter { it > a && it < b }).distinct().sorted()
         edges.zipWithNext().filter { (s, e) -> e - s >= 180 }.map { (s, e) -> Triple(s, e, run) }
-    }
+    }.filterNot { (a, b, _) -> walkingBetweenSets(a, b, segments, cardioActivities) }
     fun at(t: Double) = hr.getOrNull(floor(t).toInt())?.takeIf { it > 0 }
     fun points(a: Double, b: Double) = (max(0, ceil(a).toInt()) until min(hr.size, ceil(b).toInt()))
         .filter { hr[it] > 0 }.map { it - a to hr[it].toDouble() }
@@ -89,6 +89,14 @@ internal fun captureCardio(segments: List<CaptureSegment>, activities: List<Capt
             cadence.takeIf { it.sumOf { p -> p.second } > 0 }?.let { c -> (c.sumOf { it.first * it.second } / c.sumOf { it.second }).roundToInt() },
             watch?.distanceM, watch?.let { w -> if ((w.activeS ?: 0) > 0 && w.distanceM != null) w.distanceM * 3.6 / w.activeS!! else null })
     }
+}
+
+/** Walking around during a rest (a set ends just before it, the next starts just after, under six minutes, no cardio
+ * workout on the watch) is part of the rest, not cardio: 2026-11-03 had 3.5 minutes of it between tricep sets. */
+private fun walkingBetweenSets(a: Double, b: Double, segments: List<CaptureSegment>, cardio: List<CaptureActivity>): Boolean {
+    val lifting = segments.filter { it.kind == "lifting" }
+    return b - a < 360 && cardio.none { it.start < b && it.end > a } &&
+        lifting.any { abs(it.end - a) <= 30 } && lifting.any { abs(it.start - b) <= 30 }
 }
 
 /** Grid search with analytic two-parameter least squares. A non-flat fit needs >=30 s of observed HR.
