@@ -23,7 +23,10 @@ Matched against the saved workouts of 2026-11-02 (strength training 22:13–23:2
 | `0x0901` | 32 = workout type code | Workout ended |
 
 Heartline stores these as `watch_workout` rows (start/end, type) and, with auto capture on, starts and stops a
-capture from them. The statistics fetch runs in the 5-minute quick sync, so the capture starts a few minutes late.
+capture from them. The statistics fetch runs in the 5-minute quick sync, but the watch hands the log over in blocks of
+50 events (2026-11-04: three fetches in a row returned exactly 50, the newest ending 40 minutes before the fetch, and
+the next fetch was empty). With an event every 30-40 s, a workout start reaches the phone up to about 30 minutes late,
+so auto capture accepts starts up to an hour old. The sync keeps fetching until the log is empty.
 
 ## Not identified yet (two days of the owner's log, 7,950 events)
 
