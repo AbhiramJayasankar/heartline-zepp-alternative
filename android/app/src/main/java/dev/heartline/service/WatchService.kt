@@ -37,7 +37,7 @@ class WatchService : Service() {
         watch.onSuccessfulSync = { dev.heartline.app.HealthConnectExporter.get(this).afterSync() }
         calls = CallForwarder(this, scope, app.settings, watch)
         agenda = WatchAgendaSync(this, scope, app.db, watch)
-        AlexaBridge(scope, watch, app.db, java.io.File(filesDir, "alexa"), OnDeviceSpeech(this), SampleAssistant(app.db)).start()
+        AlexaBridge(scope, watch, app.db, java.io.File(filesDir, "alexa"), VoskSpeech(this), SampleAssistant(app.db)).start()
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Watch connection", NotificationManager.IMPORTANCE_LOW).apply {
             setSound(null, null); enableVibration(false); setShowBadge(false)

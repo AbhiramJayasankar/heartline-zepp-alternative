@@ -10,3 +10,4 @@ android/build/
 android/**/build/
 android/local.properties
 android/.kotlin/
+android/app/src/main/assets/vosk-en/

@@ -38,7 +38,7 @@ import java.io.File
  * ends the bridge works through [STOPS], moving on whenever voice is still arriving [ESCALATE_MS] later.
  */
 class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchConnection, private val db: HeartlineDatabase, private val folder: File,
-                  private val speech: OnDeviceSpeech, private val assistant: SampleAssistant) {
+                  private val speech: VoskSpeech, private val assistant: SampleAssistant) {
     private var voice = ByteArrayOutputStream()
     private var packets = 0
     private var decoder: MicDecoder? = null
@@ -58,6 +58,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
 
     fun start() = scope.launch {
         launch(Dispatchers.IO) { decodeOld() }
+        launch { sttSelfTest() }
         watch.chunked2021.collect { m ->
             if (m.endpoint != Endpoint2021.ALEXA || m.payload.isEmpty()) return@collect
             try {
@@ -195,6 +196,30 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
     private var down = 0
     private var downN = 0
 
+    /**
+     * Debug: if files/alexa/.stt-test names a 16 kHz WAV, transcribe it once per recognizer mode at app start and log
+     * each result, so speech-to-text can be tuned without the watch.
+     */
+    private suspend fun sttSelfTest() {
+        val flag = File(folder, ".stt-test").takeIf { it.exists() } ?: return
+        val wav = File(folder, flag.readText().trim()); flag.delete()
+        val pcm = runCatching { val d = wav.readBytes(); ShortArray((d.size - 44) / 2) { i -> ((d[44 + 2 * i].toInt() and 255) or (d[45 + 2 * i].toInt() shl 8)).toShort() } }
+            .getOrElse { db.events.add("warn", "STT test: ${it.message}"); return }
+        repeat(2) { // the first run includes unpacking and loading the model
+            val t0 = System.currentTimeMillis()
+            val r = runCatching { speech.transcribe(pcm) }
+            db.events.add("info", "STT test %d ms: ".format(System.currentTimeMillis() - t0) + r.fold({ "\"${it.text}\"" }, { "failed: ${it.message}" }))
+        }
+    }
+
+    private fun wav16k(pcm: ShortArray): ByteArray {
+        val b = java.nio.ByteBuffer.allocate(44 + pcm.size * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        b.put("RIFF".toByteArray()).putInt(36 + pcm.size * 2).put("WAVEfmt ".toByteArray()).putInt(16).putShort(1).putShort(1)
+            .putInt(16_000).putInt(32_000).putShort(2).putShort(16).put("data".toByteArray()).putInt(pcm.size * 2)
+        pcm.forEach { b.putShort(it) }
+        return b.array()
+    }
+
     /** A growable ShortArray. */
     private class ShortBuffer {
         private var a = ShortArray(16_000 * 8); var size = 0; private set
@@ -206,6 +231,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
     /** Speech-to-text on the turn's audio, then a sample answer (see [SampleAssistant]); the watch is on "Thinking". */
     private suspend fun respond() {
         val audio = synchronized(pcm16) { pcm16.snapshot() }
+        runCatching { File(folder, "$name-16k.wav").writeBytes(wav16k(audio)) }
         val t0 = System.currentTimeMillis()
         val transcript = runCatching { speech.transcribe(audio) }
         val heard = transcript.getOrNull()?.text.orEmpty()
