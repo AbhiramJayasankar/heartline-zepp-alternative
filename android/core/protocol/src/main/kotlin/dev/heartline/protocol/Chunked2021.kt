@@ -4,7 +4,7 @@ package dev.heartline.protocol
  * Huami's "2021" chunked transfer on characteristics 0016 (phone writes) and 0017 (watch notifies), as in
  * Gadgetbridge's Huami2021ChunkedEncoder/Decoder. The GTR 2e uses the plain (non-extended, unencrypted) header:
  * `03 | flags | handle | count`, and the first chunk adds `u32 length | u16 endpoint`. Flags: 0x01 first, 0x02 last,
- * 0x04 needs an ack, 0x08 encrypted. Acks are `04 00 handle 01 count`, written to 0017.
+ * 0x04 needs an ack, 0x08 encrypted. Acks are `04 handle 01 count`, written to 0017 (see [chunked2021Ack]).
  */
 object Endpoint2021 { const val ALEXA = 0x0011 }
 
@@ -28,7 +28,12 @@ fun chunked2021Frames(endpoint: Int, payload: ByteArray, handle: Int, mtu: Int =
     return frames
 }
 
-fun chunked2021Ack(handle: Int, count: Int): ByteArray = bytes(4, 0, handle and 255, 1, count and 255)
+/**
+ * Gadgetbridge sends `04 00 handle 01 count`, but that is the extended (Zepp OS) layout. The GTR 2e's frames have no
+ * extended byte and its own acks are `04 handle 01 count` (status 01 ok, 06 refused), so it gets the same layout back;
+ * the 5-byte form read as handle 00, left its start unacked and stalled its voice until it timed out.
+ */
+fun chunked2021Ack(handle: Int, count: Int): ByteArray = bytes(4, handle and 255, 1, count and 255)
 
 /** A complete 2021 message: which endpoint it is for and its payload. */
 class Message2021(val endpoint: Int, val payload: ByteArray)

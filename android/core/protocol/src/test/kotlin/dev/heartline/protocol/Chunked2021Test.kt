@@ -15,7 +15,7 @@ class Chunked2021Test {
         val payload = hex("01 02 06 01") + json
         val frame = hex("03 07 63 00") + byteArrayOf(payload.size.toByte(), 0, 0, 0) + hex("11 00") + payload
         val r = Chunked2021Decoder().feed(frame)
-        assertContentEquals(hex("04 00 63 01 00"), r.ack)
+        assertContentEquals(hex("04 63 01 00"), r.ack) // the watch's own ack layout
         assertEquals(Endpoint2021.ALEXA, r.message!!.endpoint)
         assertContentEquals(payload, r.message!!.payload)
     }
