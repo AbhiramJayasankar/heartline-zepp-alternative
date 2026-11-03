@@ -22,6 +22,10 @@ import java.io.File
  * arrives, [SpeechEndpointer] decides when the speaker has finished, and each session is saved under files/alexa/ as
  * the raw voice messages (.bin) and audio (.wav). Speech-to-text and an AI come next.
  *
+ * The working sequence (2026-11-03): ack the start, take the live voice, send 06 (triggered) when speech ends, which
+ * turns "Listening" into "Thinking", then a simple reply (09), which the watch shows. It waits ~40 s for the reply
+ * before "I didn't hear you clearly". The card (08 06) is acked but never shown; neither is one without its length.
+ *
  * Found on the GTR 2e (2026-11-03): with acks in the wrong layout the watch buffered 2 s, timed out and restarted
  * every 10 s; a start within [RESTART_S] of the last end is still treated as such a restart and left unanswered.
  * There is no known "stop listening" command. 02 (end) from the phone does not stop it and even lifts its 30 s limit;
@@ -131,7 +135,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         db.events.add("info", "Alexa: stuck session, sending ${ORPHAN_STOPS[orphanStep]}")
         watch.send2021(Endpoint2021.ALEXA, when (orphanStep++) {
             0 -> byteArrayOf(Alexa.TRIGGERED.toByte())
-            1 -> Alexa.replyRich("Heartline", "Stopped", "Listening was stuck.")
+            1 -> Alexa.replySimple("Listening was stuck.")
             2 -> Alexa.replySimple("Listening was stuck.")
             3 -> Alexa.error(3, "Heartline could not stop listening")
             else -> byteArrayOf(Alexa.END.toByte())
@@ -162,8 +166,8 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
 
     private suspend fun reply() {
         replied = true
-        watch.send2021(Endpoint2021.ALEXA, Alexa.replyRich("Heartline", "Heard you",
-            "Got %.1f s of audio, %.1f s of it speech. Speech-to-text and AI answers are coming next.".format(packets * 0.02, endpointer.speechFrames * 0.02)))
+        // Only the simple reply (09) shows on the GTR 2e; the card (08 06) is acked but left on "Thinking".
+        watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple("Heard %.1f s. Speech-to-text and AI answers are coming next.".format(packets * 0.02)))
     }
 
     private suspend fun closeDecoder() {
@@ -191,6 +195,6 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         const val FRAME = 960
         const val ESCALATE_MS = 1500L
         val ORPHAN_STOPS = listOf("triggered (06)", "a card", "a simple reply", "an error (0f)", "end (02)")
-        val STOPS = listOf("triggered (06)", "the reply", "an error (0f)")
+        val STOPS = listOf("triggered (06)", "the reply again", "an error (0f)")
     }
 }
