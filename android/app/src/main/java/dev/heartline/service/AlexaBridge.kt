@@ -31,7 +31,8 @@ import java.io.File
  * answered "not support this function"; weather (08/01) and reminders (08/02) are ignored; commands 07, 0c, 0d, 0e too.
  *
  * With acks in the wrong layout the watch buffered 2 s, timed out and restarted every 10 s; with the right ones it
- * does not, so every start is answered. The small Alexa button shown under a reply does not send a new start: the
+ * does not, so every start is answered. 0b after a reply (Alexa's ExpectSpeech) makes the watch listen again by itself
+ * once the reply has shown (~2 s), with the reply kept above the listening icon: a continued conversation. The small Alexa button shown under a reply does not send a new start: the
  * watch just streams voice again (opening with its start tone), so voice after a reply begins a new turn.
  * There is no known "stop listening" command. 02 (end) from the phone does not stop it and even lifts its 30 s limit;
  * with the stalled acks, 06 (triggered) was the one command that made it drop its buffered voice. So once speech
