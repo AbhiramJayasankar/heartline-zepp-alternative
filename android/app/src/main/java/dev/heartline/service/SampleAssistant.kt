@@ -145,14 +145,29 @@ class SampleAssistant(private val db: HeartlineDatabase, private val now: () -> 
                 s.contains("alarm") || s.contains("wake me") -> timeOfDay(s.substringAfter("alarm").substringAfter("wake me"))?.let { Ask.Alarm(it) } ?: Ask.Echo(transcript)
                 s.contains("heart") || s.contains("pulse") || Regex("""\bbpm\b""").containsMatchIn(s) -> Ask.HeartRate
                 s.contains("step") -> Ask.Steps
-                s.contains("weather") || s.contains("temperature outside") -> Ask.Weather
+                s.contains("temperature outside") || s.split(' ').any(::soundsLikeWeather) -> Ask.Weather
                 Regex("""\b(time is it|the time|what time)\b""").containsMatchIn(s) -> Ask.Time
                 Regex("""\b(date|what day|which day)\b""").containsMatchIn(s) -> Ask.Date
                 Regex("""\b(help|what can you do)\b""").containsMatchIn(s) -> Ask.Help
                 Regex("""\b(chat|talk to me|conversation)\b""").containsMatchIn(s) -> Ask.Chat
                 Regex("""\b(show my words|show what i said)\b""").containsMatchIn(s) -> Ask.ShowWords
+                // Vosk's small model often hears "set a timer for ..." as something else ("said i am a for one minute").
+                Regex("""\bfor\b""").containsMatchIn(s) && duration(s) != null -> Ask.Timer(duration(s)!!)
                 else -> Ask.Echo(transcript.trim())
             }
+        }
+
+        /** "weather" alone is often heard as "whether", "wether", "weber" or "feather" by Vosk's small model. */
+        fun soundsLikeWeather(word: String): Boolean = word in setOf("weather", "whether", "wether", "weber", "feather", "leather", "wetter", "weathers") ||
+            (word.length in 5..8 && distance(word, "weather") <= 2)
+
+        private fun distance(a: String, b: String): Int {
+            val d = IntArray(b.length + 1) { it }
+            for (i in 1..a.length) {
+                var prev = d[0]; d[0] = i
+                for (j in 1..b.length) { val t = d[j]; d[j] = minOf(d[j] + 1, d[j - 1] + 1, prev + if (a[i - 1] == b[j - 1]) 0 else 1); prev = t }
+            }
+            return d[b.length]
         }
     }
 }

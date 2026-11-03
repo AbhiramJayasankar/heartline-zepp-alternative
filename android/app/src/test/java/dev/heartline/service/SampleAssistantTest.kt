@@ -13,6 +13,7 @@ class SampleAssistantTest {
         assertEquals(Ask.Timer(90), parse("timer for one minute and thirty seconds"))
         assertEquals(Ask.Timer(1800), parse("set a timer for half an hour"))
         assertEquals(Ask.CancelTimer, parse("cancel the timer"))
+        assertEquals(Ask.Timer(60), parse("said i am a for one minute")) // heard by Vosk on the watch, 2026-11-03
     }
 
     @Test fun alarms() {
@@ -31,6 +32,8 @@ class SampleAssistantTest {
         assertEquals(Ask.HeartRate, parse("What's my heart rate"))
         assertEquals(Ask.Steps, parse("how many steps have I done"))
         assertEquals(Ask.Weather, parse("what's the weather like"))
+        assertEquals(Ask.Weather, parse("whether"))
+        assertEquals(Ask.Weather, parse("weber"))
         assertEquals(Ask.Help, parse("what can you do"))
         assertEquals(Ask.Chat, parse("let's chat"))
         assertEquals(Ask.Echo("Hello, can you hear me?"), parse("Hello, can you hear me?"))
