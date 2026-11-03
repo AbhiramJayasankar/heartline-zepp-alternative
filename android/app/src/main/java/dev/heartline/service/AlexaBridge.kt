@@ -28,7 +28,8 @@ import java.io.File
  * before "I didn't hear you clearly". The card (08 06) is acked but never shown; neither is one without its length.
  *
  * With acks in the wrong layout the watch buffered 2 s, timed out and restarted every 10 s; with the right ones it
- * does not, so every start is answered (the follow-up Alexa button after a reply starts a new session).
+ * does not, so every start is answered. The small Alexa button shown under a reply does not send a new start: the
+ * watch just streams voice again (opening with its start tone), so voice after a reply begins a new turn.
  * There is no known "stop listening" command. 02 (end) from the phone does not stop it and even lifts its 30 s limit;
  * with the stalled acks, 06 (triggered) was the one command that made it drop its buffered voice. So once speech
  * ends the bridge works through [STOPS], moving on whenever voice is still arriving [ESCALATE_MS] later.
@@ -47,6 +48,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
     private var replied = false
     private var probed = false
     private var session = 0
+    private var turn = 0
     private var stop = 0
     private var name = ""
 
@@ -77,14 +79,8 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
             if (repliedAt > 0) "%.1f s after the last reply".format((now - repliedAt) / 1000.0) else null,
             if (ended > 0) "%.1f s after the last end".format((now - ended) / 1000.0) else null,
         ).joinToString(", ").ifEmpty { "first this run" }
-        tourJob?.cancel()
-        closeDecoder()
-        active = true; replied = false; stopSent = 0; voice = ByteArrayOutputStream(); packets = 0; pending.clear()
-        started = System.currentTimeMillis(); name = "alexa-%d".format(started / 1000)
-        stop = 0; session++
-        endpointer = SpeechEndpointer()
-        folder.mkdirs()
-        decoder = withContext(Dispatchers.IO) { MicDecoder(File(folder, "$name.wav"), onPcm = ::levels) }
+        session++; turn = 0
+        newTurn()
         if (!probed) {
             probed = true
             watch.send2021(Endpoint2021.ALEXA, byteArrayOf(Alexa.CAPABILITIES_REQUEST.toByte()))
@@ -95,7 +91,25 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         db.events.add("info", "Alexa started on the watch ($gap); acknowledged")
     }
 
+    /** Per-turn state. The follow-up Alexa button after a reply reopens the mic in the same session (voice again, no start). */
+    private suspend fun newTurn() {
+        tourJob?.cancel()
+        closeDecoder()
+        active = true; replied = false; stopSent = 0; voice = ByteArrayOutputStream(); packets = 0; pending.clear()
+        started = System.currentTimeMillis(); name = "alexa-%d".format(started / 1000)
+        stop = 0; turn++
+        endpointer = SpeechEndpointer()
+        folder.mkdirs()
+        decoder = withContext(Dispatchers.IO) { MicDecoder(File(folder, "$name.wav"), onPcm = ::levels) }
+    }
+
     private suspend fun voiceArrived(payload: ByteArray) {
+        if (replied) {
+            // Voice after our reply: the follow-up button. Save the last turn and listen to the new one.
+            saveTurn()
+            newTurn()
+            db.events.add("info", "Alexa follow-up: turn $turn, %.1f s after the reply".format((System.currentTimeMillis() - repliedAt) / 1000.0))
+        }
         voice.write(payload, 1, payload.size - 1)
         val audio = Alexa.voicePackets(payload)
         packets += audio.size
@@ -154,11 +168,16 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
 
     private suspend fun finish() {
         active = false
+        val wasReplied = replied
+        saveTurn()
+        if (!wasReplied) reply()
+    }
+
+    private suspend fun saveTurn() {
         closeDecoder()
         File(folder, "$name.bin").writeBytes(voice.toByteArray())
-        val after = if (stopSent > 0) ", end came %d ms after sending ${STOPS[stop - 1]}".format(System.currentTimeMillis() - stopSent) else ", no stop sent"
-        db.events.add("info", "Alexa voice: $packets packets = %.1f s (speech %.1f s)$after, saved $name.wav".format(packets * 0.02, endpointer.speechFrames * 0.02))
-        if (!replied) reply()
+        val after = if (stopSent > 0) ", stopped with ${STOPS[stop - 1]}" else ", no stop sent"
+        db.events.add("info", "Alexa voice, turn $turn: $packets packets = %.1f s (speech %.1f s)$after, saved $name.wav".format(packets * 0.02, endpointer.speechFrames * 0.02))
     }
 
     private var repliedAt = 0L
