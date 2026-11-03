@@ -124,6 +124,15 @@ class RealController(
             }
         }.collect { (t, tr) -> today.value = t; trends.value = tr }
     }
+    // Placeholder from the activity history only; the full implementation (live HR, stress, SpO2, temperature, PAI) replaces it.
+    override fun healthDay(date: LocalDate): Flow<HealthDayUi> = activityDay(date).map { d ->
+        val start = date.atStartOfDay(zone).toEpochSecond()
+        val hr = d.minutes.mapNotNull { m -> m.hr?.let { SeriesPoint(m.ts.toDouble(), it.toDouble()) } }
+        HealthDayUi(date, start, hr, 0, null, d.hrMin, d.hrAvg, d.hrMax, emptyList(), emptyList(), 0, emptyList(), null, null, emptyList(), emptyList(),
+            emptyList(), null, null, emptyList(), emptyList(), emptyList(), null, null, null,
+            d.minutes.filter { it.steps > 0 }.map { SeriesPoint(it.ts.toDouble(), it.steps.toDouble()) }, d.steps, emptyList(), null, null,
+            d.activeMinutes, d.wornMinutes, null, null, d.minutes, d.sleep, d.workouts)
+    }
     override fun activityDay(date: LocalDate): Flow<ActivityDayUi> {
         val from = date.atStartOfDay(zone).toEpochSecond().toDouble()
         val to = date.plusDays(1).atStartOfDay(zone).toEpochSecond().toDouble() - 1

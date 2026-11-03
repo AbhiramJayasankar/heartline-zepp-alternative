@@ -54,6 +54,7 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     private var checkJob: Job? = null
 
     override fun activityDay(date: LocalDate): Flow<ActivityDayUi> = flowOf(demoDay(date))
+    override fun healthDay(date: LocalDate): Flow<HealthDayUi> = flowOf(demoHealthDay(date))
     override suspend fun checkDetail(id: String): SessionUi = demoSession(id)
 
     override fun connect() { connection.value = ConnectionUi(LinkState.CONNECTED, since = now()) }
@@ -285,6 +286,44 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
             listOf(WorkoutUi(start + 18 * 3600, 2700, "Outdoor run", 148, 172, 412, 5980, 5210, track,
                 (0..180).map { i -> val a = i / 180.0 * 2 * Math.PI; RoutePoint(i * 15, 12.9716 + 0.006 * Math.sin(a) + 0.0015 * Math.sin(3 * a), 77.5946 + 0.009 * Math.cos(a), 900.0 + 6 * Math.sin(2 * a)) })),
         )
+    }
+
+    /** A full day with the shapes a real one has: sleep dip, morning walk, desk stress, evening run. */
+    private fun demoHealthDay(date: LocalDate): HealthDayUi {
+        val day = demoDay(date); val start = date.atStartOfDay(zone).toEpochSecond()
+        val r = Random(date.toEpochDay())
+        val hr = day.minutes.mapNotNull { m -> m.hr?.let { SeriesPoint(m.ts.toDouble(), it.toDouble()) } } +
+            day.workouts.flatMap { w -> w.track.map { SeriesPoint(it.ts.toDouble(), it.bpm.toDouble()) } }
+        val hrs = hr.sortedBy { it.t }
+        fun hours(series: List<SeriesPoint>, sum: Boolean = false) = (0 until 24).map { h ->
+            val v = series.filter { ((it.t - start) / 3600).toInt() == h }.map { it.v }
+            if (v.isEmpty()) HourStatUi(h, null, null, null, if (sum) 0.0 else null) else HourStatUi(h, v.min(), v.average(), v.max(), if (sum) v.sum() else null)
+        }
+        val stress = (7 * 60 until 23 * 60 step 5).map { m ->
+            val h = m / 60.0
+            val base = when { h < 9 -> 28.0; h < 13 -> 52.0; h < 14 -> 35.0; h < 18 -> 61.0; h < 19.5 -> 74.0; else -> 30.0 }
+            SeriesPoint(start + m * 60.0, (base + 12 * sin(m / 37.0) + r.nextInt(-8, 9)).coerceIn(1.0, 100.0))
+        }
+        val spo2 = (0 until 7 * 60 step 10).map { m -> SeriesPoint(start + m * 60.0, (96.5 + 1.5 * sin(m / 50.0) - (if (m in 180..200) 4.0 else 0.0) + r.nextDouble(-1.0, 1.0)).coerceAtMost(100.0)) }
+        val temp = (0 until 1440).filter { it !in (22 * 60 + 30)..(23 * 60 + 12) }.map { m ->
+            val h = m / 60.0; val skin = if (h < 7) 34.2 + 0.4 * sin(h) else 32.3 + 0.8 * sin(h / 2.3) - (if (h in 18.0..19.2) 1.6 else 0.0)
+            SeriesPoint(start + m * 60.0, skin + r.nextDouble(-0.15, 0.15))
+        }
+        val steps = day.minutes.filter { it.steps > 0 }.map { SeriesPoint(it.ts.toDouble(), it.steps.toDouble()) }
+        fun bands(v: List<Double>, defs: List<Triple<String, Int, Int>>, perPoint: Int) = defs.map { (n, lo, hi) -> BandTimeUi(n, lo, hi, v.count { it >= lo && it <= hi } * perPoint) }
+        val maxHr = 193
+        val zones = listOf(1 to "Warm-up", 2 to "Fat burn", 3 to "Aerobic", 4 to "Anaerobic", 5 to "Max").map { (z, n) ->
+            val lo = (maxHr * (z + 4) / 10.0).toInt(); val hi = if (z == 5) null else (maxHr * (z + 5) / 10.0).toInt()
+            ZoneTimeUi(z, n, lo, hi, hrs.count { it.v >= lo && (hi == null || it.v < hi) } * 60)
+        }
+        return HealthDayUi(date, start, hrs, 1340, 54, hrs.minOf { it.v }.toInt(), hrs.map { it.v }.average().roundToInt(), hrs.maxOf { it.v }.toInt(),
+            zones, hours(hrs), 6,
+            stress, stress.map { it.v }.average().roundToInt(), stress.maxOf { it.v }.toInt(),
+            bands(stress.map { it.v }, listOf(Triple("Relaxed", 1, 39), Triple("Normal", 40, 59), Triple("Medium", 60, 79), Triple("High", 80, 100)), 5), hours(stress),
+            spo2, spo2.map { it.v }.average(), spo2.minOf { it.v }, bands(spo2.map { it.v }, listOf(Triple("Normal", 95, 100), Triple("Slightly low", 90, 94), Triple("Low", 70, 89)), 10),
+            temp, temp.map { SeriesPoint(it.t, it.v - 2.1) }, temp.map { it.v }.average(), temp.minOf { it.v }, temp.maxOf { it.v },
+            steps, day.steps, hours(steps, sum = true), 6420, 2140, day.activeMinutes, day.wornMinutes,
+            8.4, 63.0, day.minutes, day.sleep, day.workouts)
     }
 
     private fun demoGps() = GpsUi(

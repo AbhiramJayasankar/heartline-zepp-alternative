@@ -28,6 +28,8 @@ interface HeartlineController {
     val prefs: StateFlow<PrefsUi>
 
     fun activityDay(date: LocalDate): Flow<ActivityDayUi>
+    /** Everything recorded for one local day, for the day detail pages (heart rate, stress, body, steps). */
+    fun healthDay(date: LocalDate): Flow<HealthDayUi>
     suspend fun checkDetail(id: String): SessionUi?
 
     fun connect()
@@ -96,6 +98,28 @@ interface HeartlineController {
 data class SeriesPoint(val t: Double, val v: Double)
 /** Time in one heart-rate zone; zone 1..5, bounds in bpm (high null for the top zone). */
 data class ZoneTimeUi(val zone: Int, val name: String, val lowBpm: Int, val highBpm: Int?, val seconds: Int)
+/** A labelled value range and how long the day spent in it (stress bands, SpO2 bands). */
+data class BandTimeUi(val name: String, val low: Int, val high: Int, val minutes: Int)
+/** Per-hour summary; hour is 0-23 local, null fields mean no data that hour. */
+data class HourStatUi(val hour: Int, val min: Double?, val avg: Double?, val max: Double?, val total: Double? = null)
+/**
+ * One local day. All series use epoch seconds in [SeriesPoint.t]. [hr] merges the watch's per-minute history with the
+ * finer live readings; [stress] is the watch's automatic stress (0-100); [spo2] its SpO2 readings (%); [temperature] /
+ * [temperature2] the two words of the per-minute temperature record (°C). [steps] is steps per minute.
+ * Bands follow Zepp: stress relaxed 1-39, normal 40-59, medium 60-79, high 80-100.
+ */
+data class HealthDayUi(
+    val date: LocalDate, val dayStart: Long,
+    val hr: List<SeriesPoint>, val hrLiveSamples: Int, val restingHr: Int?, val hrMin: Int?, val hrAvg: Int?, val hrMax: Int?,
+    val hrZones: List<ZoneTimeUi>, val hrByHour: List<HourStatUi>, val hrHighMinutes: Int,
+    val stress: List<SeriesPoint>, val stressAvg: Int?, val stressMax: Int?, val stressBands: List<BandTimeUi>, val stressByHour: List<HourStatUi>,
+    val spo2: List<SeriesPoint>, val spo2Avg: Double?, val spo2Min: Double?, val spo2Bands: List<BandTimeUi>,
+    val temperature: List<SeriesPoint>, val temperature2: List<SeriesPoint>, val tempAvg: Double?, val tempMin: Double?, val tempMax: Double?,
+    val steps: List<SeriesPoint>, val stepsTotal: Int, val stepsByHour: List<HourStatUi>, val distanceM: Int?, val caloriesKcal: Int?,
+    val activeMinutes: Int, val wornMinutes: Int,
+    val paiToday: Double?, val paiTotal: Double?,
+    val minutes: List<MinuteUi>, val sleep: SleepNightUi?, val workouts: List<WorkoutUi>,
+)
 data class LapUi(val index: Int, val durationS: Int, val distanceM: Int?, val avgHr: Int?, val paceSPerKm: Double?)
 /** Everything decoded beyond the basic summary. Any decoded field without a dedicated slot goes in [extras] as label to value. */
 data class WorkoutDetailUi(
