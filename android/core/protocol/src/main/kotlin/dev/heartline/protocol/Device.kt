@@ -15,6 +15,8 @@ object Uuids {
     val CONFIG: UUID = huami("0003")
     val REALTIME_STEPS: UUID = huami("0007")
     val DEVICE_EVENT: UUID = huami("0010")
+    /** Watch workout lifecycle (Gadgetbridge HuamiWorkoutStatus): `11 status`, 02 start, 03 pause, 04 resume, 05 end. */
+    val WORKOUT_STATUS: UUID = huami("000f")
     val CHUNKED: UUID = huami("0020")
     val HR_MEASURE: UUID = standard("2a37")
     val HR_CONTROL: UUID = standard("2a39")
@@ -79,3 +81,9 @@ fun decodeInfo(data: ByteArray): String {
 
 val ALERT_FIND: ByteArray get() = bytes(3)
 val ALERT_OFF: ByteArray get() = bytes(0)
+
+/** Name of a workout-status notification, or the raw hex when it isn't the documented `11 status` form. */
+fun workoutStatusName(data: ByteArray): String =
+    if (data.size >= 2 && data[0].toInt() == 0x11) when (data[1].toInt() and 255) {
+        2 -> "started"; 3 -> "paused"; 4 -> "resumed"; 5 -> "ended"; else -> "status %02x".format(data[1].toInt() and 255)
+    } else "unknown " + data.joinToString("") { "%02x".format(it) }

@@ -47,6 +47,9 @@ class WatchConnection(
     private val gpsState = MutableStateFlow<GpsState?>(null)
     val gps = gpsState.asStateFlow()
     private val watchEvents = MutableSharedFlow<ByteArray>(extraBufferCapacity = 64)
+    private val workoutEvents = MutableSharedFlow<ByteArray>(extraBufferCapacity = 16)
+    /** Raw workout-status notifications from the watch (see [workoutStatusName]); for starting captures automatically. */
+    val workoutStatus: SharedFlow<ByteArray> = workoutEvents
     val deviceEvents = watchEvents.asSharedFlow()
     private val actions = Mutex()
     private val syncLock = Mutex()
@@ -134,6 +137,7 @@ class WatchConnection(
                         stepsState.value = parseRealtimeSteps(c.read(Uuids.REALTIME_STEPS))
                         c.enableNotification(Uuids.REALTIME_STEPS); c.enableNotification(Uuids.DEVICE_EVENT)
                     }
+                    optional("Workout status") { c.enableNotification(Uuids.WORKOUT_STATUS) }
                     if (wantHr) setLiveHr(true)
                     if (wantRaw) startRaw(rawState.value.sensors)
                     readyState.value = true
@@ -213,6 +217,10 @@ class WatchConnection(
                 if (bpm > 0) { val ts = System.currentTimeMillis() / 1000.0; persistence.heartRate(ts, bpm); hrState.update { it.copy(bpm = bpm, ts = ts.toLong()) } }
             }
             Uuids.REALTIME_STEPS -> parseRealtimeSteps(n.value)?.let { stepsState.value = it }
+            Uuids.WORKOUT_STATUS -> {
+                log("info", "Watch workout ${workoutStatusName(n.value)} (${n.value.joinToString("") { "%02x".format(it) }})")
+                workoutEvents.tryEmit(n.value.copyOf())
+            }
             Uuids.DEVICE_EVENT -> {
                 log("info", "Watch event: ${deviceEventName(n.value).replace('_', ' ')}")
                 watchEvents.emit(n.value.copyOf())
