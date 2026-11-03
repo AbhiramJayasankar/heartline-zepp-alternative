@@ -265,20 +265,36 @@ class WatchConnection(
         if (recording != null && rawState.value.sensors == sensors) return@withLock recording!!.file
         if (recording != null) stopRawLocked(c)
         wantRaw = true
-        val r = RawRecording(File(context.filesDir, "raw"), sensors) { rawEvents.tryEmit(RawUpdate(levels = listOf(it))) }
+        val mode = RawPpgMode(FAST_PPG_ENABLED && RawSensor.PPG in sensors, android.os.SystemClock.elapsedRealtime())
+        val r = RawRecording(File(context.filesDir, "raw"), sensors, mode.fast) { rawEvents.tryEmit(RawUpdate(levels = listOf(it))) }
         recording = r; gpsState.value = null
         rawState.value = RawStatus(false, sensors, r.file)
         try {
             c.enableNotification(Uuids.RAW_DATA); c.enableNotification(Uuids.RAW_CTRL)
-            rawBegin(c, sensors)
+            rawBegin(c, sensors, mode.fast)
             rawState.value = RawStatus(true, sensors, r.file)
             watchdog = scope.launch {
                 while (isActive) {
                     delay(200); r.flush()
-                    if (r.hasAudio && System.nanoTime() - r.lastMic >= 4_000_000_000 && System.nanoTime() - r.lastKick >= 4_000_000_000) {
+                    if (mode.retrySlow(android.os.SystemClock.elapsedRealtime(), r.ppgPackets)) {
+                        log("warn", "No PPG within 5 s with fast PPG (0x80); retrying raw stream once without 0x80")
+                        optional("Slow PPG fallback") { actions.withLock {
+                            if (recording === r) {
+                                c.write(Uuids.RAW_CTRL, RAW_STOP); delay(300)
+                                r.lastKick = System.nanoTime()
+                                r.restartClock(false); rawBegin(c, sensors, false)
+                            }
+                        } }
+                    }
+                    if (r.hasAudio && (!mode.fast || mode.hasPpg(r.ppgPackets)) &&
+                        System.nanoTime() - r.lastMic >= 4_000_000_000 && System.nanoTime() - r.lastKick >= 4_000_000_000) {
                         r.lastKick = System.nanoTime()
                         log("warn", "Microphone went quiet; restarting the raw stream")
-                        optional("Microphone restart") { actions.withLock { c.write(Uuids.RAW_CTRL, RAW_STOP); delay(300); rawBegin(c, sensors) } }
+                        optional("Microphone restart") { actions.withLock {
+                            c.write(Uuids.RAW_CTRL, RAW_STOP); delay(300)
+                            mode.began(android.os.SystemClock.elapsedRealtime(), r.ppgPackets)
+                            r.restartClock(mode.fast); rawBegin(c, sensors, mode.fast)
+                        } }
                     }
                 }
             }
@@ -299,7 +315,8 @@ class WatchConnection(
             throw e
         }
     }
-    private suspend fun rawBegin(c: GattClient, sensors: Set<RawSensor>, commands: () -> List<ByteArray> = { rawStartCommands(rawMask(sensors)) }) {
+    private suspend fun rawBegin(c: GattClient, sensors: Set<RawSensor>, fastPpg: Boolean = FAST_PPG_ENABLED,
+        commands: () -> List<ByteArray> = { rawStartCommands(rawMask(sensors, fastPpg)) }) {
         for (cmd in commands()) { c.write(Uuids.RAW_CTRL, cmd); delay(400) }
     }
     @Volatile private var probeSink: ((ByteArray) -> Unit)? = null

@@ -40,7 +40,7 @@ internal fun mergeCapture(session: CaptureSession, parts: List<Recording>): Reco
         times { it.accT }, parts.flatMap { it.acc.toList() }.toTypedArray(),
         times { it.gyroT }, parts.flatMap { it.gyro.toList() }.toTypedArray(),
         times { it.magT }, parts.flatMap { it.mag.toList() }.toTypedArray(), times { it.accArrivalT },
-        session.elapsed(session.end ?: session.start).toDouble(), times { it.ppgArrivalT })
+        session.elapsed(session.end ?: session.start).toDouble(), times { it.ppgArrivalT }, parts.any { it.watchClock })
 }
 
 internal fun readCaptureFiles(folder: File, session: CaptureSession) = session.files.mapNotNull { name ->

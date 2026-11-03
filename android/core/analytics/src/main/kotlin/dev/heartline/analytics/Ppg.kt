@@ -30,9 +30,12 @@ fun retime(t: DoubleArray, window: Int = 125): DoubleArray {
 fun makeRecording(
     ppgT: DoubleArray, ppg: DoubleArray, accT: DoubleArray = doubleArrayOf(),
     acc: Array<FloatArray> = emptyArray(),
+    watchClock: Boolean = false,
 ): Recording {
     require(ppgT.size == ppg.size && accT.size == acc.size && acc.all { it.size == 3 })
     val start = ppgT.firstOrNull() ?: 0.0
+    if (watchClock) return Recording(start, DoubleArray(ppgT.size) { ppgT[it] - start }, ppg.copyOf(),
+        DoubleArray(accT.size) { accT[it] - start }, Array(acc.size) { acc[it].copyOf() }, watchClock = true)
     if (ppg.size < 2) return Recording(start, DoubleArray(ppg.size), ppg.copyOf(), doubleArrayOf(), emptyArray())
     val at = if (accT.size > 3) retime(accT).also { t ->
         val offset = accT[0] - start
@@ -53,23 +56,29 @@ fun readRecordingCsv(reader: Reader): Recording {
     val a = ArrayList<FloatArray>()
     val gt = ArrayList<Double>(); val g = ArrayList<FloatArray>()
     val mt = ArrayList<Double>(); val m = ArrayList<FloatArray>()
+    val pw = ArrayList<Double>(); val aw = ArrayList<Double>()
+    val gw = ArrayList<Double>(); val mw = ArrayList<Double>()
     lines.lineSequence().filter { it.isNotBlank() }.forEach { line ->
         val row = csvFields(line)
         fun field(name: String) = row.getOrElse(columns.getValue(name)) { "" }
+        val watch = columns["wts"]?.let { row.getOrNull(it)?.toDoubleOrNull() } ?: Double.NaN
         when (field("kind")) {
-            "ppg" -> if (field("ppg").isNotEmpty()) { pt.add(field("ts").toDouble()); p.add(field("ppg").toDouble()) }
+            "ppg" -> if (field("ppg").isNotEmpty()) { pt.add(field("ts").toDouble()); p.add(field("ppg").toDouble()); pw.add(watch) }
             "accel" -> if (field("ax").isNotEmpty()) {
                 at.add(field("ts").toDouble())
+                aw.add(watch)
                 a.add(floatArrayOf(field("ax").toFloat(), field("ay").toFloat(), field("az").toFloat()))
             }
             "gyro", "mag" -> if (field("ax").isNotEmpty()) {
                 val times = if (field("kind") == "gyro") gt else mt
                 val values = if (field("kind") == "gyro") g else m
                 times.add(field("ts").toDouble())
+                (if (field("kind") == "gyro") gw else mw).add(watch)
                 values.add(floatArrayOf(field("ax").toFloat(), field("ay").toFloat(), field("az").toFloat()))
             }
         }
     }
+    if ("wts" in columns) return watchRecording(pt, p, at, a, gt, g, mt, m, pw, aw, gw, mw)
     val legacy = makeRecording(pt.toDoubleArray(), p.toDoubleArray(), at.toDoubleArray(), a.toTypedArray())
     val start = pt.firstOrNull() ?: listOfNotNull(at.firstOrNull(), gt.firstOrNull(), mt.firstOrNull()).minOrNull() ?: 0.0
     return legacy.copy(start = start,
@@ -78,6 +87,67 @@ fun readRecordingCsv(reader: Reader): Recording {
         accArrivalT = at.map { it - start }.toDoubleArray(),
         gyroT = gt.map { it - start }.toDoubleArray(), gyro = g.toTypedArray(),
         magT = mt.map { it - start }.toDoubleArray(), mag = m.toTypedArray())
+}
+
+/** A common watch origin aligns every sensor. Empty wts cells are arrival fallbacks,
+ * translated with the nearest valid epoch/watch pair rather than retimed across a gap. */
+private fun watchRecording(
+    pt: List<Double>, p: List<Double>, at: List<Double>, a: List<FloatArray>,
+    gt: List<Double>, g: List<FloatArray>, mt: List<Double>, m: List<FloatArray>,
+    pw: List<Double>, aw: List<Double>, gw: List<Double>, mw: List<Double>,
+): Recording {
+    val start = pt.firstOrNull() ?: listOfNotNull(at.firstOrNull(), gt.firstOrNull(), mt.firstOrNull()).minOrNull() ?: 0.0
+    val pairs = listOf(pt to pw, at to aw, gt to gw, mt to mw)
+    val anchor = pairs.firstNotNullOfOrNull { (t, w) -> w.indices.firstOrNull { w[it].isFinite() }?.let { t[it] to w[it] } }
+    val origin = anchor?.let { it.second - (it.first - start) } ?: 0.0
+    fun times(t: List<Double>, w: List<Double>): DoubleArray {
+        val valid = w.indices.filter { w[it].isFinite() }
+        var j = 0
+        val out = DoubleArray(t.size) { i ->
+            while (j < valid.lastIndex && abs(valid[j + 1] - i) <= abs(valid[j] - i)) j++
+            if (w[i].isFinite()) w[i] - origin else valid.getOrNull(j)?.let { w[it] - origin + t[i] - t[it] } ?: (t[i] - start)
+        }
+        // A delayed unstamped packet can overlap the next authoritative stamp on the
+        // phone clock. Only reconstruct that missing block; keep every stamped time exact.
+        val step = median(valid.zipWithNext().map { (a, b) -> (w[b] - w[a]) / (b - a) }.toDoubleArray())
+            .takeIf { it.isFinite() && it > 0 } ?: .04
+        var first = 0
+        while (first < w.size) {
+            if (w[first].isFinite()) { first++; continue }
+            var end = first + 1
+            while (end < w.size && !w[end].isFinite()) end++
+            val left = out.getOrNull(first - 1)
+            val right = out.getOrNull(end)
+            val overlaps = (first until end).any { i ->
+                (i > 0 && out[i] <= out[i - 1]) || (right != null && out[i] >= right)
+            }
+            if (overlaps && (left != null || right != null)) for (i in first until end) out[i] = when {
+                left != null && right != null -> left + (right - left) * (i - first + 1) / (end - first + 1)
+                left != null -> max(out[i], left + (i - first + 1) * step)
+                else -> right!! - (end - i) * step
+            }
+            first = end
+        }
+        return out
+    }
+    val ptime = times(pt, pw)
+    val keep = ArrayList<Int>()
+    var run = 0
+    for (i in p.indices) {
+        if (i > 0 && ptime[i] - ptime[i - 1] > 1) run = i
+        if (ptime[i] - ptime[run] < .4 - 1e-9) continue
+        // Also remove a longer low LED-settling plateau, using the following second.
+        if (ptime[i] - ptime[run] < 2) {
+            val end = ptime.lowerBound(ptime[i] + 1)
+            val next = median(p.subList(i, max(i + 1, end)).toDoubleArray())
+            if (p[i] < .4 * next) continue
+        }
+        keep += i
+    }
+    val accTime = times(at, aw)
+    return Recording(start, keep.map { ptime[it] }.toDoubleArray(), keep.map { p[it] }.toDoubleArray(), accTime, a.toTypedArray(),
+        times(gt, gw), g.toTypedArray(), times(mt, mw), m.toTypedArray(), accTime,
+        ppgArrivalT = keep.map { pt[it] - start }.toDoubleArray(), watchClock = true)
 }
 
 private fun csvFields(line: String): List<String> {
@@ -169,6 +239,8 @@ internal fun findPeaks(y: DoubleArray, distance: Int, prominence: Double): IntAr
 
 internal fun detectBeats(rec: Recording, motion: Motion, expectedHr: Double? = null): Beats {
     if (rec.durationS < 8) return Beats(notes = listOf("Recording too short to find heartbeats (needs at least 8 s)."))
+    // Analysis grid (100 Hz), not the sensor rate: interpolation uses actual sample times.
+    // Thus filters, refractory distances and template durations work at 25, 50 or changing Hz.
     val t = grid(0.0, rec.ppgT.last(), 0.01)
     val x = interpolate(rec.ppgT, rec.ppg, t)
     val baseline = zeroPhase(x, butterworth(100.0, 0.5))
@@ -215,6 +287,13 @@ internal fun detectBeats(rec: Recording, motion: Motion, expectedHr: Double? = n
     val good = BooleanArray(peaks.size) { i ->
         valid[i] && template != null && correlation(windows[i]!!, template) >= 0.80 &&
             amplitude[i] > 0.3 * medAmp && amplitude[i] < 3.0 * medAmp
+    }
+    if (rec.watchClock) {
+        // Never qualify interpolated beats across a packet-loss/reconnect gap or LED warm-up.
+        for (i in good.indices) {
+            val at = rec.ppgT.lowerBound(times[i])
+            if (at == 0 || at == rec.ppgT.size || rec.ppgT[at] - rec.ppgT[at - 1] > .5) good[i] = false
+        }
     }
     val notes = ArrayList<String>()
     if (motion.t.isNotEmpty()) {

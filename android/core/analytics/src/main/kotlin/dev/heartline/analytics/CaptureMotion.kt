@@ -9,7 +9,7 @@ private const val FS = 25.0
 
 internal fun captureMotion(rec: Recording, duration: Double): CaptureMotionResult {
     val n = ceil(duration * FS).toInt()
-    val acc = resampleVectors(rec.accArrivalT, rec.acc, n)
+    val acc = resampleVectors(if (rec.watchClock) rec.accT else rec.accArrivalT, rec.acc, n, rec.watchClock)
     val norm = magnitude(acc).map { it - 1 }.toDoubleArray()
     val hp = filterRuns(norm, .1, 8.0)
     val accAxes = acc.map { filterRuns(it, .1, 8.0) }
@@ -78,11 +78,11 @@ private fun magnitude(axes: List<DoubleArray>) = DoubleArray(axes.first().size) 
 private fun rms(x: DoubleArray): Double = x.filter { it.isFinite() }.let { if (it.isEmpty()) 0.0 else sqrt(it.sumOf { v -> v * v } / it.size) }
 
 /** Interpolate only across sub-500 ms arrival jitter. Reconnects and sensor stalls remain NaN. */
-private fun resampleVectors(arrival: DoubleArray, xyz: Array<FloatArray>, n: Int): List<DoubleArray> {
+private fun resampleVectors(arrival: DoubleArray, xyz: Array<FloatArray>, n: Int, watchClock: Boolean): List<DoubleArray> {
     val t = arrival.copyOf()
     var first = 0
     // Retiming removes overlapping packet stamps without stretching a reconnect gap into motion.
-    for (i in 1..t.size) {
+    if (!watchClock) for (i in 1..t.size) {
         if (i < t.size && arrival[i] - arrival[i - 1] <= 1) continue
         val local = retime(arrival.copyOfRange(first, i))
         for (j in local.indices) t[first + j] = arrival[first] + local[j]

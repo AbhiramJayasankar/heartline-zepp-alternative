@@ -45,3 +45,46 @@ sample**: the step between consecutive stamps equals the packet's own sample cou
 
 - The first ~10 PPG samples after a start sit near 3,800 while the LED settles. Drop them.
 - No red or infrared channel appeared under any mask: every PPG run sits at the same green level (~27,000-28,000).
+
+## Test fixture
+
+`core/ble/src/test/resources/raw/probe-1103b.txt` holds the complete probe-2 runs (masks 0x02, 0x82, 0x83, 0x81;
+586 packets in arrival order). Measured on the watch clock: 0x02 PPG 25.10 Hz; 0x82 PPG 25.13 Hz for the first 7.8 s
+then 50.16 Hz (the watch's own switch at 20:01:00.8, counters continuous, no packet loss); 0x83 PPG 50.14 Hz and
+accel 26.21 Hz; 0x81 accel 26.16 Hz.
+
+## Recording and compatibility
+
+`RawSampleClock` keeps one pending packet per sensor. On its stamp it writes sample `i` at
+`watchEnd - (n-1-i)*period`. It estimates each sensor's period from up to 15 consecutive
+stamp/count intervals, excludes outliers around the median and weights by sample count.
+Three consistent changed intervals reset the estimate, allowing the 0x82 rate switch. The
+initial rates are PPG 25 Hz and accel 26.16 Hz. Each authoritative end stamp also bounds
+the packet period to prevent overlap with the preceding stamped packet.
+
+A robust running affine fit maps watch seconds to phone epoch seconds using up to 120 s /
+256 stamp-arrival pairs. It excludes delayed BLE bursts, bounds drift to +/-1000 ppm and
+slews phase corrections at at most 1 ms/s. `ts` remains epoch seconds; trailing `wts` records
+unwrapped watch seconds at full precision. Timestamps are monotonic **within each sensor**;
+interleaved sensor batches are not globally sorted CSV rows.
+
+Missing stamps fall back to the packet's original arrival time and measured/nominal period
+when the next same-sensor packet arrives, after 1.5 s, or on stop. Those rows have empty `wts`.
+Counter offsets reject late/duplicate stamps for an already emitted packet. Unsigned counters
+and the 32-bit watch clock wrap naturally; skipped counters do not enter the rate estimator.
+Stream restarts flush the pending tail and reset pairing/rate state. Reconnects get new CSVs
+and a new epoch fit; capture merging retains their epoch gaps even if the watch rebooted.
+A backward watch-clock reset without a new recording rejects stamps and uses arrival
+fallback until a new recording; it does not reinterpret the reset as a 49-day forward jump.
+
+The CSV reader prefers watch time, translates empty `wts` cells through nearby epoch/watch
+anchors, and preserves sensor alignment. If a delayed fallback block overlaps later watch
+stamps, only that block is interpolated between its neighboring anchors to preserve order.
+It excludes the first 0.4 s of each PPG run and any
+remaining low settling samples (<40% of the following second's median, within the first 2 s)
+from analysis only. Every raw value, including the initial ~3,800-level samples, remains in CSV.
+Files without `wts` use the unchanged legacy path, including retiming and warm-up behavior.
+
+`FAST_PPG_ENABLED` in `RawPpgMode.kt` is the one switch for adding 0x80 to captures, the live raw view and
+manual checks. It is **off**, because 0x80 has no effect (probe 3). If it were on, after ~5 s with 0x80 and no PPG
+the connection would log a warning and restart once without it. Explicit mask probes are always exact requests.
