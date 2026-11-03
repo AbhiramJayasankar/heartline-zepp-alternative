@@ -51,12 +51,6 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
 
     fun start() = scope.launch {
         launch(Dispatchers.IO) { decodeOld() }
-        // Debug: `touch files/alexa/.reply-once` sends one card after the next app start (to answer a stuck "Thinking").
-        File(folder, ".reply-once").takeIf { it.exists() }?.let { flag ->
-            flag.delete()
-            launch { delay(4000); runCatching { watch.send2021(Endpoint2021.ALEXA, Alexa.replyRich("Heartline", "Heard you", "This is the reply to Thinking.")) }
-                .onSuccess { db.events.add("info", "Alexa: sent the one-off card") }.onFailure { db.events.add("warn", "Alexa one-off card: ${it.message}") } }
-        }
         watch.chunked2021.collect { m ->
             if (m.endpoint != Endpoint2021.ALEXA || m.payload.isEmpty()) return@collect
             try {
