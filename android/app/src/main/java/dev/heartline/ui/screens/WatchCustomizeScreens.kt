@@ -1,6 +1,7 @@
 package dev.heartline.ui.screens
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
@@ -83,33 +84,31 @@ fun VibrationScreen(controller: HeartlineController, nav: Navigator) {
     val conn by controller.connection.collectAsStateWithLifecycle()
     val connected = conn.state == LinkState.CONNECTED
     Screen("Vibration patterns", onBack = { nav.pop() },
-        subtitle = "How the watch buzzes for each kind of alert. Try a pattern on your wrist before you set it.") {
+        subtitle = "How the watch buzzes for each kind of alert. Picking a pattern sets it on the watch; Try buzzes it once.") {
         if (!connected) { MutedText("Connect the watch to try or set patterns."); Gap(8) }
         list.forEach { v ->
-            var profile by remember(v.kind, v.profile) { mutableStateOf(v.profile ?: "short") }
-            var repeat by remember(v.kind, v.repeat) { mutableStateOf(v.repeat) }
+            val profile = v.profile ?: "short"
             var open by remember { mutableStateOf(false) }
+            // Choosing a pattern or a count sets it on the watch straight away; Try only buzzes.
+            fun set(p: String, r: Int) = controller.setVibration(v.kind, p, r)
             Gap(14)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(v.label, style = HL.type.bodyStrong, color = c.ink, modifier = Modifier.weight(1f))
-                MutedText(if (v.profile == null) "Watch default" else "Set: " + VibrationPatterns.PROFILES.first { it.key == v.profile }.label)
+                Column(Modifier.weight(1f)) {
+                    Text(v.label, style = HL.type.bodyStrong, color = c.ink)
+                    MutedText(if (v.profile == null) "Watch default" else "Set to " + VibrationPatterns.PROFILES.first { it.key == v.profile }.label.lowercase() + ", ×${v.repeat}")
+                }
+                PillButton("Try", { controller.tryVibration(v.kind, profile, v.repeat) }, style = ButtonStyle.QUIET, enabled = connected)
             }
             Gap(8)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box {
-                    PillButton(VibrationPatterns.PROFILES.first { it.key == profile }.label, { open = true }, style = ButtonStyle.QUIET)
+                    PillButton(VibrationPatterns.PROFILES.first { it.key == profile }.label, { open = true }, style = ButtonStyle.QUIET, enabled = connected)
                     DropdownMenu(open, { open = false }) {
-                        VibrationPatterns.PROFILES.forEach { p -> DropdownMenuItem(text = { Text(p.label) }, onClick = { open = false; profile = p.key }) }
+                        VibrationPatterns.PROFILES.forEach { p -> DropdownMenuItem(text = { Text(p.label) }, onClick = { open = false; set(p.key, v.repeat) }) }
                     }
                 }
                 Spacer(Modifier.width(8.dp))
-                Segmented(listOf(1 to "×1", 2 to "×2", 3 to "×3", 5 to "×5"), repeat, { repeat = it })
-            }
-            Gap(8)
-            Row {
-                PillButton("Try", { controller.tryVibration(v.kind, profile, repeat) }, style = ButtonStyle.QUIET, enabled = connected)
-                Spacer(Modifier.width(8.dp))
-                PillButton("Set", { controller.setVibration(v.kind, profile, repeat) }, enabled = connected)
+                Segmented(listOf(1 to "×1", 2 to "×2", 3 to "×3", 5 to "×5"), v.repeat, { if (connected) set(profile, it) })
             }
             Gap(14); HorizontalDivider(color = c.line)
         }
