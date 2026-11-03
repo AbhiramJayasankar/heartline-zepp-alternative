@@ -2,9 +2,10 @@ package dev.heartline.protocol
 
 enum class RawSensor(val mask: Int) { ACCEL(1), PPG(2), GPS(8), GYRO(16), MIC(32), MAG(64) }
 fun rawMask(sensors: Set<RawSensor>): Int = sensors.fold(0) { mask, sensor -> mask or sensor.mask }.let { if (it == 0) 3 else it }
-fun rawStartCommands(mask: Int = 3): List<ByteArray> {
-    require(mask in 0..255) { "bytes must be in range(0, 256)" }
-    return listOf(bytes(1, mask, 0x19), bytes(1, mask, 0, 0, 0, 0x19), bytes(2))
+/** [rate] is the last byte of both start commands; every client sends 0x19 (25). Probed to see if it sets the rate. */
+fun rawStartCommands(mask: Int = 3, rate: Int = 0x19): List<ByteArray> {
+    require(mask in 0..255 && rate in 0..255) { "bytes must be in range(0, 256)" }
+    return listOf(bytes(1, mask, rate), bytes(1, mask, 0, 0, 0, rate), bytes(2))
 }
 val RAW_STOP: ByteArray get() = bytes(3)
 const val ACCEL_ONE_G = 4100

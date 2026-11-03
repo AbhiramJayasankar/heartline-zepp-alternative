@@ -308,15 +308,15 @@ class WatchConnection(
      * Starts the raw stream with an arbitrary sensor [mask] for [seconds] and reports what came back: packet types,
      * counts, sizes and a sample of each. Used to find what the undocumented mask bits switch on.
      */
-    suspend fun probeRawMask(mask: Int, seconds: Long = 8): String = actions.withLock {
+    suspend fun probeRawMask(mask: Int, seconds: Long = 8, rate: Int = 0x19): String = actions.withLock {
         val c = requireClient()
         check(recording == null) { "Stop raw streaming first" }
         val packets = java.util.concurrent.ConcurrentLinkedQueue<ByteArray>()
         // Every packet goes to the BLE log with its arrival time, so new channels can be decoded offline.
-        probeSink = { packets.add(it); BleLog.note("probe 0x%02x pkt %s".format(mask, it.joinToString("") { b -> "%02x".format(b) })) }
+        probeSink = { packets.add(it); BleLog.note("probe 0x%02x r%02x pkt %s".format(mask, rate, it.joinToString("") { b -> "%02x".format(b) })) }
         try {
             c.enableNotification(Uuids.RAW_DATA); c.enableNotification(Uuids.RAW_CTRL)
-            rawBegin(c, setOf()) { rawStartCommands(mask) }
+            rawBegin(c, setOf()) { rawStartCommands(mask, rate) }
             delay(seconds * 1000)
         } finally {
             withContext(NonCancellable) {
@@ -325,7 +325,8 @@ class WatchConnection(
             }
         }
         val byType = packets.groupBy { it[0].toInt() and 255 }
-        val summary = if (byType.isEmpty()) "mask 0x%02x: nothing".format(mask) else "mask 0x%02x: ".format(mask) + byType.entries.sortedBy { it.key }.joinToString("; ") { (t, list) ->
+        val label = if (rate == 0x19) "mask 0x%02x".format(mask) else "mask 0x%02x rate 0x%02x".format(mask, rate)
+        val summary = if (byType.isEmpty()) "$label: nothing" else "$label: " + byType.entries.sortedBy { it.key }.joinToString("; ") { (t, list) ->
             "type 0x%02x x%d (%.0f/s, %s bytes)".format(t, list.size, list.size / seconds.toDouble(), list.map { it.size }.distinct().sorted().take(3).joinToString("/"))
         }
         BleLog.note("probe $summary")

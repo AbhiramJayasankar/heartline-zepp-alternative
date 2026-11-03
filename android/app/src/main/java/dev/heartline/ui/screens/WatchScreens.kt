@@ -253,7 +253,7 @@ fun SensorsScreen(controller: HeartlineController, nav: Navigator) {
         val probe by controller.probe.collectAsStateWithLifecycle()
         SectionTitle("Unknown sensors")
         Gap(4)
-        MutedText("Two of the watch's sensor switches have never been mapped; one may be the red and infrared light it uses for SpO2. Wear the watch, stop streaming, then probe and keep your arm still for about 90 seconds: four combinations run for 20 seconds each.")
+        MutedText("Two of the watch's sensor switches have never been mapped; one may be the red and infrared light it uses for SpO2. Wear the watch, stop streaming, then probe and keep your arm still for about 2½ minutes: eleven combinations run for 12 seconds each.")
         Gap(10)
         PillButton("Probe unknown sensors", { controller.probeUnknownSensors() }, style = ButtonStyle.QUIET, enabled = connected && !s.streaming)
         probe.forEach { Gap(6); Text(it, style = HL.type.small, color = c.ink) }
