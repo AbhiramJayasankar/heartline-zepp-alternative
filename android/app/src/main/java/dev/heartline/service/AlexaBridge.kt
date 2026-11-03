@@ -9,6 +9,7 @@ import dev.heartline.protocol.Endpoint2021
 import dev.heartline.protocol.SpeechEndpointer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -26,8 +27,8 @@ import java.io.File
  * turns "Listening" into "Thinking", then a simple reply (09), which the watch shows. It waits ~40 s for the reply
  * before "I didn't hear you clearly". The card (08 06) is acked but never shown; neither is one without its length.
  *
- * Found on the GTR 2e (2026-11-03): with acks in the wrong layout the watch buffered 2 s, timed out and restarted
- * every 10 s; a start within [RESTART_S] of the last end is still treated as such a restart and left unanswered.
+ * With acks in the wrong layout the watch buffered 2 s, timed out and restarted every 10 s; with the right ones it
+ * does not, so every start is answered (the follow-up Alexa button after a reply starts a new session).
  * There is no known "stop listening" command. 02 (end) from the phone does not stop it and even lifts its 30 s limit;
  * with the stalled acks, 06 (triggered) was the one command that made it drop its buffered voice. So once speech
  * ends the bridge works through [STOPS], moving on whenever voice is still arriving [ESCALATE_MS] later.
@@ -60,6 +61,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
                     Alexa.END -> {
                         ended = System.currentTimeMillis()
                         if (orphanAt > 0) { db.events.add("info", "Alexa: the stuck session ended %d ms after sending ${ORPHAN_STOPS[orphanStep - 1]}".format(ended - orphanAt)); orphanAt = 0; orphanStep = 0 }
+                        tourJob?.let { if (it.isActive) { it.cancel(); db.events.add("info", "Alexa: the watch ended the session %.1f s after the last reply".format((ended - repliedAt) / 1000.0)) } }
                         if (active) finish()
                     }
                     else -> db.events.add("info", "Alexa message: " + m.payload.take(160).joinToString("") { "%02x".format(it) } +
@@ -70,11 +72,12 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
     }
 
     private suspend fun begin() {
-        val since = (System.currentTimeMillis() - ended) / 1000.0
-        if (ended > 0 && since < RESTART_S) {
-            db.events.add("info", "Alexa restarted by itself %.1f s after the last end; left unanswered".format(since))
-            return
-        }
+        val now = System.currentTimeMillis()
+        val gap = listOfNotNull(
+            if (repliedAt > 0) "%.1f s after the last reply".format((now - repliedAt) / 1000.0) else null,
+            if (ended > 0) "%.1f s after the last end".format((now - ended) / 1000.0) else null,
+        ).joinToString(", ").ifEmpty { "first this run" }
+        tourJob?.cancel()
         closeDecoder()
         active = true; replied = false; stopSent = 0; voice = ByteArrayOutputStream(); packets = 0; pending.clear()
         started = System.currentTimeMillis(); name = "alexa-%d".format(started / 1000)
@@ -89,7 +92,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         }
         // Gadgetbridge waits ~700 ms so the link has switched to its fast interval before acking.
         delay(700); watch.send2021(Endpoint2021.ALEXA, Alexa.startAck); acked = System.currentTimeMillis()
-        db.events.add("info", "Alexa started on the watch; acknowledged")
+        db.events.add("info", "Alexa started on the watch ($gap); acknowledged")
     }
 
     private suspend fun voiceArrived(payload: ByteArray) {
@@ -158,10 +161,31 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         if (!replied) reply()
     }
 
+    private var repliedAt = 0L
+    private var tourJob: Job? = null
+    private val tourFile get() = File(folder, ".tour")
+
     private suspend fun reply() {
-        replied = true
-        // Only the simple reply (09) shows on the GTR 2e; the card (08 06) is acked but left on "Thinking".
+        replied = true; repliedAt = System.currentTimeMillis()
+        val step = runCatching { tourFile.readText().trim().toInt() }.getOrDefault(0)
+        if (step < AlexaReplyTour.stops.size) {
+            tourFile.writeText("${step + 1}")
+            tourJob = scope.launch { tour(AlexaReplyTour.stops[step], step) }
+            return
+        }
+        // The simple reply (09) shows on the GTR 2e; the card (08 06) is acked but left on "Thinking".
         watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple("Heard %.1f s. Speech-to-text and AI answers are coming next.".format(packets * 0.02)))
+    }
+
+    /** One stop of [AlexaReplyTour]: lettered candidates 3 s apart, then the plain fallback. */
+    private suspend fun tour(stop: AlexaReplyTour.Stop, step: Int) {
+        db.events.add("info", "Alexa reply tour ${step + 1}/${AlexaReplyTour.stops.size}: ${stop.title}")
+        for (c in stop.candidates) {
+            watch.send2021(Endpoint2021.ALEXA, c.payload); repliedAt = System.currentTimeMillis()
+            db.events.add("info", "Alexa reply tour: sent ${c.letter} (${c.what})")
+            delay(3000)
+        }
+        stop.fallback?.let { watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple(it)); repliedAt = System.currentTimeMillis(); db.events.add("info", "Alexa reply tour: sent the fallback") }
     }
 
     private suspend fun closeDecoder() {
@@ -185,7 +209,6 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
     }
 
     private companion object {
-        const val RESTART_S = 12.0
         const val FRAME = 960
         const val ESCALATE_MS = 1500L
         val ORPHAN_STOPS = listOf("triggered (06)", "a card", "a simple reply", "an error (0f)", "end (02)")
