@@ -65,6 +65,7 @@ sealed interface Route {
     data object WatchSettings : Route
     data object WatchMenu : Route
     data object Vibration : Route
+    data object Assistant : Route
     data object Forwarding : Route
     data object Data : Route
     data object Profile : Route
@@ -133,7 +134,14 @@ fun AppRoot(controller: HeartlineController) {
             if (top != Route.Capture) dev.heartline.ui.screens.CaptureBanner(controller) { nav.push(Route.Capture) }
             AnimatedContent(targetState = top ?: tab, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "screen") { target ->
                 Column(Modifier.fillMaxSize()) {
-                    androidx.compose.runtime.CompositionLocalProvider(dev.heartline.ui.screens.LocalTabScroll provides (target as? Tab)?.let { tabScroll[it] }) {
+                    val syncUi by controller.sync.collectAsStateWithLifecycle()
+                    val link by controller.connection.collectAsStateWithLifecycle()
+                    // Pulling down a tab syncs the watch, or reconnects it first when the link is down.
+                    val pageRefresh = (target as? Tab)?.let { dev.heartline.ui.screens.PageRefresh(syncUi.running) {
+                        if (link.state == dev.heartline.app.LinkState.CONNECTED) controller.syncNow() else controller.connect()
+                    } }
+                    androidx.compose.runtime.CompositionLocalProvider(dev.heartline.ui.screens.LocalTabScroll provides (target as? Tab)?.let { tabScroll[it] },
+                        dev.heartline.ui.screens.LocalPageRefresh provides pageRefresh) {
                     when (target) {
                         Tab.TODAY -> TodayScreen(controller, onOpenHeart = { tab = Tab.HEART }, onOpenActivity = { tab = Tab.ACTIVITY },
                             onOpenDay = { m -> nav.push(dev.heartline.ui.screens.dayRoute(m, java.time.LocalDate.now().toEpochDay())) })
@@ -148,6 +156,7 @@ fun AppRoot(controller: HeartlineController) {
                         Route.WatchSettings -> WatchSettingsScreen(controller, nav)
                         Route.WatchMenu -> WatchMenuScreen(controller, nav)
                         Route.Vibration -> VibrationScreen(controller, nav)
+                        Route.Assistant -> dev.heartline.ui.screens.AssistantScreen(controller, nav)
                         Route.Forwarding -> ForwardingScreen(controller, nav)
                         Route.Data -> DataScreen(controller, nav)
                         Route.Profile -> ProfileScreen(controller, nav)

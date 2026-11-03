@@ -143,6 +143,8 @@ class WatchConnection(
                         c.enableNotification(Uuids.REALTIME_STEPS); c.enableNotification(Uuids.DEVICE_EVENT)
                     }
                     optional("Workout status") { c.enableNotification(Uuids.WORKOUT_STATUS) }
+                    // Charging starts and stops arrive here; without it the 30-minute read left "charging" showing.
+                    optional("Battery") { batteryState.value = parseBattery(c.read(Uuids.BATTERY)); c.enableNotification(Uuids.BATTERY) }
                     optional("2021 channel") { c.enableNotification(Uuids.CHUNKED_2021_READ) }
                     // Listen on every other notifying characteristic too: the watch can only send on subscribed ones,
                     // and features like Alexa or workout status may use characteristics nobody has mapped.
@@ -243,6 +245,7 @@ class WatchConnection(
                 log("info", "Watch workout ${workoutStatusName(n.value)} (${n.value.joinToString("") { "%02x".format(it) }})")
                 workoutEvents.tryEmit(n.value.copyOf())
             }
+            Uuids.BATTERY -> runCatching { parseBattery(n.value) }.getOrNull()?.takeIf { it.level in 0..100 }?.let { batteryState.value = it }
             Uuids.DEVICE_EVENT -> {
                 log("info", "Watch event: ${deviceEventName(n.value).replace('_', ' ')}")
                 watchEvents.emit(n.value.copyOf())
@@ -574,14 +577,17 @@ class WatchConnection(
     }
     private suspend fun syncHealthType(type: FetchType) {
         var since = SyncPolicy.healthSince(persistence.lastHealth(type.key), now())
-        for (round in 0 until 5) {
+        var previous: ByteArray? = null
+        for (round in 0 until if (type.consumedOnTransfer) 30 else 5) {
             val f = fetch(type, since)
             if (f.data.isEmpty()) break
             persistence.rawFetch(type.key, f.reply, f.start, f.data)
             val rows = if (type == FetchType.RESTING_HR) parseRestingHeartRate(f.data) else parseHealth(type, f.data, f.start, now())
-            if (rows.all { it.value == null }) break
+            if (rows.all { it.value == null } && !type.consumedOnTransfer) break
             persistence.health(rows)
-            if (type.consumedOnTransfer) break
+            // An emptied-on-transfer buffer hands over one page per fetch (the event log: 50 events, while the watch
+            // adds one every ~7 s), so keep fetching until it is empty or repeats.
+            if (type.consumedOnTransfer) { if (f.data.contentEquals(previous)) break; previous = f.data; continue }
             since = SyncPolicy.next(since, rows.last().ts) ?: break
             if (since > now()) break
         }

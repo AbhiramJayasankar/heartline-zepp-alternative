@@ -38,7 +38,8 @@ class WatchService : Service() {
         calls = CallForwarder(this, scope, app.settings, watch)
         agenda = WatchAgendaSync(this, scope, app.db, watch)
         scope.launch(kotlinx.coroutines.Dispatchers.IO) { backfillWatchWorkouts() }
-        AlexaBridge(scope, watch, app.db, java.io.File(filesDir, "alexa"), VoskSpeech(this), SampleAssistant(app.db)).start()
+        AlexaBridge(scope, watch, app.db, java.io.File(filesDir, "alexa"), VoskSpeech(this), SampleAssistant(app.db, ai = AssistantAi(),
+            aiConfig = { AssistantAiConfig.parse(app.db.meta.get(AssistantAiConfig.KEY)) })).start()
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Watch connection", NotificationManager.IMPORTANCE_LOW).apply {
             setSound(null, null); enableVibration(false); setShowBadge(false)
@@ -91,22 +92,23 @@ class WatchService : Service() {
     private var autoCaptureStartedAt: Long? = null
 
     /**
-     * Starts and ends of watch workouts arrive through the quick sync's statistics fetch (a few minutes late), as
-     * "watch_workout" rows. With auto capture on, a fresh start begins a capture named after the workout, and the
+     * Starts and ends of watch workouts arrive through the quick sync's statistics fetch as "watch_workout" rows. The
+     * watch writes that log in batches of 50 events (one every 30-40 s), so a start can reach the phone up to about
+     * 30 minutes late (2026-11-04); a start up to an hour old with no end yet still begins a capture. With auto capture on, a fresh start begins a capture named after the workout, and the
      * matching end stops a capture this started.
      */
     private suspend fun followWatchWorkouts() {
-        val since = System.currentTimeMillis() / 1000.0 - 15 * 60
+        val since = System.currentTimeMillis() / 1000.0 - 60 * 60
         app.db.health.observeSeries("watch_workout", since).collect { rows ->
             val last = rows.maxByOrNull { it.ts } ?: return@collect
             val now = System.currentTimeMillis() / 1000
             val name = runCatching { org.json.JSONObject(last.extra ?: "{}").optString("type", "Workout") }.getOrDefault("Workout")
             val start = runCatching { org.json.JSONObject(last.extra ?: "{}").optString("event") }.getOrNull() == "start"
             if (app.db.meta.get(AUTO_CAPTURE) != "true") return@collect
-            if (start && now - last.ts < 15 * 60 && captureRunner.run.value == null && autoCaptureStartedAt != last.ts) {
+            if (start && now - last.ts < 60 * 60 && captureRunner.run.value == null && autoCaptureStartedAt != last.ts) {
                 autoCaptureStartedAt = last.ts
                 runCatching { captureRunner.start(name, 180) }
-                    .onSuccess { app.db.events.add("info", "Started a capture for the watch's $name") }
+                    .onSuccess { app.db.events.add("info", "Started a capture for the watch's $name, ${(now - last.ts) / 60} min after it began") }
                     .onFailure { app.db.events.add("warn", "Auto capture did not start: ${it.message}") }
             } else if (!start && autoCaptureStartedAt != null && last.ts > autoCaptureStartedAt!! && captureRunner.run.value != null) {
                 autoCaptureStartedAt = null

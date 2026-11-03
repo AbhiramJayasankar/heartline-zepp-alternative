@@ -164,6 +164,9 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override val phoneLink = MutableStateFlow(PhoneLinkUi(musicEnabled = true, musicAccess = true, nowPlaying = "Kesariya, Arijit Singh"))
     override suspend fun searchPlaces(query: String): List<PlaceUi> =
         if (query.isBlank()) emptyList() else listOf(bengaluru, PlaceUi("Bengaluru Rural", "Karnataka, India", 13.28, 77.53)).filter { it.name.contains(query, true) }
+    override val assistantAi = MutableStateFlow(AssistantAiUi(null, dev.heartline.service.AssistantAiConfig.DEFAULT_MODEL))
+    override fun setAssistantAi(key: String?, model: String) { assistantAi.update { AssistantAiUi(key?.takeLast(4) ?: it.keyEnd, model) } }
+    override suspend fun testAssistantAi(question: String) = "Demo mode: Say(text=Two plus two is four.)"
     override fun setWeather(enabled: Boolean, place: PlaceUi?) = weather.update { it.copy(enabled = enabled, place = place ?: it.place) }
     override fun refreshWeather() = weather.update { it.copy(updatedAt = now(), sentToWatchAt = now()) }
     override fun setMusicControl(enabled: Boolean) = phoneLink.update { it.copy(musicEnabled = enabled) }

@@ -65,6 +65,13 @@ interface HeartlineController {
     fun refreshWeather()
     fun setMusicControl(enabled: Boolean)
 
+    /** Alexa answers from an OpenRouter model; the key stays on the phone and only its last 4 characters are shown. */
+    val assistantAi: StateFlow<AssistantAiUi>
+    /** [key] null keeps the saved one, blank removes it. */
+    fun setAssistantAi(key: String?, model: String)
+    /** One sample question through the saved key and model: the answer or why it failed. */
+    suspend fun testAssistantAi(question: String): String
+
     /** The watch's app list in order; saved locally, sent by [sendWatchMenu]. */
     val watchMenu: StateFlow<List<MenuAppUi>>
     fun setWatchMenu(apps: List<MenuAppUi>)
@@ -203,6 +210,8 @@ data class CaptureAnalysisUi(
 )
 
 data class PlaceUi(val name: String, val region: String?, val lat: Double, val lon: Double)
+data class AssistantAiUi(val keyEnd: String?, val model: String)
+
 data class WeatherUi(
     val enabled: Boolean = false, val place: PlaceUi? = null, val tempC: Int? = null, val condition: String? = null,
     val highC: Int? = null, val lowC: Int? = null, val updatedAt: Long? = null, val sentToWatchAt: Long? = null, val error: String? = null,

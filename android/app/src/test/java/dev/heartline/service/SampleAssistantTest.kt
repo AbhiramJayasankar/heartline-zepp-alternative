@@ -39,6 +39,20 @@ class SampleAssistantTest {
         assertEquals(Ask.Echo("Hello, can you hear me?"), parse("Hello, can you hear me?"))
     }
 
+    @Test fun spokenNumbers() {
+        assertEquals("timer for 25 minutes", SampleAssistant.normalizeNumbers("timer for twenty five minutes"))
+        assertEquals("alarm at 9:30 am", SampleAssistant.normalizeNumbers("alarm at nine thirty am"))
+        assertEquals("wake me at 7:00", SampleAssistant.normalizeNumbers("wake me at seven o'clock"))
+        assertEquals("1 minute and 30 seconds", SampleAssistant.normalizeNumbers("one minute and thirty seconds"))
+        assertEquals("150 steps", SampleAssistant.normalizeNumbers("one hundred fifty steps"))
+        // Heard on the watch, 2026-11-04: a bare hour means whichever of 7:00 and 19:00 comes first.
+        assertEquals(Ask.Alarm(LocalTime.of(7, 0), either = true), parse("alarm at seven"))
+        assertEquals(Ask.Alarm(LocalTime.of(9, 30), either = true), parse("set an alarm for nine thirty"))
+        assertEquals(Ask.Timer(300), parse("timer for five minutes"))
+        assertEquals(Ask.Reminder(1200, "stretch"), parse("remind me in twenty minutes to stretch"))
+        assertEquals(Ask.Echo("set an alarm for tomorrow my and thirty am"), parse("set an alarm for tomorrow my and thirty am"))
+    }
+
     @Test fun spokenDurations() {
         assertEquals("1 hour 30 minutes", SampleAssistant.spoken(5400))
         assertEquals("45 seconds", SampleAssistant.spoken(45))

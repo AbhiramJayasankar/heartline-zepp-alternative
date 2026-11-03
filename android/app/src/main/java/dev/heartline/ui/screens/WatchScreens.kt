@@ -121,6 +121,7 @@ fun WatchScreen(controller: HeartlineController, nav: Navigator) {
         NavRow("Watch settings", "All-day heart rate, stress, alerts, display") { nav.push(Route.WatchSettings) }
         NavRow("Watch apps", "Which apps the watch lists, and their order") { nav.push(Route.WatchMenu) }
         NavRow("Vibration patterns", "How the watch buzzes for calls, messages, alarms") { nav.push(Route.Vibration) }
+        NavRow("Alexa answers", "AI that understands the watch's Alexa button") { nav.push(Route.Assistant) }
         NavRow("Alarms", "Vibration alarms on the watch") { nav.push(Route.Alarms) }
         NavRow("Weather", "Forecast for the watch's weather app") { nav.push(Route.Weather) }
         NavRow("Calendar", "Upcoming events as watch reminders") { nav.push(Route.Reminders) }

@@ -20,6 +20,12 @@ class WatchMenuTest {
         assertEquals(0x07, c[1 + 16 * 4 + 3].toInt()) // "more" sits at position 16
     }
 
+    @Test fun anEarlierMoreStaysWhereItIs() {
+        // Apps after "more" open from the More screen; a divider before position 16 is the owner's choice.
+        val c = WatchMenu.command(listOf("hr", "more", "timer", "stopwatch"))
+        assertEquals("1e" + "0000ff02" + "0100ff07" + "0200ff0d" + "0300ff0c", c.hex())
+    }
+
     @Test fun vibrationPatternBytes() {
         val calls = VibrationPatterns.KINDS.first { it.key == "incoming_call" }
         val short = VibrationPatterns.PROFILES.first { it.key == "short" }

@@ -4,6 +4,8 @@ package dev.heartline.protocol
  * The watch's app list (Gadgetbridge HuamiSupport.setDisplayItemsNew, which the GTR 2 and 2e use): `1e`, then four
  * bytes per shown app in order: position, 00, ff (menu), the app's id from HuamiMenuType. Apps left out are hidden.
  * Sent as a chunked type-2 write. Which ids a given firmware knows is not documented; unknown ones are skipped by the watch.
+ * "More" is a divider: apps listed after it open from the watch's More screen, and with nothing after it the More
+ * screen disappears (seen 2026-11-04, which hid the countdown).
  */
 object WatchMenu {
     class App(val key: String, val id: Int, val label: String)
@@ -14,20 +16,21 @@ object WatchMenu {
         App("stress", 0x1c, "Stress"), App("breathing", 0x33, "Breathing"), App("sleep", 0x23, "Sleep"), App("workout", 0x03, "Workout"),
         App("activity", 0x14, "Activity history"), App("weather", 0x04, "Weather"), App("notifications", 0x06, "Notifications"),
         App("eventreminder", 0x15, "Event reminders"), App("alarm", 0x09, "Alarm"), App("worldclock", 0x1a, "World clock"),
-        App("timer", 0x0d, "Timer"), App("stopwatch", 0x0c, "Stopwatch"), App("pomodoro", 0x38, "Pomodoro"), App("compass", 0x16, "Compass"),
+        App("timer", 0x0d, "Countdown"), App("stopwatch", 0x0c, "Stopwatch"), App("pomodoro", 0x38, "Pomodoro"), App("compass", 0x16, "Compass"),
         App("barometer", 0x41, "Barometer"), App("temperature", 0x40, "Temperature"), App("music", 0x0b, "Music"), App("alexa", 0x39, "Alexa"),
         App("findphone", 0x0e, "Find phone"), App("mutephone", 0x0f, "Mute phone"), App("period", 0x1d, "Cycle tracking"),
         App("dnd", 0x08, "Do not disturb"), App("battery", 0x3a, "Battery"), App("flashlight", 0x43, "Flashlight"),
+        App("goal", 0x21, "Goal"), App("events", 0x26, "Events"), App("widgets", 0x28, "Widgets"),
         App("settings", 0x13, "Settings"), App("more", 0x07, "More"),
     )
     private val byKey = APPS.associateBy { it.key }
 
     fun command(shown: List<String>): ByteArray {
         val list = shown.filter { it in byKey }.toMutableList()
-        // setDisplayItemsNew: with a "more" section, at most 16 apps go before it or some get cut off.
+        // setDisplayItemsNew: at most 16 apps fit before "more" or some get cut off. An earlier "more" is kept.
         val more = list.indexOf("more")
         if (more == -1 && list.size > 16) list.add(16, "more")
-        else if (more != -1 && list.size > 17) { list.removeAt(more); list.add(16, "more") }
+        else if (more > 16) { list.removeAt(more); list.add(16, "more") }
         val out = java.io.ByteArrayOutputStream()
         out.write(0x1e)
         list.forEachIndexed { i, key -> out.write(i); out.write(0); out.write(0xff); out.write(byKey.getValue(key).id) }

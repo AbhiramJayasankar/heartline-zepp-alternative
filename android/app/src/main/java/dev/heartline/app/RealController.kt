@@ -236,7 +236,20 @@ class RealController(
         val sms = dev.heartline.protocol.isSmsApp(asPackage)
         it.notify(title, body, if (sms) NotificationKind.GENERIC else NotificationKind.MESSAGE, label, dev.heartline.protocol.watchIconFor(asPackage))
     }
-    override fun syncNow() = action { it.syncActivity(); it.syncHealth() }
+    /** Battery first (its charging flag), then activity and health. The watch sometimes drops the link mid-sync; then
+     * wait for the automatic reconnect and run it once more. */
+    override fun syncNow() = launchAction {
+        for (attempt in 1..2) {
+            try { ensureService().command { it.readBattery(); it.syncActivity(); it.syncHealth() }; return@launchAction }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                if (attempt == 2) throw e
+                db.events.add("warn", "Sync interrupted (${e.message}); retrying once the watch reconnects")
+                delay(2000)
+                withTimeoutOrNull(60_000) { connection.first { it.state == LinkState.CONNECTED } } ?: throw e
+            }
+        }
+    }
     override fun refreshTemperature() = action { it.syncQuick() }
     override fun setWatchClock() = action { it.syncTime() }
     override fun applyWatchSetting(key: String, value: Any) = action { it.applySetting(key, value) }
@@ -291,6 +304,25 @@ class RealController(
     // ---- Task A: weather on the watch, find phone, music controls. Replace these stubs. ----
     private val taskA = TaskAController(context, scope, db, service) { ensureService() }
     override val weather = taskA.weather
+    override val assistantAi: StateFlow<AssistantAiUi> = db.meta.observe(dev.heartline.service.AssistantAiConfig.KEY)
+        .map { dev.heartline.service.AssistantAiConfig.parse(it).let { c -> AssistantAiUi(c.apiKey.takeIf { k -> k.isNotBlank() }?.takeLast(4), c.model) } }
+        .stateIn(scope, SharingStarted.Eagerly, AssistantAiUi(null, dev.heartline.service.AssistantAiConfig.DEFAULT_MODEL))
+    override fun setAssistantAi(key: String?, model: String) {
+        scope.launch {
+            val saved = dev.heartline.service.AssistantAiConfig.parse(db.meta.get(dev.heartline.service.AssistantAiConfig.KEY))
+            db.meta.set(dev.heartline.service.AssistantAiConfig.KEY, dev.heartline.service.AssistantAiConfig(key?.trim() ?: saved.apiKey,
+                model.trim().ifEmpty { dev.heartline.service.AssistantAiConfig.DEFAULT_MODEL }).json())
+        }
+    }
+    override suspend fun testAssistantAi(question: String): String {
+        val config = dev.heartline.service.AssistantAiConfig.parse(db.meta.get(dev.heartline.service.AssistantAiConfig.KEY))
+        if (!config.enabled) return "Save a key first."
+        val ai = dev.heartline.service.AssistantAi()
+        val started = System.nanoTime()
+        val ask = ai.interpret(question, dev.heartline.service.AiContext(java.time.ZonedDateTime.now(), null, null), emptyList(), config)
+        val ms = (System.nanoTime() - started) / 1_000_000
+        return if (ask == null) "No answer after $ms ms: ${ai.lastError ?: "unknown"}" else "$ask ($ms ms)"
+    }
     override val phoneLink = taskA.phoneLink
     override suspend fun searchPlaces(query: String): List<PlaceUi> = taskA.searchPlaces(query)
     override fun setWeather(enabled: Boolean, place: PlaceUi?) = taskA.setWeather(enabled, place)

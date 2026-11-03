@@ -32,7 +32,13 @@ class WatchCustomizeController(private val scope: CoroutineScope, private val db
         scope.launch { db.meta.set(VIBRATION_KEY, encodeVibrations(vibrations.value.map { if (it.kind == kind) it.copy(profile = profile, repeat = repeat) else it })) }
         send(kind, profile, repeat, test = false)
     }
-    fun tryVibration(kind: String, profile: String, repeat: Int) = send(kind, profile, repeat, test = true)
+    /** The watch ignores a trial buzz for "find watch", so that one is saved and then rung the way Find watch rings it. */
+    fun tryVibration(kind: String, profile: String, repeat: Int) {
+        if (kind != "find_band") return send(kind, profile, repeat, test = true)
+        scope.launch { db.meta.set(VIBRATION_KEY, encodeVibrations(vibrations.value.map { if (it.kind == kind) it.copy(profile = profile, repeat = repeat) else it })) }
+        val k = VibrationPatterns.KINDS.first { it.key == kind }; val p = VibrationPatterns.PROFILES.first { it.key == profile }
+        action { it.writeChunkedType2(VibrationPatterns.command(k, p, repeat), "vibration for ${k.label}"); it.vibrate() }
+    }
 
     private fun send(kind: String, profile: String, repeat: Int, test: Boolean) {
         val k = VibrationPatterns.KINDS.first { it.key == kind }; val p = VibrationPatterns.PROFILES.first { it.key == profile }

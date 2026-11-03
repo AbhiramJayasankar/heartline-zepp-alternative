@@ -15,7 +15,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,14 +55,22 @@ fun WatchMenuScreen(controller: HeartlineController, nav: Navigator) {
         controller.setWatchMenu(apps.toMutableList().also { it[i] = apps[j]; it[j] = apps[i] })
     }
     Screen("Watch apps", onBack = { nav.pop() },
-        subtitle = "Pick the apps your watch lists, and their order, then send the list. Apps your watch doesn't have are skipped.") {
+        subtitle = "Pick the apps your watch lists, and their order, then send the list. Apps below More open from the watch's More screen. Apps your watch doesn't have are skipped.") {
         Row(verticalAlignment = Alignment.CenterVertically) {
             PillButton("Send to watch", { controller.sendWatchMenu() }, enabled = connected)
             Spacer(Modifier.width(12.dp))
             MutedText(if (connected) "${apps.count { it.shown }} apps shown" else "Connect the watch to send")
         }
         Gap(12)
+        val moreAt = apps.indexOfFirst { it.key == "more" && it.shown }
+        if (moreAt != -1 && apps.drop(moreAt + 1).none { it.shown }) {
+            Text("Nothing is below More, so the watch hides its More screen. Move apps below it, or use Put the rest under More.", style = HL.type.small, color = c.warn)
+            Gap(8)
+        }
         apps.forEachIndexed { i, a ->
+            if (a.key == "more" && a.shown) {
+                Gap(10); Text("Inside More", style = HL.type.label, color = c.inkSoft); Gap(2)
+            }
             Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Switch(a.shown, { on -> controller.setWatchMenu(apps.map { if (it.key == a.key) it.copy(shown = on) else it }) },
                     colors = SwitchDefaults.colors(checkedTrackColor = c.ok, checkedThumbColor = c.surface, uncheckedTrackColor = c.gridMajor, uncheckedThumbColor = c.surface, uncheckedBorderColor = c.gridMajor))
@@ -69,9 +81,16 @@ fun WatchMenuScreen(controller: HeartlineController, nav: Navigator) {
             HorizontalDivider(color = c.line)
         }
         Gap(16)
+        PillButton("Put the rest under More", {
+            // Shown apps stay on the main list in their order; More follows, then every other app inside it.
+            val main = apps.filter { it.shown && it.key != "more" }
+            val rest = apps.filter { !it.shown && it.key != "more" }.map { it.copy(shown = true) }
+            controller.setWatchMenu(main + apps.first { it.key == "more" }.copy(shown = true) + rest)
+        }, style = ButtonStyle.QUIET)
+        Gap(8)
         PillButton("Show every app", { controller.setWatchMenu(apps.map { it.copy(shown = true) }) }, style = ButtonStyle.QUIET)
         Gap(8)
-        MutedText("The watch can't report its current list, so this starts from Zepp's usual set. More than 16 apps puts the rest under More.")
+        MutedText("The watch can't report its current list, so this starts from Zepp's usual set. More than 16 apps before More puts the rest under it. Some entries (notifications, flashlight, barometer) are built into the watch and don't change its list.")
     }
 }
 
@@ -84,7 +103,7 @@ fun VibrationScreen(controller: HeartlineController, nav: Navigator) {
     val conn by controller.connection.collectAsStateWithLifecycle()
     val connected = conn.state == LinkState.CONNECTED
     Screen("Vibration patterns", onBack = { nav.pop() },
-        subtitle = "How the watch buzzes for each kind of alert. Picking a pattern sets it on the watch; Try buzzes it once.") {
+        subtitle = "How the watch buzzes for each kind of alert. Picking a pattern or count sets it on the watch; Try buzzes it once. On the GTR 2e the count is what you feel; the patterns themselves buzz alike.") {
         if (!connected) { MutedText("Connect the watch to try or set patterns."); Gap(8) }
         list.forEach { v ->
             val profile = v.profile ?: "short"
@@ -112,5 +131,44 @@ fun VibrationScreen(controller: HeartlineController, nav: Navigator) {
             }
             Gap(14); HorizontalDivider(color = c.line)
         }
+    }
+}
+
+// ---------------- Alexa answers ----------------
+
+@Composable
+fun AssistantScreen(controller: HeartlineController, nav: Navigator) {
+    val c = HL.colors
+    val ai by controller.assistantAi.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    var key by remember { mutableStateOf("") }
+    var model by remember(ai.model) { mutableStateOf(ai.model) }
+    var result by remember { mutableStateOf<String?>(null) }
+    var testing by remember { mutableStateOf(false) }
+    Screen("Alexa answers", onBack = { nav.pop() },
+        subtitle = "With an OpenRouter key, a free AI model reads what the watch heard, fixes misheard numbers, and answers questions. Without one, only the built-in answers work.") {
+        MutedText(ai.keyEnd?.let { "Key saved, ending in $it." } ?: "No key saved.")
+        Gap(8)
+        OutlinedTextField(key, { key = it.trim() }, label = { Text(if (ai.keyEnd == null) "OpenRouter API key" else "Replace the key") }, singleLine = true,
+            visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+        Gap(8)
+        OutlinedTextField(model, { model = it.trim() }, label = { Text("Model") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Gap(10)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            PillButton("Save", { controller.setAssistantAi(key.ifEmpty { null }, model); key = "" })
+            Spacer(Modifier.width(10.dp))
+            PillButton(if (testing) "Asking…" else "Test", {
+                testing = true; result = null
+                scope.launch { result = controller.testAssistantAi("set an alarm for my and thirty am"); testing = false }
+            }, style = ButtonStyle.QUIET, enabled = !testing && ai.keyEnd != null)
+            if (ai.keyEnd != null) {
+                Spacer(Modifier.width(10.dp))
+                PillButton("Remove key", { controller.setAssistantAi("", model) }, style = ButtonStyle.QUIET)
+            }
+        }
+        result?.let { Gap(10); Text(it, style = HL.type.small, color = c.ink) }
+        Gap(16)
+        MutedText("Test asks \"set an alarm for my and thirty am\", a real mishearing of \"nine thirty\"; a working setup answers with an alarm at 09:30. " +
+            "Free models are rate-limited by OpenRouter. If the model fails, Heartline tries openrouter/free, then its built-in answers. Each question sends the words heard, the time, your latest heart rate and steps to OpenRouter.")
     }
 }

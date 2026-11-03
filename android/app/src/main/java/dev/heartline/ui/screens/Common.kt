@@ -46,6 +46,10 @@ val Gutter = 20.dp
 /** Tabs keep one scroll position each, so coming back from a sub-screen lands where you left. Sub-screens get null. */
 val LocalTabScroll = androidx.compose.runtime.staticCompositionLocalOf<ScrollState?> { null }
 
+/** Pull down to refresh on the tabs: whether a refresh is running, and what pulling starts. */
+class PageRefresh(val refreshing: Boolean, val onRefresh: () -> Unit)
+val LocalPageRefresh = androidx.compose.runtime.compositionLocalOf<PageRefresh?> { null }
+
 /**
  * A full-height scrolling page. Headers may draw behind the status bar at rest; once the page scrolls,
  * a paper scrim fades in under the status bar so content never runs into the clock and icons.
@@ -54,8 +58,12 @@ val LocalTabScroll = androidx.compose.runtime.staticCompositionLocalOf<ScrollSta
 fun ScrollPage(state: ScrollState = LocalTabScroll.current ?: rememberScrollState(), content: @Composable ColumnScope.() -> Unit) {
     val scrolled by remember(state) { derivedStateOf { state.value > 0 } }
     val alpha by animateFloatAsState(if (scrolled) 0.96f else 0f, label = "scrim")
+    val refresh = LocalPageRefresh.current
     Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize().verticalScroll(state), content = content)
+        if (refresh == null) Column(Modifier.fillMaxSize().verticalScroll(state), content = content)
+        else androidx.compose.material3.pulltorefresh.PullToRefreshBox(refresh.refreshing, refresh.onRefresh, Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().verticalScroll(state), content = content)
+        }
         Box(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(HL.colors.paper.copy(alpha = alpha)))
     }
 }
