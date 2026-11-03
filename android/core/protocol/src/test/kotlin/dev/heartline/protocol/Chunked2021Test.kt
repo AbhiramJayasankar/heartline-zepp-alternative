@@ -44,4 +44,28 @@ class Chunked2021Test {
         assertEquals(listOf(14, 3), out.map { it.size })
         assertEquals(0x08, out[1][0].toInt())
     }
+
+    // Layouts follow the Zepp app 10.9.0 encoders (jq0/iq0 for alerts, h1r for lists, uav/zok for weather).
+    @Test fun timerIsAnAlertWithHoursMinutesSeconds() {
+        assertContentEquals(hex("08 02 00 08000000 01 03 74 31 00 00 05 1e"), Alexa.timer("t1", 0, 5, 30))
+    }
+
+    @Test fun deleteNamesTheKindAndToken() {
+        assertContentEquals(hex("08 02 00 05000000 02 01 61 31 00"), Alexa.deleteAlert(Alexa.ALERT_ALARM, "a1"))
+    }
+
+    @Test fun alarmCarriesLocalTimeAndDays() {
+        val a = Alexa.alarm("a", 0x01020304, Alexa.WEEKDAYS)
+        assertContentEquals(hex("08 02 00 12000000 01 01 61 00 00 00 04030201 00000000 1f000000"), a)
+    }
+
+    @Test fun listRowsEndWithAnEmptyCode() {
+        assertContentEquals(hex("08 03 00 0a000000 54 00 01 61 00 62 00 00 53 00"), Alexa.list("T", "S", listOf("a" to "b")))
+    }
+
+    @Test fun weatherStartsWithZeppsFieldMask() {
+        val w = Alexa.weather(100, "L", "D", "Sunny", Alexa.Icon("Sunny"), "20", "25", "15", emptyList(), tzOffsetSec = 3600)
+        assertContentEquals(hex("08 01 00"), w.copyOfRange(0, 3))
+        assertContentEquals(hex("fd030000 740e0000"), w.copyOfRange(7, 15))
+    }
 }

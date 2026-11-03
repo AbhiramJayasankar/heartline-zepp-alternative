@@ -63,12 +63,23 @@ class Chunked2021Decoder {
     }
 }
 
-/** Alexa on endpoint 0x0011 (Gadgetbridge ZeppOsAlexaService). */
+/**
+ * Alexa on endpoint 0x0011. Commands from Gadgetbridge's ZeppOsAssistantService, completed from the Zepp app (10.9.0):
+ * 06 is Alexa's StopCapture (Listening to Thinking), 0b its ExpectSpeech (listen again, sent ~600 ms after a reply),
+ * 07 shows up to 50 characters of text with a flag, 0a carries spoken audio, 14 / 15 set and clear the notification
+ * indicator. Replies under 08 carry a u16 subtype and a u32 length: 1 weather, 2 alerts, 3 list, 4 local actions,
+ * 5 audio items, 6 a card; Zepp sends the card only to watches reporting assistant version 3 or more (the GTR 2e
+ * reports 2 and shows plain text instead).
+ */
 object Alexa {
     const val START = 0x01; const val END = 0x02; const val START_ACK = 0x03; const val VOICE = 0x05; const val TRIGGERED = 0x06
-    const val REPLY_COMPLEX = 0x08; const val REPLY_SIMPLE = 0x09; const val VOICE_MORE = 0x0b; const val ERROR = 0x0f
+    const val SHOW_TEXT = 0x07; const val REPLY_COMPLEX = 0x08; const val REPLY_SIMPLE = 0x09; const val REPLY_VOICE = 0x0a
+    const val LISTEN_AGAIN = 0x0b; const val ERROR = 0x0f; const val SET_INDICATOR = 0x14; const val CLEAR_INDICATOR = 0x15
     const val LANGUAGES_REQUEST = 0x10; const val LANGUAGES_RESPONSE = 0x11; const val SET_LANGUAGE = 0x12; const val SET_LANGUAGE_ACK = 0x13
     const val CAPABILITIES_REQUEST = 0x20; const val CAPABILITIES_RESPONSE = 0x21
+    const val ALERT_ALARM = 1; const val ALERT_REMINDER = 2; const val ALERT_TIMER = 3
+    /** Repeat days for alarms and reminders, as Zepp maps them: bit 0 Monday ... bit 6 Sunday. */
+    const val EVERY_DAY = 127; const val WEEKDAYS = 31; const val WEEKENDS = 96
     val startAck: ByteArray get() = bytes(START_ACK, 0)
     /**
      * Opus packets in one voice message: `05 | u32 length | (u8 size, packet)*`. On the GTR 2e every packet is SILK
@@ -94,4 +105,47 @@ object Alexa {
     }
     fun setLanguage(tag: String): ByteArray = bytes(SET_LANGUAGE) + tag.replace('_', '-').toByteArray(Charsets.UTF_8) + bytes(0)
     fun error(code: Int, message: String): ByteArray = bytes(ERROR, code) + message.toByteArray(Charsets.UTF_8) + bytes(0)
+    val listenAgain: ByteArray get() = bytes(LISTEN_AGAIN)
+    /** Up to 50 characters, e.g. what the speaker said; Zepp sends it with [flag] true for the final text. */
+    fun showText(text: String, flag: Boolean = true): ByteArray = bytes(SHOW_TEXT, if (flag) 1 else 0) + z(text.take(50))
+    fun indicator(on: Boolean): ByteArray = bytes(if (on) SET_INDICATOR else CLEAR_INDICATOR)
+
+    class Icon(val name: String, val url: String = "")
+    class Forecast(val epochSec: Long, val high: String, val low: String, val icon: Icon)
+
+    /**
+     * Weather (08/1): a u32 bit mask of the fields present, then the fields in order. Zepp sends 0x3fd: time (local
+     * seconds), location, date line, description, icon (name, url), current, high, low, forecast days.
+     */
+    fun weather(epochSec: Long, location: String, dateLine: String, description: String, icon: Icon, current: String, high: String, low: String,
+                forecast: List<Forecast>, tzOffsetSec: Int): ByteArray {
+        val b = java.io.ByteArrayOutputStream()
+        b.write(u32(0x3fd)); b.write(u32(epochSec + tzOffsetSec)); b.write(z(location)); b.write(z(dateLine)); b.write(z(description))
+        b.write(z(icon.name)); b.write(z(icon.url)); b.write(z(current)); b.write(z(high)); b.write(z(low))
+        b.write(forecast.size)
+        forecast.forEach { f -> b.write(u32(f.epochSec + tzOffsetSec)); b.write(z(f.high)); b.write(z(f.low)); b.write(z(f.icon.name)); b.write(z(f.icon.url)) }
+        return complex(1, b.toByteArray())
+    }
+
+    /** A list (08/3): title, rows of left and right text, subtitle. */
+    fun list(title: String, subtitle: String, rows: List<Pair<String, String>>): ByteArray {
+        val b = java.io.ByteArrayOutputStream()
+        b.write(z(title)); b.write(rows.size)
+        rows.forEach { (left, right) -> b.write(z(left)); b.write(z(right)); b.write(z("")) }
+        b.write(z(subtitle))
+        return complex(3, b.toByteArray())
+    }
+
+    /** An alarm at [localEpochSec] (wall-clock time as seconds), repeating on [days] (0 once). [token] identifies it. */
+    fun alarm(token: String, localEpochSec: Long, days: Int = 0): ByteArray = alert(1, ALERT_ALARM, token, z("") + z("") + u32(localEpochSec) + u32(0) + u32(days.toLong()))
+    fun reminder(token: String, localEpochSec: Long, label: String, days: Int = 0): ByteArray =
+        alert(1, ALERT_REMINDER, token, z(label) + z(label) + u32(localEpochSec) + u32(0) + u32(days.toLong()))
+    fun timer(token: String, hours: Int, minutes: Int, seconds: Int): ByteArray = alert(1, ALERT_TIMER, token, bytes(hours, minutes, seconds))
+    fun deleteAlert(kind: Int, token: String): ByteArray = alert(2, kind, token, ByteArray(0))
+
+    private fun alert(op: Int, kind: Int, token: String, details: ByteArray) = complex(2, bytes(op, kind) + z(token) + details)
+    private fun complex(subtype: Int, body: ByteArray) = bytes(REPLY_COMPLEX, subtype and 255, subtype shr 8) + u32(body.size.toLong()) + body
+    private fun z(s: String) = s.toByteArray(Charsets.UTF_8) + bytes(0)
+    private fun u32(v: Long) = bytes((v and 255).toInt(), ((v shr 8) and 255).toInt(), ((v shr 16) and 255).toInt(), ((v shr 24) and 255).toInt())
+    private fun u32(v: Int) = u32(v.toLong())
 }

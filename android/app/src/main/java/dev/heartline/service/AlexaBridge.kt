@@ -9,6 +9,7 @@ import dev.heartline.protocol.Endpoint2021
 import dev.heartline.protocol.SpeechEndpointer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -36,7 +37,8 @@ import java.io.File
  * with the stalled acks, 06 (triggered) was the one command that made it drop its buffered voice. So once speech
  * ends the bridge works through [STOPS], moving on whenever voice is still arriving [ESCALATE_MS] later.
  */
-class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchConnection, private val db: HeartlineDatabase, private val folder: File) {
+class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchConnection, private val db: HeartlineDatabase, private val folder: File,
+                  private val speech: OnDeviceSpeech, private val assistant: SampleAssistant) {
     private var voice = ByteArrayOutputStream()
     private var packets = 0
     private var decoder: MicDecoder? = null
@@ -94,7 +96,9 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
 
     /** Per-turn state. The follow-up Alexa button after a reply reopens the mic in the same session (voice again, no start). */
     private suspend fun newTurn() {
+        answerJob?.cancel(); answerJob = null
         closeDecoder()
+        synchronized(pcm16) { pcm16.reset() }; down = 0; downN = 0
         active = true; replied = false; stopSent = 0; voice = ByteArrayOutputStream(); packets = 0; pending.clear()
         started = System.currentTimeMillis(); name = "alexa-%d".format(started / 1000)
         stop = 0; turn++
@@ -126,7 +130,8 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
             0 -> {
                 // 06 moves the watch from "Listening" to "Thinking" and stops the voice; it then waits for the reply.
                 watch.send2021(Endpoint2021.ALEXA, byteArrayOf(Alexa.TRIGGERED.toByte()))
-                delay(600); if (!replied) reply()
+                replied = true
+                answerJob = scope.launch { respond() }
             }
             1 -> if (!replied) reply()
             2 -> watch.send2021(Endpoint2021.ALEXA, Alexa.error(3, "Heartline could not stop listening"))
@@ -159,6 +164,10 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
     private fun levels(pcm: ShortArray) {
         // The decoder's buffers need not be 20 ms long; regroup into 960-sample frames (20 ms at 48 kHz).
         pcm.forEach { pending += it }
+        // Keep a 16 kHz copy (average of three 48 kHz samples; the audio is narrowband) for speech-to-text.
+        synchronized(pcm16) {
+            pcm.forEach { v -> down += v; if (++downN == 3) { pcm16.add((down / 3).toShort()); down = 0; downN = 0 } }
+        }
         while (pending.size >= FRAME) {
             val frame = ShortArray(FRAME) { pending[it] }
             pending.subList(0, FRAME).clear()
@@ -181,6 +190,36 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
     }
 
     private var repliedAt = 0L
+    private var answerJob: Job? = null
+    private val pcm16 = ShortBuffer()
+    private var down = 0
+    private var downN = 0
+
+    /** A growable ShortArray. */
+    private class ShortBuffer {
+        private var a = ShortArray(16_000 * 8); var size = 0; private set
+        fun add(v: Short) { if (size == a.size) a = a.copyOf(a.size * 2); a[size++] = v }
+        fun reset() { size = 0 }
+        fun snapshot() = a.copyOf(size)
+    }
+
+    /** Speech-to-text on the turn's audio, then a sample answer (see [SampleAssistant]); the watch is on "Thinking". */
+    private suspend fun respond() {
+        val audio = synchronized(pcm16) { pcm16.snapshot() }
+        val t0 = System.currentTimeMillis()
+        val transcript = runCatching { speech.transcribe(audio) }
+        val heard = transcript.getOrNull()?.text.orEmpty()
+        db.events.add("info", transcript.fold(
+            { "Alexa heard (${it.engine}, %.1f s audio, %d ms): \"${it.text}\"".format(audio.size / 16_000.0, System.currentTimeMillis() - t0) },
+            { "Alexa speech-to-text failed after %d ms: ${it.message}".format(System.currentTimeMillis() - t0) }))
+        val answer = if (transcript.isFailure) SampleAssistant.Answer("Sorry, speech-to-text failed: ${transcript.exceptionOrNull()?.message}")
+            else runCatching { assistant.answer(heard) }.getOrElse { SampleAssistant.Answer("Sorry, that went wrong: ${it.message}") }
+        answer.frames.forEach { watch.send2021(Endpoint2021.ALEXA, it) }
+        answer.text?.let { watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple(it)) }
+        repliedAt = System.currentTimeMillis()
+        db.events.add("info", "Alexa answered: ${answer.text ?: "(no text)"}; ${answer.frames.size} extra frame(s)" + if (answer.listenAgain) ", listening again" else "")
+        if (answer.listenAgain) { delay(600); watch.send2021(Endpoint2021.ALEXA, Alexa.listenAgain) }
+    }
 
     private suspend fun reply() {
         replied = true; repliedAt = System.currentTimeMillis()
