@@ -109,10 +109,18 @@ class ControlsTest {
             assertEquals(row["command"], result.second.hex(), row["key"].str())
         }
     }
+    @Test fun connectedAdvertisingMatchesGadgetbridge() {
+        // Gadgetbridge setBtConnectedAdvertising for the GTR 2e: 06 01 00 01 / 06 01 00 00 on the config characteristic.
+        assertEquals("06010001", settingCommand("connected_advertising", true).second.joinToString("") { "%02x".format(it) })
+        assertEquals("06010000", settingCommand("connected_advertising", false).second.joinToString("") { "%02x".format(it) })
+    }
+
     @Test fun settingsDefinitionsExactlyMatchPython() {
         val expected = oracle["setting_specs"].arr().map { it.obj() }
-        assertEquals(expected.map { it["key"] }, SETTINGS.map { it.key })
-        SETTINGS.zip(expected).forEach { (s, e) ->
+        // Android-only settings added after the Python port.
+        val ported = SETTINGS.filter { it.key != "connected_advertising" }
+        assertEquals(expected.map { it["key"] }, ported.map { it.key })
+        ported.zip(expected).forEach { (s, e) ->
             assertEquals(e["label"], s.label)
             assertEquals(e["type"], s.type)
             assertEquals(e["target"].str().uppercase(), s.target.name)

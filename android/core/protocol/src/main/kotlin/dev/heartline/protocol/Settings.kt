@@ -21,6 +21,7 @@ val SETTINGS: List<SettingDef> = listOf(
     SettingDef("hr_alert", "High heart rate alert", "bool"),
     SettingDef("hr_alert_threshold", "High heart rate threshold", "int", min = 100, max = 180),
     SettingDef("expose_hr", "Share heart rate with other apps (BLE heart rate broadcast)", "bool"),
+    SettingDef("connected_advertising", "Stay visible to other devices while connected (needed for heart rate sharing)", "bool"),
     SettingDef("goal_notification", "Step goal notification", "bool"),
     SettingDef("lift_wrist", "Lift wrist to wake", "bool"),
     SettingDef("inactivity_warnings", "Move reminders (9:00-21:00, after 60 min)", "bool"),
@@ -98,6 +99,7 @@ fun settingCommand(key: String, value: Any, current: Map<String, Any?> = emptyMa
             bytes(6, 0x1A, 0, b(on), threshold.toInt())
         }
         "expose_hr" -> bytes(6, 0x1F, 0, b(v))
+        "connected_advertising" -> bytes(6, 1, 0, b(v))
         "goal_notification" -> bytes(6, 6, 0, b(v))
         "lift_wrist" -> if (truthy(v)) bytes(6, 5, 0, 1, 0, 0, 0, 0) else bytes(6, 5, 0, 0)
         "inactivity_warnings" -> if (truthy(v)) bytes(8, 1, 0x3C, 0, 9, 0, 0x15, 0, 0, 0, 0, 0)
