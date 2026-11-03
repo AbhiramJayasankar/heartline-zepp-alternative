@@ -17,6 +17,9 @@ object Uuids {
     val DEVICE_EVENT: UUID = huami("0010")
     /** Watch workout lifecycle (Gadgetbridge HuamiWorkoutStatus): `11 status`, 02 start, 03 pause, 04 resume, 05 end. */
     val WORKOUT_STATUS: UUID = huami("000f")
+    /** Huami 2021 chunked transfer: the phone writes on 0016, the watch notifies (and takes acks) on 0017. */
+    val CHUNKED_2021_WRITE: UUID = huami("0016")
+    val CHUNKED_2021_READ: UUID = huami("0017")
     val CHUNKED: UUID = huami("0020")
     val HR_MEASURE: UUID = standard("2a37")
     val HR_CONTROL: UUID = standard("2a39")

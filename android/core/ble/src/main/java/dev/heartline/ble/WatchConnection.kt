@@ -48,6 +48,11 @@ class WatchConnection(
     val gps = gpsState.asStateFlow()
     private val watchEvents = MutableSharedFlow<ByteArray>(extraBufferCapacity = 64)
     private val workoutEvents = MutableSharedFlow<ByteArray>(extraBufferCapacity = 16)
+    private val decoder2021 = Chunked2021Decoder()
+    private var handle2021 = 0
+    private val messages2021 = MutableSharedFlow<Message2021>(extraBufferCapacity = 256)
+    /** Complete messages the watch sends on the 2021 chunked channel (Alexa is endpoint 0x0011). */
+    val chunked2021: SharedFlow<Message2021> = messages2021
     /** Raw workout-status notifications from the watch (see [workoutStatusName]); for starting captures automatically. */
     val workoutStatus: SharedFlow<ByteArray> = workoutEvents
     val deviceEvents = watchEvents.asSharedFlow()
@@ -138,6 +143,7 @@ class WatchConnection(
                         c.enableNotification(Uuids.REALTIME_STEPS); c.enableNotification(Uuids.DEVICE_EVENT)
                     }
                     optional("Workout status") { c.enableNotification(Uuids.WORKOUT_STATUS) }
+                    optional("2021 channel") { c.enableNotification(Uuids.CHUNKED_2021_READ) }
                     // Listen on every other notifying characteristic too: the watch can only send on subscribed ones,
                     // and features like Alexa or workout status may use characteristics nobody has mapped.
                     for ((service, uuid) in c.notifiable()) if (uuid !in handledNotifications) optional("Listen $uuid") {
@@ -223,6 +229,16 @@ class WatchConnection(
             }
             Uuids.REALTIME_STEPS -> parseRealtimeSteps(n.value)?.let { stepsState.value = it }
             !in handledNotifications -> log("info", "Unmapped notification on ${n.uuid.toString().substring(4, 8)}: ${n.value.joinToString("") { "%02x".format(it) }}")
+            Uuids.CHUNKED_2021_READ -> {
+                val r = decoder2021.feed(n.value)
+                // Ack straight away, outside the action lock: the watch gives up on Alexa after about 5 s.
+                r.ack?.let { ack -> client?.let { c -> scope.launch { optional("2021 ack") { c.write(Uuids.CHUNKED_2021_READ, ack) } } } }
+                r.message?.let { m ->
+                    if (m.endpoint != Endpoint2021.ALEXA || (m.payload.firstOrNull()?.toInt() ?: 0) != Alexa.VOICE)
+                        log("info", "Watch 2021 message on 0x%04x: %s".format(m.endpoint, m.payload.take(48).joinToString("") { "%02x".format(it) }))
+                    messages2021.tryEmit(m)
+                }
+            }
             Uuids.WORKOUT_STATUS -> {
                 log("info", "Watch workout ${workoutStatusName(n.value)} (${n.value.joinToString("") { "%02x".format(it) }})")
                 workoutEvents.tryEmit(n.value.copyOf())
@@ -405,6 +421,12 @@ class WatchConnection(
         val c = requireClient()
         chunks(c, musicPayload(music), 3); chunks(c, musicVolumePayload(volumePercent), 3)
     }
+    /** Sends one message on the 2021 chunked channel. Not under the action lock, so replies are not stuck behind a sync. */
+    suspend fun send2021(endpoint: Int, payload: ByteArray) {
+        val c = requireClient()
+        handle2021 = (handle2021 + 1) and 255
+        for (frame in chunked2021Frames(endpoint, payload, handle2021)) c.write(Uuids.CHUNKED_2021_WRITE, frame)
+    }
     suspend fun acknowledgeFindPhone() = actions.withLock { requireClient().write(Uuids.CONFIG, FIND_PHONE_ACK) }
     private suspend fun chunks(c: GattClient, payload: ByteArray, type: Int = 0) {
         // watch.py:notify: keep MTU 23 here even after negotiating 247 for raw data.
@@ -546,5 +568,5 @@ class WatchConnection(
 }
 
 /** Characteristics the app already subscribes to (or must not touch: raw stream, history transfer, live HR). */
-private val handledNotifications = setOf(Uuids.AUTH, Uuids.RAW_CTRL, Uuids.RAW_DATA, Uuids.ACT_CTRL, Uuids.ACT_DATA, Uuids.CONFIG,
+private val handledNotifications = setOf(Uuids.CHUNKED_2021_READ, Uuids.AUTH, Uuids.RAW_CTRL, Uuids.RAW_DATA, Uuids.ACT_CTRL, Uuids.ACT_DATA, Uuids.CONFIG,
     Uuids.REALTIME_STEPS, Uuids.DEVICE_EVENT, Uuids.CHUNKED, Uuids.HR_MEASURE, Uuids.WORKOUT_STATUS, Uuids.BATTERY)
