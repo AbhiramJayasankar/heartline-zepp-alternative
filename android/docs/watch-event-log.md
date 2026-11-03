@@ -7,8 +7,10 @@ Code: `core/protocol/.../WatchStatistics.kt`.
 
 Frames of `fe ef | u16 length | protobuf`, back to back. The protobuf is what the Zepp app calls
 `Hmstatistics.EventsStatistics`: 1 serial, 2 device source, 3 device id, 4 version, 5 repeated events. Each event
-(`EventHole`) has 1 id, 2 a wall-clock time (local time counted as seconds since 1970, so it reads as UTC), 3 a
-session time (real epoch seconds), 4 reserved, 5 repeated `{1 key, 2 value}` params. Zepp uploads the log without
+(`EventHole`) has 1 id, 2 a wall-clock time, 3 a session time, 4 reserved, 5 repeated `{1 key, 2 value}` params. Both
+times are the watch's local time counted as seconds since 1970: read as epochs they are 5:30 h late in IST, so
+Heartline converts them with the phone's time zone. (Until 2026-11-04 field 3 was taken as a real epoch and the
+`watch_workout` rows were stored 5:30 h late; the backfill re-reads them.) Zepp uploads the log without
 reading it, so the ids have no names in the app.
 
 ## Identified ids

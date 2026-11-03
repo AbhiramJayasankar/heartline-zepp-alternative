@@ -1,16 +1,21 @@
 package dev.heartline.protocol
 
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.ZoneOffset
+
 /**
  * The watch's event log, fetched as "statistics" (0x2C). Frames are `fe ef u16-length` followed by a protobuf the Zepp
  * app calls Hmstatistics.EventsStatistics: 1 serial, 2 device source, 3 device id, 4 version, 5 repeated events. Each
- * event (EventHole) has 1 id, 2 a wall-clock time (local time counted as seconds), 3 a session time (real epoch
- * seconds), 4 reserved and 5 repeated key/value params. Zepp uploads these without reading them.
+ * event (EventHole) has 1 id, 2 a wall-clock time, 3 a session time, 4 reserved and 5 repeated key/value params. Both
+ * times are the watch's local time counted as seconds since 1970, so they read 5:30 h late as epochs in IST. Zepp uploads
+ * these without reading them.
  *
  * Matched against saved workouts (2026-11-02): 0x0801 is a workout opened or started and 0x0901 one ended, each with the
  * watch's workout type code (as in [WORKOUT_TYPES]) in param 80 or 32; their session times fall within seconds of the
- * workout's own start and end. Other ids are not identified yet.
+ * workout's own start and end once read as local time. Other ids are not identified yet.
  */
-data class WatchStatEvent(val id: Int, val wallTs: Long, val epoch: Long, val params: Map<Int, Long>)
+data class WatchStatEvent(val id: Int, val wallTs: Long, val sessionTs: Long, val params: Map<Int, Long>)
 
 fun parseStatisticsEvents(data: ByteArray): List<WatchStatEvent> {
     val out = ArrayList<WatchStatEvent>()
@@ -25,25 +30,29 @@ fun parseStatisticsEvents(data: ByteArray): List<WatchStatEvent> {
 }
 
 private fun event(b: ByteArray): WatchStatEvent {
-    var id = 0; var wall = 0L; var epoch = 0L; val params = LinkedHashMap<Int, Long>()
+    var id = 0; var wall = 0L; var session = 0L; val params = LinkedHashMap<Int, Long>()
     Proto(b, 0, b.size).fields { f, p ->
         when (f) {
-            1 -> id = p.varint().toInt(); 2 -> wall = p.varint(); 3 -> epoch = p.varint()
+            1 -> id = p.varint().toInt(); 2 -> wall = p.varint(); 3 -> session = p.varint()
             5 -> { var k = 0; var v = 0L; val pb = p.bytes(); Proto(pb, 0, pb.size).fields { g, q -> if (g == 1) k = q.varint().toInt() else if (g == 2) v = q.varint() else q.skip() }; params[k] = v }
             else -> p.skip()
         }
     }
-    return WatchStatEvent(id, wall, epoch, params)
+    return WatchStatEvent(id, wall, session, params)
 }
 
-/** Workout starts and ends from the event log, as health rows "watch_workout": value = type code, extra event = start/end. */
-fun watchWorkoutMarks(events: List<WatchStatEvent>): List<HealthPoint> = events.mapNotNull { e ->
+/**
+ * Workout starts and ends from the event log, as health rows "watch_workout": value = type code, extra event = start/end.
+ * Times are converted from the watch's local time with [zone], the phone's zone (the watch follows the phone's clock).
+ */
+fun watchWorkoutMarks(events: List<WatchStatEvent>, zone: ZoneId = ZoneId.systemDefault()): List<HealthPoint> = events.mapNotNull { e ->
     val (kind, code) = when (e.id) {
         0x0801 -> "start" to e.params[80]
         0x0901 -> "end" to e.params[32]
         else -> return@mapNotNull null
     }
-    val ts = if (e.epoch > 0) e.epoch else return@mapNotNull null
+    if (e.sessionTs <= 0) return@mapNotNull null
+    val ts = LocalDateTime.ofEpochSecond(e.sessionTs, 0, ZoneOffset.UTC).atZone(zone).toEpochSecond()
     HealthPoint("watch_workout", ts, code?.toDouble(), mapOf("event" to kind, "type" to (code?.let { WORKOUT_TYPES[it.toInt()] } ?: "Workout")))
 }
 

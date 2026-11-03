@@ -1,5 +1,6 @@
 package dev.heartline.protocol
 
+import java.time.ZoneId
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -14,7 +15,7 @@ class WatchStatisticsTest {
         val e = parseStatisticsEvents(frame).single()
         assertEquals(0x0801, e.id)
         assertEquals(1793657633L, e.wallTs)
-        assertEquals(1793657629L, e.epoch)
+        assertEquals(1793657629L, e.sessionTs)
         assertEquals(mapOf(80 to 52L), e.params)
     }
 
@@ -23,9 +24,10 @@ class WatchStatisticsTest {
     }
 
     @Test fun workoutMarks() {
-        val m = watchWorkoutMarks(parseStatisticsEvents(frame)).single()
+        val m = watchWorkoutMarks(parseStatisticsEvents(frame), ZoneId.of("Asia/Kolkata")).single()
         assertEquals("watch_workout", m.type)
-        assertEquals(1793657629L, m.ts)
+        // Local 22:13:49 IST; the watch's own workout summary for that session starts at 1793637834 (22:13:54).
+        assertEquals(1793657629L - 19800, m.ts)
         assertEquals(52.0, m.value)
         assertEquals("start", m.extra["event"])
         val end = WatchStatEvent(0x0901, 0, 1793661731, mapOf(32 to 52L))
