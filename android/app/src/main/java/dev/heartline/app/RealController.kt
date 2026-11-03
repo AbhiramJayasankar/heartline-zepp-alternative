@@ -236,6 +236,7 @@ class RealController(
         it.notify(title, body, if (sms) NotificationKind.GENERIC else NotificationKind.MESSAGE, label, dev.heartline.protocol.watchIconFor(asPackage))
     }
     override fun syncNow() = action { it.syncActivity(); it.syncHealth() }
+    override fun refreshTemperature() = action { it.syncQuick() }
     override fun setWatchClock() = action { it.syncTime() }
     override fun applyWatchSetting(key: String, value: Any) = action { it.applySetting(key, value) }
     override fun saveProfile(profile: ProfileUi) { settings.setProfile(dev.heartline.data.model.Profile(profile.age, profile.sex?.uppercase()?.let { Sex.valueOf(it) }, profile.weightKg, profile.heightCm, profile.maxHr, profile.restingHr)) }

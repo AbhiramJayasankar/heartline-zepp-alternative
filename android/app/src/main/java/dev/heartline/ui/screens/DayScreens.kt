@@ -19,6 +19,11 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import kotlinx.coroutines.delay
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -78,7 +83,7 @@ fun DayScreen(controller: HeartlineController, metric: DayMetric, epochDay: Long
         when (metric) {
             DayMetric.HEART -> HeartDay(day, nav)
             DayMetric.STRESS -> StressDay(day)
-            DayMetric.BODY -> BodyDay(day)
+            DayMetric.BODY -> BodyDay(day, live = date == today, onRefresh = controller::refreshTemperature)
         }
         Gap(28)
         // Jump sideways between the metrics for the same day.
@@ -251,8 +256,10 @@ private fun stressLevel(avg: Int?): String = when { avg == null -> "–"; avg < 
 // ---- SpO2 and temperature ----
 
 @Composable
-private fun BodyDay(d: HealthDayUi) {
+private fun BodyDay(d: HealthDayUi, live: Boolean, onRefresh: () -> Unit) {
     val c = HL.colors
+    // While today's page is open, fetch the newest temperature every minute (the service otherwise does every 5 minutes).
+    if (live) LaunchedEffect(Unit) { while (true) { onRefresh(); delay(60_000) } }
     SectionTitle("Blood oxygen (SpO2)"); Gap(8)
     if (d.spo2.isEmpty()) MutedText("No SpO2 readings this day. The watch records SpO2 during sleep and when you measure on the watch.")
     else {
@@ -268,6 +275,7 @@ private fun BodyDay(d: HealthDayUi) {
         Gap(8); MutedText("Wrist SpO2 is a wellness estimate. Brief dips during sleep are common; repeated readings under 90% are worth mentioning to a doctor.")
     }
     Gap(28); SectionTitle("Temperature"); Gap(8)
+    if (live) d.temperature.lastOrNull()?.let { p -> TemperatureNow(p, onRefresh); Gap(14) }
     if (d.temperature.isEmpty()) MutedText("No temperature readings this day.")
     else {
         Stats(listOf(Triple("Average", d.tempAvg?.let { "%.1f".format(it) } ?: "–", "°C"), Triple("Lowest", d.tempMin?.let { "%.1f".format(it) } ?: "–", "°C"),
@@ -280,5 +288,21 @@ private fun BodyDay(d: HealthDayUi) {
         }
         Gap(8)
         MutedText("The watch's temperature sensor reads the skin under it while worn and the air when it is off your wrist, and needs about 15 minutes to settle after you put it on. The second value is a companion reading in each record whose exact meaning Amazfit does not document.")
+    }
+}
+
+/** The newest reading and how old it is; the watch writes its temperature records with a delay of its own. */
+@Composable
+private fun TemperatureNow(p: SeriesPoint, onRefresh: () -> Unit) {
+    val c = HL.colors
+    var now by remember { mutableLongStateOf(System.currentTimeMillis() / 1000) }
+    LaunchedEffect(Unit) { while (true) { delay(15_000); now = System.currentTimeMillis() / 1000 } }
+    val age = ((now - p.t) / 60).toLong().coerceAtLeast(0)
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.surface).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("%.1f °C".format(p.v), style = MaterialTheme.typography.headlineMedium, color = c.ink)
+            Text(if (age < 1) "Latest reading, just now" else "Latest reading, $age min ago", style = MaterialTheme.typography.bodySmall, color = c.inkSoft)
+        }
+        TextButton(onClick = onRefresh) { Text("Refresh") }
     }
 }

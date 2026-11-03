@@ -42,6 +42,8 @@ interface HeartlineController {
     /** [asPackage] makes it look like that app's notification (its watch icon and name), e.g. "com.whatsapp". */
     fun sendNotification(title: String, body: String, kind: NotifyKind, asPackage: String = "")
     fun syncNow()
+    /** Fetches only temperature, stress and SpO2: quick enough to call every minute while a page shows them. */
+    fun refreshTemperature()
     fun setWatchClock()
     fun applyWatchSetting(key: String, value: Any)
     fun saveProfile(profile: ProfileUi)

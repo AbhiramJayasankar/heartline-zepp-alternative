@@ -527,6 +527,17 @@ class WatchConnection(
             onSuccessfulSync?.invoke()
         } finally { syncState.value = SyncStatus() }
     }
+    /**
+     * Temperature, stress and SpO2 only. Their buffers empty on transfer, so fetching every few minutes is cheap and adds
+     * no duplicates; it turns the hourly temperature into a near-live reading. Logs how old the newest temperature is,
+     * which is the watch's own delay in writing records.
+     */
+    suspend fun syncQuick(types: List<FetchType> = QUICK_TYPES) = syncLock.withLock {
+        requireClient()
+        for (type in types) optional("Sync ${type.key}") { syncHealthType(type) }
+        persistence.lastHealth(FetchType.TEMPERATURE.key)?.let { log("info", "Quick sync: newest temperature reading is %d min old".format((now() - it) / 60)) }
+        onSuccessfulSync?.invoke()
+    }
     private suspend fun syncHealthType(type: FetchType) {
         var since = SyncPolicy.healthSince(persistence.lastHealth(type.key), now())
         for (round in 0 until 5) {
@@ -570,3 +581,5 @@ class WatchConnection(
 /** Characteristics the app already subscribes to (or must not touch: raw stream, history transfer, live HR). */
 private val handledNotifications = setOf(Uuids.CHUNKED_2021_READ, Uuids.AUTH, Uuids.RAW_CTRL, Uuids.RAW_DATA, Uuids.ACT_CTRL, Uuids.ACT_DATA, Uuids.CONFIG,
     Uuids.REALTIME_STEPS, Uuids.DEVICE_EVENT, Uuids.CHUNKED, Uuids.HR_MEASURE, Uuids.WORKOUT_STATUS, Uuids.BATTERY)
+
+val QUICK_TYPES = listOf(FetchType.TEMPERATURE, FetchType.STRESS, FetchType.SPO2)
