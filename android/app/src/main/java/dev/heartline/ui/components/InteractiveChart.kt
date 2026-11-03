@@ -52,7 +52,8 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 
-/** One plotted series. [format] renders a value for the readout; [gap] breaks the line across missing data (x units). */
+/** One plotted series. [format] renders a value for the readout; [gap] breaks the line across missing data (x units).
+ * A zero [width] shows the series in the readout only. */
 data class ChartLine(
     val points: List<SeriesPoint>, val color: Color, val label: String, val unit: String = "",
     val width: Dp = 2.dp, val fill: Boolean = false, val dashed: Boolean = false, val step: Boolean = false,
@@ -96,7 +97,7 @@ fun InteractiveChart(
 
     Column(modifier.fillMaxWidth()) {
         // Readout: values at the touched moment, or the chart's own summary/hint at rest.
-        Box(Modifier.fillMaxWidth().heightIn(min = 40.dp)) {
+        Box(Modifier.fillMaxWidth().heightIn(min = 62.dp)) {
             val sel = selected
             if (sel == null) {
                 if (summary != null) summary() else if (idleHint != null) MutedText(idleHint)
@@ -196,6 +197,7 @@ fun InteractiveChart(
                 }
             }
             lines.forEach { l ->
+                if (l.width.value <= 0f) return@forEach // readout-only series
                 val pts = l.points.filter { it.t >= a - l.gap && it.t <= b + l.gap }
                 if (pts.isEmpty()) return@forEach
                 val path = Path(); var started = false; var prev: SeriesPoint? = null
@@ -224,7 +226,7 @@ fun InteractiveChart(
             selected?.let { s ->
                 if (s in a..b) {
                     drawLine(c.ink.copy(alpha = 0.55f), Offset(x(s), top), Offset(x(s), bottom), 1.2.dp.toPx())
-                    lines.forEach { l -> nearest(l.points, s, l.gap)?.let { p -> drawCircle(c.paper, 5.dp.toPx(), Offset(x(p.t), y(p.v))); drawCircle(l.color, 3.5.dp.toPx(), Offset(x(p.t), y(p.v))) } }
+                    lines.filter { it.width.value > 0f }.forEach { l -> nearest(l.points, s, l.gap)?.let { p -> drawCircle(c.paper, 5.dp.toPx(), Offset(x(p.t), y(p.v))); drawCircle(l.color, 3.5.dp.toPx(), Offset(x(p.t), y(p.v))) } }
                 }
             }
         }

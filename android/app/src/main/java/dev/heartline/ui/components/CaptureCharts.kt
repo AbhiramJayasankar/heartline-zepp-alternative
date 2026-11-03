@@ -52,30 +52,15 @@ fun RepStrip(reps: List<RepUi>, maxDurationS: Double, maxArc: Double, color: Col
 @Composable
 fun RecoveryChart(points: List<RecoveryPointUi>, medianRestS: Double?, modifier: Modifier = Modifier) {
     val c = HL.colors
-    val tm = rememberTextMeasurer()
-    Canvas(modifier.fillMaxWidth().height(170.dp)) {
-        if (points.size < 2) return@Canvas
-        val left = 34.dp.toPx(); val right = size.width - 8.dp.toPx(); val top = 8.dp.toPx(); val bottom = size.height - 20.dp.toPx()
-        val tMax = points.maxOf { it.t }.coerceAtLeast(60).toDouble()
-        val lo = minOf(-12.0, points.minOf { it.delta } - 2); val hi = maxOf(4.0, points.maxOf { it.delta } + 2)
-        fun x(t: Double) = left + (t / tMax).toFloat() * (right - left)
-        fun y(v: Double) = bottom - ((v - lo) / (hi - lo)).toFloat() * (bottom - top)
-        var v = Math.ceil(lo / 4) * 4
-        while (v <= hi) { drawLine(if (v == 0.0) c.inkSoft else c.gridMajor, Offset(left, y(v)), Offset(right, y(v)), 1f); label(tm, if (v > 0) "+${v.toInt()}" else "${v.toInt()}", left - 6.dp.toPx(), y(v) - 7.dp.toPx(), c.inkSoft, alignEnd = true); v += 4 }
-        var t = 0
-        while (t <= tMax) { label(tm, if (t == 0) "peak" else "${t}s", x(t.toDouble()), bottom + 4.dp.toPx(), c.inkSoft, center = t > 0); t += 60 }
-        val line = Path().apply { points.forEachIndexed { i, p -> if (i == 0) moveTo(x(p.t.toDouble()), y(p.delta)) else lineTo(x(p.t.toDouble()), y(p.delta)) } }
-        val area = Path().apply { addPath(line); lineTo(x(points.last().t.toDouble()), y(0.0)); lineTo(x(points.first().t.toDouble()), y(0.0)); close() }
-        drawPath(area, c.pulse.copy(alpha = 0.14f))
-        drawPath(line, c.pulse, style = Stroke(2.5.dp.toPx(), join = StrokeJoin.Round))
-        val m = points.minBy { it.delta }
-        drawCircle(c.pulse, 4.dp.toPx(), Offset(x(m.t.toDouble()), y(m.delta)))
-        label(tm, "%.0f bpm at %ds".format(m.delta, m.t), x(m.t.toDouble()) + 6.dp.toPx(), y(m.delta) + 4.dp.toPx(), c.ink)
-        medianRestS?.takeIf { it <= tMax }?.let { r ->
-            drawLine(c.inkSoft, Offset(x(r), top), Offset(x(r), bottom), 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f)))
-            label(tm, "median rest", x(r) + 4.dp.toPx(), top, c.inkSoft)
-        }
-    }
+    if (points.size < 2) return
+    val end = points.maxOf { it.t }.coerceAtLeast(60).toDouble()
+    val line = ChartLine(points.map { SeriesPoint(it.t.toDouble(), it.delta) }, c.pulse, "Change from set peak", "bpm", fill = true, gap = 30.0,
+        format = { "%+.1f".format(it) })
+    val counts = points.map { SeriesPoint(it.t.toDouble(), it.n.toDouble()) }
+    InteractiveChart(listOf(line, ChartLine(counts, c.inkSoft, "Rests averaged", "", width = 0.dp, axis = false, gap = 30.0)), 0.0, end, modifier, height = 170.dp,
+        spans = medianRestS?.takeIf { it <= end }?.let { listOf(ChartSpan(it - 1, it + 1, c.inkSoft.copy(alpha = 0.6f), "Your median rest")) } ?: emptyList(),
+        xLabel = { if (it == 0.0) "peak" else "${it.toInt()}s" }, readoutX = { "${it.toInt()} s after the set's peak" }, minSpan = 30.0,
+        idleHint = "Touch to see the average change at that point in a rest.")
 }
 
 /** A few seconds of the filtered optical pulse with each detected beat marked above it. */
@@ -142,19 +127,7 @@ fun ActivityBand(activities: List<CaptureActivityUi>, durationS: Int, modifier: 
 @Composable
 fun HrWindowChart(hr: List<SeriesPoint>, from: Double, to: Double, shadeFrom: Double, shadeTo: Double, modifier: Modifier = Modifier) {
     val c = HL.colors
-    val tm = rememberTextMeasurer()
-    Canvas(modifier.fillMaxWidth().height(140.dp)) {
-        val pts = hr.filter { it.t in from..to }
-        if (pts.size < 2) return@Canvas
-        val right = size.width - 30.dp.toPx(); val top = 6.dp.toPx(); val bottom = size.height - 18.dp.toPx()
-        val lo = pts.minOf { it.v } - 5; val hi = pts.maxOf { it.v } + 5
-        fun x(t: Double) = ((t - from) / (to - from)).toFloat() * right
-        fun y(v: Double) = bottom - ((v - lo) / (hi - lo)).toFloat() * (bottom - top)
-        drawRect(c.warn.copy(alpha = 0.14f), Offset(x(shadeFrom), top), Size(x(shadeTo) - x(shadeFrom), bottom - top))
-        val p = Path().apply { pts.forEachIndexed { i, s -> if (i == 0) moveTo(x(s.t), y(s.v)) else lineTo(x(s.t), y(s.v)) } }
-        drawPath(p, c.pulse, style = Stroke(2.dp.toPx(), join = StrokeJoin.Round))
-        listOf(lo + 5, hi - 5).forEach { v -> label(tm, "${v.toInt()}", right + 4.dp.toPx(), y(v) - 7.dp.toPx(), c.inkSoft) }
-        label(tm, clock(shadeFrom), x(shadeFrom), bottom + 3.dp.toPx(), c.inkSoft, center = true)
-        label(tm, clock(shadeTo), x(shadeTo), bottom + 3.dp.toPx(), c.inkSoft, center = true)
-    }
+    InteractiveChart(listOf(ChartLine(hr.filter { it.t in from..to }, c.pulse, "Heart rate", "bpm", gap = 30.0)), from, to, modifier, height = 160.dp,
+        spans = listOf(ChartSpan(shadeFrom, shadeTo, c.warn.copy(alpha = 0.14f), "During the block")),
+        xLabel = { clock(it) }, readoutX = { "${clock(it)} into the capture" + if (it > shadeTo) ", ${clock(it - shadeTo)} after it ended" else "" }, minSpan = 30.0)
 }

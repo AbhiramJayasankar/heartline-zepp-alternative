@@ -28,6 +28,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.heartline.app.HrPoint
+import dev.heartline.app.SeriesPoint
 import dev.heartline.app.MinuteState
 import dev.heartline.app.MinuteUi
 import dev.heartline.app.RrUi
@@ -67,38 +68,12 @@ private fun clock(ts: Long): String = hhmm.format(Instant.ofEpochSecond(ts).atZo
 @Composable
 fun HrTraceChart(points: List<HrPoint>, windowS: Long, nowS: Long, modifier: Modifier = Modifier) {
     val c = HL.colors
-    val tm = rememberTextMeasurer()
-    Canvas(modifier.fillMaxWidth().height(200.dp)) {
-        val padR = 34.dp.toPx(); val padB = 18.dp.toPx(); val padT = 10.dp.toPx()
-        val t0 = nowS - windowS
-        val pts = points.filter { it.ts >= t0 && it.bpm > 0 }
-        val lo = if (pts.isEmpty()) 50.0 else max(30.0, floor((pts.minOf { it.bpm } - 8) / 10.0) * 10)
-        val hi = if (pts.isEmpty()) 110.0 else min(220.0, ceil((pts.maxOf { it.bpm } + 8) / 10.0) * 10)
-        val w = size.width - padR; val h = size.height - padB - padT
-        fun x(t: Long) = ((t - t0).toFloat() / windowS) * w
-        fun y(v: Double) = padT + (1 - ((v - lo) / (hi - lo)).toFloat()) * h
-        val step = if (hi - lo > 60) 20 else 10
-        var v = lo
-        while (v <= hi) {
-            drawLine(c.gridMajor, Offset(0f, y(v)), Offset(w, y(v)), 1f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 6f)))
-            label(tm, v.toInt().toString(), w + 6.dp.toPx(), y(v), c.inkSoft)
-            v += step
-        }
-        for (i in 0..4) {
-            val t = t0 + windowS * i / 4
-            label(tm, if (i == 4) "now" else clock(t), x(t), size.height - padB / 2, c.inkSoft, alignEnd = i == 4, center = i in 1..3)
-        }
-        if (pts.isNotEmpty()) {
-            val path = Path()
-            pts.forEachIndexed { i, p ->
-                val gap = i == 0 || p.ts - pts[i - 1].ts > 180
-                if (gap) path.moveTo(x(p.ts), y(p.bpm.toDouble())) else path.lineTo(x(p.ts), y(p.bpm.toDouble()))
-            }
-            drawPath(path, c.ink, style = Stroke(2.2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-            val last = pts.last()
-            drawCircle(c.pulse, 5.dp.toPx(), Offset(x(last.ts), y(last.bpm.toDouble())))
-        }
-    }
+    // The window end moves once a minute, so a touched reading stays selected while live values arrive.
+    val end = (nowS / 60 + 1) * 60.0
+    val start = end - windowS
+    val pts = points.filter { it.ts >= start && it.bpm > 0 }.map { SeriesPoint(it.ts.toDouble(), it.bpm.toDouble()) }
+    InteractiveChart(listOf(ChartLine(pts, c.pulse, "Heart rate", "bpm", gap = 180.0)), start, end, modifier, height = 200.dp, minSpan = 60.0,
+        idleHint = if (pts.isEmpty()) "No readings in this window yet." else "Touch for the reading at a moment. Pinch to zoom.")
 }
 
 /** A scrolling signal, newest at the right edge, auto-scaled to its own range. */
