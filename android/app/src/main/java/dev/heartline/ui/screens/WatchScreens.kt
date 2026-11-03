@@ -138,17 +138,27 @@ private fun NotifyComposer(controller: HeartlineController, connected: Boolean) 
     var title by remember { mutableStateOf("Heartline") }
     var body by remember { mutableStateOf("Time to stand up and stretch.") }
     var kind by remember { mutableStateOf(NotifyKind.MESSAGE) }
+    var asApp by remember { mutableStateOf("") }
     var sent by remember { mutableStateOf<String?>(null) }
     SectionTitle("Send to your wrist")
     Gap(8)
-    OutlinedTextField(title, { title = it.take(32) }, label = { Text("Title") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    Text("Show it as", style = HL.type.label, color = HL.colors.inkSoft)
+    Gap(6)
+    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        dev.heartline.app.SAMPLE_APPS.forEach { (pkg, name) ->
+            dev.heartline.ui.components.PillButton(name, { asApp = pkg; if (pkg.isNotEmpty() && title == "Heartline") title = "Person A" },
+                style = if (asApp == pkg) dev.heartline.ui.components.ButtonStyle.PRIMARY else dev.heartline.ui.components.ButtonStyle.QUIET)
+        }
+    }
+    Gap(10)
+    OutlinedTextField(title, { title = it.take(32) }, label = { Text("From / title") }, singleLine = true, modifier = Modifier.fillMaxWidth())
     Gap(6)
     OutlinedTextField(body, { body = it.take(240) }, label = { Text("Message") }, minLines = 2, modifier = Modifier.fillMaxWidth())
     Gap(10)
     Row(verticalAlignment = Alignment.CenterVertically) {
         Segmented(listOf(NotifyKind.MESSAGE to "Message", NotifyKind.CALL to "Call", NotifyKind.GENERIC to "Alert"), kind, { kind = it })
         Spacer(Modifier.weight(1f))
-        PillButton("Send", { controller.sendNotification(title, body, kind); sent = "Sent. Check your wrist." }, enabled = connected && body.isNotBlank())
+        PillButton("Send", { controller.sendNotification(title, body, kind, asApp); sent = "Sent. Check your wrist." }, enabled = connected && body.isNotBlank())
     }
     sent?.let { Gap(6); MutedText(it) }
 }

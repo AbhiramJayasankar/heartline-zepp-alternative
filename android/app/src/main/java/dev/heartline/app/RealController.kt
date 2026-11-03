@@ -219,7 +219,13 @@ class RealController(
     }
     override fun cancelCheck() { checkJob?.cancel(); checkJob = null; checkRun.value = null }
     override fun vibrate() = action { it.vibrate() }
-    override fun sendNotification(title: String, body: String, kind: NotifyKind) = action { it.notify(title, body, NotificationKind.valueOf(kind.name)) }
+    override fun sendNotification(title: String, body: String, kind: NotifyKind, asPackage: String) = action {
+        if (asPackage.isBlank() || kind == NotifyKind.CALL) { it.notify(title, body, NotificationKind.valueOf(kind.name)); return@action }
+        val label = runCatching { context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(asPackage, 0)).toString() }
+            .getOrDefault(SAMPLE_APPS.firstOrNull { a -> a.first == asPackage }?.second ?: asPackage)
+        val sms = dev.heartline.protocol.isSmsApp(asPackage)
+        it.notify(title, body, if (sms) NotificationKind.GENERIC else NotificationKind.MESSAGE, label, dev.heartline.protocol.watchIconFor(asPackage))
+    }
     override fun syncNow() = action { it.syncActivity(); it.syncHealth() }
     override fun setWatchClock() = action { it.syncTime() }
     override fun applyWatchSetting(key: String, value: Any) = action { it.applySetting(key, value) }
@@ -342,10 +348,10 @@ class RealController(
         probe.value = results
     }
 
-    fun forwardNotification(title: String, body: String, kind: NotificationKind, app: String) {
+    fun forwardNotification(title: String, body: String, kind: NotificationKind, app: String, icon: Int = dev.heartline.protocol.WatchIcon.APP) {
         val s = service.value ?: return
         if (s.watch.connection.value.state != ConnectionState.CONNECTED) return
-        launchAction { s.command { it.notify(title, body, kind, app) } }
+        launchAction { s.command { it.notify(title, body, kind, app, icon) } }
     }
 }
 

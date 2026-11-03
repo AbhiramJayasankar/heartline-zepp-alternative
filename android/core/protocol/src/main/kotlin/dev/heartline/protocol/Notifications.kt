@@ -15,13 +15,49 @@ private fun fit(text: String, limit: Int): ByteArray {
     return raw.copyOf(end)
 }
 
-/** health.notification_payload / HuamiSupport: the GTS-family extra header prevents watch reboots. */
-fun notificationPayload(title: String, body: String, kind: NotificationKind = NotificationKind.MESSAGE, app: String = "Heartline"): ByteArray {
+/** Built-in watch icons (Gadgetbridge HuamiIcon). The byte after the alert count picks one for custom alerts. */
+object WatchIcon {
+    const val WECHAT = 0; const val FACEBOOK = 3; const val TWITTER = 4; const val SNAPCHAT = 6; const val WHATSAPP = 7
+    const val ALARM_CLOCK = 10; const val APP = 11; const val INSTAGRAM = 12; const val CHAT_BLUE = 13; const val CALENDAR = 21
+    const val MESSENGER = 22; const val VIBER = 23; const val LINE = 24; const val TELEGRAM = 25; const val KAKAOTALK = 26
+    const val SKYPE = 27; const val VKONTAKTE = 28; const val HANGOUTS = 30; const val EMAIL = 34
+}
+
+/** Icon for an Android package, following Gadgetbridge's app-to-icon mapping; unknown apps get the generic icon. */
+fun watchIconFor(packageName: String): Int = when (packageName) {
+    "com.whatsapp", "com.whatsapp.w4b" -> WatchIcon.WHATSAPP
+    "org.telegram.messenger", "org.telegram.messenger.web", "org.thunderdog.challegram", "org.telegram.plus" -> WatchIcon.TELEGRAM
+    "com.instagram.android", "com.instagram.barcelona", "com.google.android.apps.photos" -> WatchIcon.INSTAGRAM
+    "com.facebook.orca", "com.facebook.mlite", "org.thoughtcrime.securesms" -> WatchIcon.MESSENGER
+    "com.facebook.katana", "com.facebook.lite" -> WatchIcon.FACEBOOK
+    "com.snapchat.android" -> WatchIcon.SNAPCHAT
+    "com.twitter.android", "com.x.android" -> WatchIcon.TWITTER
+    "com.google.android.gm", "com.microsoft.office.outlook", "com.samsung.android.email.provider",
+    "com.yahoo.mobile.client.android.mail", "ch.protonmail.android", "com.google.android.gm.lite" -> WatchIcon.EMAIL
+    "com.google.android.calendar", "com.samsung.android.calendar" -> WatchIcon.CALENDAR
+    "com.viber.voip", "com.discord" -> WatchIcon.VIBER
+    "jp.naver.line.android" -> WatchIcon.LINE
+    "com.kakao.talk" -> WatchIcon.KAKAOTALK
+    "com.skype.raider", "com.microsoft.teams" -> WatchIcon.SKYPE
+    "com.vkontakte.android" -> WatchIcon.VKONTAKTE
+    "com.google.android.apps.dynamite", "com.Slack" -> WatchIcon.HANGOUTS
+    "com.wire", "ch.threema.app" -> WatchIcon.CHAT_BLUE
+    "com.tencent.mm" -> WatchIcon.WECHAT
+    "com.google.android.deskclock", "com.sec.android.app.clockpackage" -> WatchIcon.ALARM_CLOCK
+    else -> WatchIcon.APP
+}
+
+/** Text-message apps use the watch's SMS alert, which has its own icon (no custom icon byte). */
+fun isSmsApp(packageName: String): Boolean = packageName in setOf(
+    "com.google.android.apps.messaging", "com.samsung.android.messaging", "com.android.mms", "com.android.messaging", "com.textra")
+
+/** health.notification_payload / HuamiSupport: the GTS-family extra header prevents watch reboots. [icon] is a [WatchIcon]. */
+fun notificationPayload(title: String, body: String, kind: NotificationKind = NotificationKind.MESSAGE, app: String = "Heartline", icon: Int = WatchIcon.APP): ByteArray {
     val heading = title.ifEmpty { " " }.codePointPrefix(32)
     val message = body.ifEmpty { " " }.codePointPrefix(512)
     if (kind == NotificationKind.CALL) return bytes(3, 0, 0, 0, 0, 0) + fit(heading, 64) + bytes(0, 0, 0, 2)
     val prefix = if (kind == NotificationKind.GENERIC) bytes(5) + EXTRA_HEADER + bytes(1)
-        else bytes(0xFA) + EXTRA_HEADER + bytes(1, 11)
+        else bytes(0xFA) + EXTRA_HEADER + bytes(1, icon and 255)
     val suffix = if (kind == NotificationKind.GENERIC) bytes(0, 32, 0) else "\u0000$app\u0000".toByteArray(Charsets.UTF_8)
     return prefix + fit("$heading\u0000$message\n\n", NOTIFICATION_MAX - prefix.size) + suffix
 }

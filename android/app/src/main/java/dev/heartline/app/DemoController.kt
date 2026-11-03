@@ -132,7 +132,7 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
 
     override fun cancelCheck() { checkJob?.cancel(); checkRun.value = null; setRawSensors(sensors.value.selected, false) }
     override fun vibrate() = addEvent("Watch vibrated")
-    override fun sendNotification(title: String, body: String, kind: NotifyKind) = addEvent("Sent notification: $title")
+    override fun sendNotification(title: String, body: String, kind: NotifyKind, asPackage: String) = addEvent("Sent notification: $title")
     override fun syncNow() {
         scope.launch {
             sync.update { it.copy(running = true, message = "Syncing activity…") }

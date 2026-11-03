@@ -39,7 +39,8 @@ interface HeartlineController {
     fun cancelCheck()
     fun setRawSensors(sensors: Set<Sensor>, streaming: Boolean)
     fun vibrate()
-    fun sendNotification(title: String, body: String, kind: NotifyKind)
+    /** [asPackage] makes it look like that app's notification (its watch icon and name), e.g. "com.whatsapp". */
+    fun sendNotification(title: String, body: String, kind: NotifyKind, asPackage: String = "")
     fun syncNow()
     fun setWatchClock()
     fun applyWatchSetting(key: String, value: Any)
@@ -303,3 +304,8 @@ data class PrefsUi(
     val hasKey: Boolean = false,
     val watchMac: String? = null,
 )
+
+/** Apps the test composer can imitate: package to display name. */
+val SAMPLE_APPS = listOf("" to "Heartline", "com.whatsapp" to "WhatsApp", "org.telegram.messenger" to "Telegram",
+    "com.instagram.android" to "Instagram", "com.google.android.gm" to "Gmail", "com.samsung.android.messaging" to "Messages",
+    "com.google.android.calendar" to "Calendar", "com.discord" to "Discord")
