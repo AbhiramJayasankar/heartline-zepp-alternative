@@ -92,6 +92,24 @@ fun ActivityScreen(controller: HeartlineController, nav: Navigator) {
         }
         Gap(10)
         Legend()
+        if (d != null && d.steps > 0) {
+            Gap(20)
+            SectionTitle("Steps by hour")
+            Gap(8)
+            val hourly = d.minutes.groupBy { (it.ts - dayStart) / 3600 }.map { (h, ms) -> dev.heartline.app.SeriesPoint(dayStart + h * 3600.0, ms.sumOf { it.steps }.toDouble()) }.filter { it.v > 0 }
+            Panel(padding = androidx.compose.foundation.layout.PaddingValues(12.dp)) {
+                dev.heartline.ui.components.InteractiveChart(emptyList(), dayStart.toDouble(), dayStart + 86_400.0, height = 150.dp,
+                    bars = listOf(dev.heartline.ui.components.ChartBars(hourly, 3600.0, c.ok, "Steps", "", format = { "%,.0f".format(it) })),
+                    readoutX = { t -> "%s–%s".format(dev.heartline.ui.components.epochClock(t - (t - dayStart) % 3600), dev.heartline.ui.components.epochClock(t - (t - dayStart) % 3600 + 3600)) },
+                    minSpan = 3 * 3600.0, idleHint = "Touch an hour for its steps.")
+            }
+        }
+        Gap(18)
+        SectionTitle("This day in detail")
+        Gap(4)
+        NavRow("Heart rate", "Full-day trace, zones, hour by hour") { nav.push(dayRoute(DayMetric.HEART, epochDay)) }
+        NavRow("Stress", "Every reading and time in each level") { nav.push(dayRoute(DayMetric.STRESS, epochDay)) }
+        NavRow("SpO2 and temperature", "Overnight oxygen, per-minute temperature") { nav.push(dayRoute(DayMetric.BODY, epochDay)) }
         d?.sleep?.let { n ->
             Gap(24)
             SectionTitle("Sleep")
@@ -146,11 +164,11 @@ private fun Legend() {
 }
 
 @Composable
-fun TrendsScreen(controller: HeartlineController) {
+fun TrendsScreen(controller: HeartlineController, nav: Navigator) {
     val c = HL.colors
     val trends by controller.trends.collectAsStateWithLifecycle()
     val t = trends
-    Screen("Trends", subtitle = "Two weeks of your numbers. Dashed lines are your 28-day baseline.") {
+    Screen("Trends", subtitle = "Two weeks of your numbers. Dashed lines are your 28-day baseline. Tap any card for every day.") {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Stat("VO2max", fmtOne(t?.vo2max)); Stat("Fitness age", fmtInt(t?.fitnessAge)); Stat("Sleep regularity", fmtInt(t?.sleepRegularity), unit = "/100")
         }
@@ -164,7 +182,7 @@ fun TrendsScreen(controller: HeartlineController) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 pair.forEach { s ->
                     val last = s.points.lastOrNull { it.value != null }?.value
-                    Panel(Modifier.weight(1f), padding = androidx.compose.foundation.layout.PaddingValues(12.dp)) {
+                    Panel(Modifier.weight(1f).clickable { nav.push(Route.Trend(s.key)) }, padding = androidx.compose.foundation.layout.PaddingValues(12.dp)) {
                         Text(s.title, style = HL.type.label, color = c.inkSoft)
                         Text(
                             when {

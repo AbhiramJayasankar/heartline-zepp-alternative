@@ -74,6 +74,9 @@ sealed interface Route {
     data object HealthConnect : Route
     data object Capture : Route
     data class CaptureResult(val id: String) : Route
+    /** A day detail page; [metric] is a DayMetric name. */
+    data class Day(val metric: String, val epochDay: Long) : Route
+    data class Trend(val key: String) : Route
 }
 
 class Navigator {
@@ -128,10 +131,11 @@ fun AppRoot(controller: HeartlineController) {
                 Column(Modifier.fillMaxSize()) {
                     androidx.compose.runtime.CompositionLocalProvider(dev.heartline.ui.screens.LocalTabScroll provides (target as? Tab)?.let { tabScroll[it] }) {
                     when (target) {
-                        Tab.TODAY -> TodayScreen(controller, onOpenHeart = { tab = Tab.HEART }, onOpenActivity = { tab = Tab.ACTIVITY })
+                        Tab.TODAY -> TodayScreen(controller, onOpenHeart = { tab = Tab.HEART }, onOpenActivity = { tab = Tab.ACTIVITY },
+                            onOpenDay = { m -> nav.push(dev.heartline.ui.screens.dayRoute(m, java.time.LocalDate.now().toEpochDay())) })
                         Tab.HEART -> HeartScreen(controller, nav)
                         Tab.ACTIVITY -> ActivityScreen(controller, nav)
-                        Tab.TRENDS -> TrendsScreen(controller)
+                        Tab.TRENDS -> TrendsScreen(controller, nav)
                         Tab.WATCH -> WatchScreen(controller, nav)
                         Route.CheckRun -> CheckRunScreen(controller, nav)
                         is Route.CheckResult -> CheckResultScreen(controller, target.id, nav)
@@ -151,6 +155,8 @@ fun AppRoot(controller: HeartlineController) {
                         Route.HealthConnect -> dev.heartline.ui.screens.HealthConnectScreen(controller, nav)
                         Route.Capture -> dev.heartline.ui.screens.CaptureScreen(controller, nav)
                         is Route.CaptureResult -> dev.heartline.ui.screens.CaptureResultScreen(controller, target.id, nav)
+                        is Route.Trend -> dev.heartline.ui.screens.TrendDetailScreen(controller, target.key, nav)
+                        is Route.Day -> dev.heartline.ui.screens.DayScreen(controller, dev.heartline.ui.screens.DayMetric.valueOf(target.metric), target.epochDay, nav)
                         else -> Unit
                     }
                     }

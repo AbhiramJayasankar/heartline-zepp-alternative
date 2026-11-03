@@ -113,6 +113,10 @@ class GattClient(private val context: Context) : AutoCloseable {
             else { d.value = value; requireGatt().writeDescriptor(d) }
         }
     }
+    /** Every characteristic that can notify or indicate, with its service, outside the firmware-update service. */
+    fun notifiable(): List<Pair<UUID, UUID>> = requireGatt().services
+        .filter { !it.uuid.toString().startsWith("00001530") }
+        .flatMap { s -> s.characteristics.filter { it.properties and (BluetoothGattCharacteristic.PROPERTY_NOTIFY or BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0 }.map { s.uuid to it.uuid } }
     private fun requireGatt() = gatt ?: error("GATT is not connected")
     private fun characteristic(uuid: UUID): BluetoothGattCharacteristic = requireGatt().services.asSequence()
         .flatMap { it.characteristics.asSequence() }.firstOrNull { it.uuid == uuid } ?: error("Missing characteristic $uuid")

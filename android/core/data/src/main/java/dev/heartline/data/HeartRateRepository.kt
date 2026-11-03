@@ -15,5 +15,6 @@ class HeartRateRepository(private val db: HeartlineDatabase) {
     }
     suspend fun stats(since: Double): HrStats = hrStats(since(since))
     fun observeSince(ts: Double): Flow<List<HrSample>> = db.observe("hr_samples") { since(ts) }
+    fun observeRange(from: Double, to: Double): Flow<List<HrSample>> = db.observe("hr_samples") { range(from, to) }
     fun observeStats(since: Double): Flow<HrStats> = db.observe("hr_samples") { stats(since) }
 }

@@ -41,6 +41,10 @@ import dev.heartline.app.WorkoutDetailUi
 import dev.heartline.ui.Navigator
 import dev.heartline.ui.Route
 import dev.heartline.ui.components.ActivityBand
+import dev.heartline.ui.components.ChartBand
+import dev.heartline.ui.components.ChartLine
+import dev.heartline.ui.components.ChartSpan
+import dev.heartline.ui.components.InteractiveChart
 import dev.heartline.ui.components.ButtonStyle
 import dev.heartline.ui.components.HrTraceChart
 import dev.heartline.ui.components.LegendDot
@@ -211,7 +215,15 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
         Panel(padding = PaddingValues(12.dp)) {
             Text(if (a.floor.size > 1) "Heart rate, sets shaded by exercise, dashed line is your lowest per 5 min" else "Heart rate, sets shaded", style = HL.type.label, color = c.inkSoft)
             Gap(6)
-            SessionChart(a.hr, a.durationS, a.zones, a.sets, floor = a.floor)
+            val setLabels = a.sets.mapIndexed { i, s -> ChartSpan(s.start, s.end, dev.heartline.ui.components.groupColor(s.group, c).copy(alpha = 0.25f), "Set ${i + 1}, ${s.reps} reps") }
+            val cardioSpans = a.cardio.map { k -> ChartSpan(k.start, k.end, c.warn.copy(alpha = 0.15f), k.name ?: k.kind.replaceFirstChar { it.uppercase() }) }
+            InteractiveChart(
+                listOf(ChartLine(a.hr, c.pulse, "Heart rate", "bpm", gap = 30.0)) +
+                    if (a.floor.size > 1) listOf(ChartLine(a.floor, c.pulse.copy(alpha = 0.7f), "5-min low", "bpm", width = 1.5.dp, dashed = true, step = true, gap = 400.0)) else emptyList(),
+                0.0, a.durationS.toDouble().coerceAtLeast(60.0), height = 210.dp, spans = setLabels + cardioSpans,
+                bands = a.zones.filter { it.zone >= 3 }.map { z -> ChartBand(z.lowBpm.toDouble(), (z.highBpm ?: 240).toDouble(), dev.heartline.ui.components.zoneColor(z.zone, c).copy(alpha = 0.06f)) },
+                xLabel = { clock(it) }, readoutX = { "${clock(it)} in, at " + dev.heartline.ui.components.epochClock(a.start + it, seconds = true) }, minSpan = 60.0,
+                idleHint = "Touch for heart rate and the set at that moment. Pinch to zoom into a set.")
             MotionStrip(a.motion, a.durationS)
             Gap(8)
             SegmentBar(a.segments, a.durationS)
@@ -521,10 +533,13 @@ fun WorkoutScreen(controller: HeartlineController, route: Route.Workout, nav: Na
         Gap(20)
         Panel(padding = PaddingValues(12.dp)) {
             Text("Heart rate", style = HL.type.label, color = c.inkSoft)
-            if (d.zones.isNotEmpty() && w.track.size > 1) {
-                Gap(6)
-                SessionChart(w.track.map { dev.heartline.app.SeriesPoint((it.ts - w.start).toDouble(), it.bpm.toDouble()) }, w.durationS, d.zones, emptyList())
-            } else HrTraceChart(w.track, w.durationS.toLong().coerceAtLeast(60), w.start + w.durationS)
+            Gap(6)
+            if (w.track.size > 1) InteractiveChart(
+                listOf(ChartLine(w.track.map { dev.heartline.app.SeriesPoint((it.ts - w.start).toDouble(), it.bpm.toDouble()) }, c.pulse, "Heart rate", "bpm", fill = true, gap = 60.0)),
+                0.0, w.durationS.toDouble().coerceAtLeast(60.0), height = 210.dp,
+                bands = d.zones.map { z -> ChartBand(z.lowBpm.toDouble(), (z.highBpm ?: 240).toDouble(), dev.heartline.ui.components.zoneColor(z.zone, c).copy(alpha = 0.08f)) },
+                xLabel = { clock(it) }, readoutX = { "${clock(it)} in, at " + dev.heartline.ui.components.epochClock(w.start + it, seconds = true) }, minSpan = 60.0)
+            else HrTraceChart(w.track, w.durationS.toLong().coerceAtLeast(60), w.start + w.durationS)
         }
         if (d.zones.isNotEmpty()) { Gap(24); SectionTitle("Heart-rate zones"); Gap(12); ZoneBars(d.zones) }
         listOf(Triple("Speed", d.speedKmh, "km/h"), Triple("Cadence", d.cadence, "spm"), Triple("Altitude", d.altitude, "m")).forEach { (title, s, unit) ->
@@ -532,7 +547,9 @@ fun WorkoutScreen(controller: HeartlineController, route: Route.Workout, nav: Na
                 Gap(16)
                 Panel(padding = PaddingValues(12.dp)) {
                     Text(title, style = HL.type.label, color = c.inkSoft); Gap(6)
-                    SeriesChart(s, if (title == "Speed") c.ok else if (title == "Cadence") c.warn else c.sleepDeep, unit)
+                    InteractiveChart(listOf(ChartLine(s, if (title == "Speed") c.ok else if (title == "Cadence") c.warn else c.sleepDeep, title, unit,
+                        gap = 120.0, format = { if (title == "Speed") "%.1f".format(it) else "%.0f".format(it) })),
+                        s.first().t, s.last().t.coerceAtLeast(s.first().t + 60), height = 140.dp, xLabel = { clock(it) }, readoutX = { "${clock(it)} in" }, minSpan = 60.0, idleHint = null)
                 }
             }
         }

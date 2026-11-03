@@ -138,6 +138,11 @@ class WatchConnection(
                         c.enableNotification(Uuids.REALTIME_STEPS); c.enableNotification(Uuids.DEVICE_EVENT)
                     }
                     optional("Workout status") { c.enableNotification(Uuids.WORKOUT_STATUS) }
+                    // Listen on every other notifying characteristic too: the watch can only send on subscribed ones,
+                    // and features like Alexa or workout status may use characteristics nobody has mapped.
+                    for ((service, uuid) in c.notifiable()) if (uuid !in handledNotifications) optional("Listen $uuid") {
+                        c.enableNotification(uuid); log("info", "Listening on ${uuid.toString().substring(4, 8)} (service ${service.toString().substring(4, 8)})")
+                    }
                     if (wantHr) setLiveHr(true)
                     if (wantRaw) startRaw(rawState.value.sensors)
                     readyState.value = true
@@ -217,6 +222,7 @@ class WatchConnection(
                 if (bpm > 0) { val ts = System.currentTimeMillis() / 1000.0; persistence.heartRate(ts, bpm); hrState.update { it.copy(bpm = bpm, ts = ts.toLong()) } }
             }
             Uuids.REALTIME_STEPS -> parseRealtimeSteps(n.value)?.let { stepsState.value = it }
+            !in handledNotifications -> log("info", "Unmapped notification on ${n.uuid.toString().substring(4, 8)}: ${n.value.joinToString("") { "%02x".format(it) }}")
             Uuids.WORKOUT_STATUS -> {
                 log("info", "Watch workout ${workoutStatusName(n.value)} (${n.value.joinToString("") { "%02x".format(it) }})")
                 workoutEvents.tryEmit(n.value.copyOf())
@@ -538,3 +544,7 @@ class WatchConnection(
         const val WATCH_BUSY = "The watch is nearby but won't accept a connection. Another phone or the Zepp app is probably connected to it: turn off Bluetooth on that phone."
     }
 }
+
+/** Characteristics the app already subscribes to (or must not touch: raw stream, history transfer, live HR). */
+private val handledNotifications = setOf(Uuids.AUTH, Uuids.RAW_CTRL, Uuids.RAW_DATA, Uuids.ACT_CTRL, Uuids.ACT_DATA, Uuids.CONFIG,
+    Uuids.REALTIME_STEPS, Uuids.DEVICE_EVENT, Uuids.CHUNKED, Uuids.HR_MEASURE, Uuids.WORKOUT_STATUS, Uuids.BATTERY)

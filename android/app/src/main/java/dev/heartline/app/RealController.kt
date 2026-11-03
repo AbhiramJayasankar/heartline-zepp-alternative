@@ -124,14 +124,23 @@ class RealController(
             }
         }.collect { (t, tr) -> today.value = t; trends.value = tr }
     }
-    // Placeholder from the activity history only; the full implementation (live HR, stress, SpO2, temperature, PAI) replaces it.
-    override fun healthDay(date: LocalDate): Flow<HealthDayUi> = activityDay(date).map { d ->
-        val start = date.atStartOfDay(zone).toEpochSecond()
-        val hr = d.minutes.mapNotNull { m -> m.hr?.let { SeriesPoint(m.ts.toDouble(), it.toDouble()) } }
-        HealthDayUi(date, start, hr, 0, null, d.hrMin, d.hrAvg, d.hrMax, emptyList(), emptyList(), 0, emptyList(), null, null, emptyList(), emptyList(),
-            emptyList(), null, null, emptyList(), emptyList(), emptyList(), null, null, null,
-            d.minutes.filter { it.steps > 0 }.map { SeriesPoint(it.ts.toDouble(), it.steps.toDouble()) }, d.steps, emptyList(), null, null,
-            d.activeMinutes, d.wornMinutes, null, null, d.minutes, d.sleep, d.workouts)
+    override fun healthDay(date: LocalDate): Flow<HealthDayUi> {
+        val from = date.atStartOfDay(zone).toEpochSecond(); val to = date.plusDays(1).atStartOfDay(zone).toEpochSecond()
+        return combine(activityDay(date), db.heartRate.observeRange(from.toDouble(), to - 1.0), db.health.observeByType(from.toDouble(), to - 1.0),
+            settings.profile, steps) { day, live, health, p, st ->
+            withContext(Dispatchers.Default) {
+                val values = health.values.flatten().mapNotNull { h -> h.value?.let { DayHealthValue(h.type, h.ts, it, h.extra) } }
+                val daily = computeDaily(analyticsMinutes(db.activity.range(from - 86_400.0, to - 1.0)),
+                    values.map { HealthValue(it.type, it.ts, it.value) }, emptyList(),
+                    Profile(p.age, p.sex?.name?.lowercase(), p.weightKg, p.heightCm, p.maxHr, p.restingHr), 2, date.atTime(23, 59).atZone(zone))
+                val d = daily.days.lastOrNull { it.date == date.toString() }
+                val maxHr = p.maxHr?.takeIf { it in 80..240 } ?: p.age?.takeIf { it in 1..120 }?.let { 220 - it } ?: 190
+                val stride = p.heightCm?.takeIf { it > 0 }?.let { it / 100 * 0.415 } ?: 0.72
+                buildHealthDay(date, from, day, live.map { HrPoint(it.ts.toLong(), it.bpm) }, values, maxHr,
+                    (d?.restingHr ?: p.restingHr?.toDouble())?.let { kotlin.math.round(it).toInt() }, d?.caloriesActive, stride,
+                    if (date == LocalDate.now(zone)) st?.distanceM else null)
+            }
+        }
     }
     override fun activityDay(date: LocalDate): Flow<ActivityDayUi> {
         val from = date.atStartOfDay(zone).toEpochSecond().toDouble()

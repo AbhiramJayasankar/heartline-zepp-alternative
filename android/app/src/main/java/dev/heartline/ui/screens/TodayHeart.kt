@@ -74,7 +74,7 @@ import kotlin.math.roundToInt
 // ---------------- Today ----------------
 
 @Composable
-fun TodayScreen(controller: HeartlineController, onOpenHeart: () -> Unit, onOpenActivity: () -> Unit) {
+fun TodayScreen(controller: HeartlineController, onOpenHeart: () -> Unit, onOpenActivity: () -> Unit, onOpenDay: (DayMetric) -> Unit = {}) {
     val c = HL.colors
     val conn by controller.connection.collectAsStateWithLifecycle()
     val battery by controller.battery.collectAsStateWithLifecycle()
@@ -140,6 +140,13 @@ fun TodayScreen(controller: HeartlineController, onOpenHeart: () -> Unit, onOpen
                 Stat("Active", fmtHm(t?.activeMinutes))
                 Stat("Distance", steps?.distanceM?.let { "%.1f".format(it / 1000.0) } ?: "–", unit = "km")
             }
+
+            Gap(28)
+            SectionTitle("Today in detail")
+            Gap(4)
+            NavRow("Heart rate", "Full-day trace, resting, zones, hour by hour") { onOpenDay(DayMetric.HEART) }
+            NavRow("Stress", "Every reading, time relaxed to high, hour by hour") { onOpenDay(DayMetric.STRESS) }
+            NavRow("SpO2 and temperature", "Overnight oxygen and the per-minute temperature") { onOpenDay(DayMetric.BODY) }
 
             if (t != null && t.factors.isNotEmpty()) {
                 Gap(28)
