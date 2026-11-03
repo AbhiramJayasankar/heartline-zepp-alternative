@@ -312,7 +312,8 @@ class WatchConnection(
         val c = requireClient()
         check(recording == null) { "Stop raw streaming first" }
         val packets = java.util.concurrent.ConcurrentLinkedQueue<ByteArray>()
-        probeSink = { packets.add(it) }
+        // Every packet goes to the BLE log with its arrival time, so new channels can be decoded offline.
+        probeSink = { packets.add(it); BleLog.note("probe 0x%02x pkt %s".format(mask, it.joinToString("") { b -> "%02x".format(b) })) }
         try {
             c.enableNotification(Uuids.RAW_DATA); c.enableNotification(Uuids.RAW_CTRL)
             rawBegin(c, setOf()) { rawStartCommands(mask) }
@@ -328,7 +329,6 @@ class WatchConnection(
             "type 0x%02x x%d (%.0f/s, %s bytes)".format(t, list.size, list.size / seconds.toDouble(), list.map { it.size }.distinct().sorted().take(3).joinToString("/"))
         }
         BleLog.note("probe $summary")
-        byType.values.forEach { list -> BleLog.note("probe sample: " + list.first().joinToString("") { "%02x".format(it) }) }
         log("info", "Sensor probe, $summary")
         summary
     }

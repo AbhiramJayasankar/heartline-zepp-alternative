@@ -322,8 +322,9 @@ class RealController(
     override val probe = MutableStateFlow<List<String>>(emptyList())
     override fun probeUnknownSensors() = action { w ->
         probe.value = listOf("Probing…")
-        // 0x04 and 0x80 are unmapped; 0x06 and 0x82 pair them with the green pulse to see if they change it.
-        val results = listOf(0x04, 0x80, 0x06, 0x82).map { mask -> runCatching { w.probeRawMask(mask) }.getOrElse { e -> "mask 0x%02x: failed, ${e.message}".format(mask) } }
+        // First probe (3 Nov): 0x04, 0x80 and 0x06 return nothing; 0x82 returns PPG packets at a far lower level (~3,700
+        // vs ~35,000 for green). Record the plain green pulse beside it, and 0x80 with accel, 20 s each, to decode it.
+        val results = listOf(0x02, 0x82, 0x83, 0x81).map { mask -> runCatching { w.probeRawMask(mask, 20) }.getOrElse { e -> "mask 0x%02x: failed, ${e.message}".format(mask) } }
         probe.value = results
     }
 
