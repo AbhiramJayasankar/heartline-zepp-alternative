@@ -9,7 +9,6 @@ import dev.heartline.protocol.Endpoint2021
 import dev.heartline.protocol.SpeechEndpointer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -66,7 +65,6 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
                     Alexa.END -> {
                         ended = System.currentTimeMillis()
                         if (orphanAt > 0) { db.events.add("info", "Alexa: the stuck session ended %d ms after sending ${ORPHAN_STOPS[orphanStep - 1]}".format(ended - orphanAt)); orphanAt = 0; orphanStep = 0 }
-                        tourJob?.let { if (it.isActive) { it.cancel(); db.events.add("info", "Alexa: the watch ended the session %.1f s after the last reply".format((ended - repliedAt) / 1000.0)) } }
                         if (active) finish()
                     }
                     else -> db.events.add("info", "Alexa message: " + m.payload.take(160).joinToString("") { "%02x".format(it) } +
@@ -96,7 +94,6 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
 
     /** Per-turn state. The follow-up Alexa button after a reply reopens the mic in the same session (voice again, no start). */
     private suspend fun newTurn() {
-        tourJob?.cancel()
         closeDecoder()
         active = true; replied = false; stopSent = 0; voice = ByteArrayOutputStream(); packets = 0; pending.clear()
         started = System.currentTimeMillis(); name = "alexa-%d".format(started / 1000)
@@ -184,7 +181,6 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
     }
 
     private var repliedAt = 0L
-    private var tourJob: Job? = null
 
     private suspend fun reply() {
         replied = true; repliedAt = System.currentTimeMillis()
