@@ -167,6 +167,12 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override fun setWeather(enabled: Boolean, place: PlaceUi?) = weather.update { it.copy(enabled = enabled, place = place ?: it.place) }
     override fun refreshWeather() = weather.update { it.copy(updatedAt = now(), sentToWatchAt = now()) }
     override fun setMusicControl(enabled: Boolean) = phoneLink.update { it.copy(musicEnabled = enabled) }
+    override val watchMenu = MutableStateFlow(WatchCustomizeController.parseMenu(null))
+    override fun setWatchMenu(apps: List<MenuAppUi>) { watchMenu.value = apps }
+    override fun sendWatchMenu() = addEvent("Sent the watch app list")
+    override val vibrations = MutableStateFlow(WatchCustomizeController.parseVibrations(null))
+    override fun setVibration(kind: String, profile: String, repeat: Int) = vibrations.update { l -> l.map { if (it.kind == kind) it.copy(profile = profile, repeat = repeat) else it } }
+    override fun tryVibration(kind: String, profile: String, repeat: Int) = addEvent("Watch tried a vibration pattern")
     override fun stopFindPhone() = phoneLink.update { it.copy(findPhoneRinging = false) }
 
     override val alarms = MutableStateFlow(listOf(
@@ -334,16 +340,13 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
         lat = null, lon = null, altM = null, speedMps = null, hdop = 2.2, utc = null,
     )
 
-    private fun demoSettings() = listOf(
-        WatchSettingUi("hr_interval", "All-day heart rate", "enum", 1, listOf(0 to "Off", 1 to "Every minute", 5 to "Every 5 minutes", 10 to "Every 10 minutes", 30 to "Every 30 minutes"), null, null),
-        WatchSettingUi("hr_sleep_detection", "Heart rate during sleep", "bool", true, emptyList(), null, null),
-        WatchSettingUi("stress_monitoring", "All-day stress", "bool", true, emptyList(), null, null),
-        WatchSettingUi("hr_alert", "High heart rate alert", "bool", false, emptyList(), null, null),
-        WatchSettingUi("hr_alert_threshold", "High heart rate threshold", "int", 150, emptyList(), 100, 200),
-        WatchSettingUi("lift_wrist", "Lift wrist to wake", "bool", true, emptyList(), null, null),
-        WatchSettingUi("inactivity_warnings", "Move reminders", "bool", false, emptyList(), null, null),
-        WatchSettingUi("time_24h", "24-hour clock", "bool", true, emptyList(), null, null),
-    )
+    private fun demoSettings(): List<WatchSettingUi> {
+        val values = mapOf<String, Any>("hr_interval" to 1, "hr_sleep_detection" to true, "stress_monitoring" to true, "hr_alert" to false,
+            "hr_alert_threshold" to 150, "lift_wrist" to true, "inactivity_warnings" to false, "time_24h" to true, "dnd" to "auto",
+            "lift_wrist_when" to "always", "language" to "auto", "wear_location" to "left", "step_goal" to 8000)
+        return dev.heartline.protocol.SETTINGS.map { s -> WatchSettingUi(s.key, s.label, s.type, values[s.key] ?: dev.heartline.protocol.settingDefault(s.key), s.options.map { it.value to it.label }, s.min, s.max,
+            dev.heartline.protocol.settingSection(s)) }
+    }
 }
 
 /** A plausible 60-minute gym session: 45 min of lifting sets, then 15 min on the treadmill. */

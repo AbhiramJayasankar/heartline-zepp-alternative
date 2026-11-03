@@ -37,7 +37,7 @@ val SETTINGS: List<SettingDef> = listOf(
     SettingDef("connected_advertising", "Stay visible to other devices while connected (needed for heart rate sharing)", "bool"),
     SettingDef("goal_notification", "Step goal notification", "bool"),
     SettingDef("lift_wrist", "Lift wrist to wake", "bool"),
-    SettingDef("inactivity_warnings", "Move reminders (9:00-21:00, after 60 min)", "bool"),
+    SettingDef("inactivity_warnings", "Move reminders", "bool"),
     SettingDef("dnd", "Do not disturb", "enum", listOf(SettingOption("off", "Off"), SettingOption("auto", "Automatic (while asleep)"), SettingOption("scheduled", "Between set times"))),
     SettingDef("time_24h", "24-hour clock", "bool"),
     SettingDef("metric_units", "Metric units", "bool"),
@@ -75,6 +75,20 @@ fun settingSection(def: SettingDef): String = when (def.key) {
     "expose_hr", "connected_advertising" -> "Connection"
     "time_24h", "metric_units", "goal_notification" -> "Watch"
     else -> def.section
+}
+
+/** Section order on the settings screen. */
+val SETTING_SECTIONS = listOf("Health", "Display", "Do not disturb", "Move reminders", "Connection", "Watch")
+
+/** What the encoders assume until a value is set, so the screen can show it instead of "Not set". */
+fun settingDefault(key: String): Any? = when (key) {
+    "lift_wrist_when" -> "always"; "lift_wrist_start" -> "08:00"; "lift_wrist_end" -> "22:00"
+    "dnd" -> "off"; "dnd_start" -> "22:00"; "dnd_end" -> "07:00"
+    "inactivity_minutes" -> 60; "inactivity_start" -> "09:00"; "inactivity_end" -> "21:00"
+    "inactivity_quiet_start" -> "12:00"; "inactivity_quiet_end" -> "14:00"
+    "disconnect_alert" -> "off"; "disconnect_start" -> "08:00"; "disconnect_end" -> "22:00"
+    "language" -> "auto"
+    else -> null
 }
 
 private val HH_MM = Regex("""\d{2}:\d{2}""")

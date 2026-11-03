@@ -121,7 +121,8 @@ class ControlsTest {
         val ported = SETTINGS.filter { it.key != "connected_advertising" && !it.androidOnly }
         assertEquals(expected.map { it["key"] }, ported.map { it.key })
         ported.zip(expected).forEach { (s, e) ->
-            assertEquals(e["label"], s.label)
+            // The Python label spelled out fixed hours; on Android they are settings of their own.
+            if (s.key != "inactivity_warnings") assertEquals(e["label"], s.label)
             assertEquals(e["type"], s.type)
             assertEquals(e["target"].str().uppercase(), s.target.name)
             assertEquals((e["min"] as? Number)?.toInt(), s.min)

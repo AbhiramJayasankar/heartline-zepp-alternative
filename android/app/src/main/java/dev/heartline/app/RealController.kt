@@ -71,7 +71,7 @@ class RealController(
             }.combine(settings.watch) { p, w -> p.copy(watchMac = w.mac, hasKey = keys.load() != null) }.collect { prefs.value = it }
         }
         scope.launch { settings.lastWrittenWatchSettings.collect { values ->
-            watchSettings.value = SETTINGS.map { s -> WatchSettingUi(s.key, s.label, s.type, values[s.key]?.let { settingValue(s.key, it) }, s.options.map { it.value to it.label }, s.min, s.max,
+            watchSettings.value = SETTINGS.map { s -> WatchSettingUi(s.key, s.label, s.type, (values[s.key]?.let { settingValue(s.key, it) } ?: dev.heartline.protocol.settingDefault(s.key)), s.options.map { it.value to it.label }, s.min, s.max,
                 dev.heartline.protocol.settingSection(s)) }
         } }
         scope.launch { db.events.observeRecent(200).collect { list -> events.value = list.map { EventUi(it.ts.toLong(), it.level == "warn", it.level == "error", it.msg) } } }
@@ -296,6 +296,13 @@ class RealController(
     override fun setWeather(enabled: Boolean, place: PlaceUi?) = taskA.setWeather(enabled, place)
     override fun refreshWeather() = taskA.refreshWeather()
     override fun setMusicControl(enabled: Boolean) = taskA.setMusicControl(enabled)
+    private val customize = WatchCustomizeController(scope, db) { block -> action(block) }
+    override val watchMenu = customize.watchMenu
+    override fun setWatchMenu(apps: List<MenuAppUi>) { customize.setWatchMenu(apps) }
+    override fun sendWatchMenu() = customize.sendWatchMenu()
+    override val vibrations = customize.vibrations
+    override fun setVibration(kind: String, profile: String, repeat: Int) = customize.setVibration(kind, profile, repeat)
+    override fun tryVibration(kind: String, profile: String, repeat: Int) { customize.tryVibration(kind, profile, repeat) }
     override fun stopFindPhone() = taskA.stopFindPhone()
     // ---- end Task A ----
 

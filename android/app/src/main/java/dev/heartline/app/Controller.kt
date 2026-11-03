@@ -64,6 +64,15 @@ interface HeartlineController {
     fun setWeather(enabled: Boolean, place: PlaceUi?)
     fun refreshWeather()
     fun setMusicControl(enabled: Boolean)
+
+    /** The watch's app list in order; saved locally, sent by [sendWatchMenu]. */
+    val watchMenu: StateFlow<List<MenuAppUi>>
+    fun setWatchMenu(apps: List<MenuAppUi>)
+    fun sendWatchMenu()
+    /** Vibration pattern per alert type; [setVibration] saves and sends, [tryVibration] only buzzes. */
+    val vibrations: StateFlow<List<VibrationUi>>
+    fun setVibration(kind: String, profile: String, repeat: Int)
+    fun tryVibration(kind: String, profile: String, repeat: Int)
     fun stopFindPhone()
 
     // Alarms and calendar reminders on the watch

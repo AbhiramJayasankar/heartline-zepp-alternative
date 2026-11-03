@@ -479,6 +479,12 @@ class WatchConnection(
             }
         }
     }
+    /** A chunked type-2 message without a reply, e.g. the app list or a vibration pattern ([what] is for the log). */
+    suspend fun writeChunkedType2(payload: ByteArray, what: String) = actions.withLock {
+        val c = requireClient()
+        for (chunk in chunkedWrites(payload, mtu = 23, type = 2)) c.write(Uuids.CHUNKED, chunk)
+        log("info", "Sent $what")
+    }
     suspend fun writeCalendarReminder(payload: ByteArray) = actions.withLock {
         require(payload.size >= 20 && payload[0] == 0x0b.toByte())
         val c = requireClient()

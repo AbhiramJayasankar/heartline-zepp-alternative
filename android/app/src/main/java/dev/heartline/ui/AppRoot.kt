@@ -46,6 +46,8 @@ import dev.heartline.ui.screens.TodayScreen
 import dev.heartline.ui.screens.TrendsScreen
 import dev.heartline.ui.screens.WatchScreen
 import dev.heartline.ui.screens.WatchSettingsScreen
+import dev.heartline.ui.screens.WatchMenuScreen
+import dev.heartline.ui.screens.VibrationScreen
 import dev.heartline.ui.screens.WorkoutScreen
 import dev.heartline.ui.theme.HL
 
@@ -61,6 +63,8 @@ sealed interface Route {
     data class Workout(val start: Long, val epochDay: Long) : Route
     data object Sensors : Route
     data object WatchSettings : Route
+    data object WatchMenu : Route
+    data object Vibration : Route
     data object Forwarding : Route
     data object Data : Route
     data object Profile : Route
@@ -142,6 +146,8 @@ fun AppRoot(controller: HeartlineController) {
                         is Route.Workout -> WorkoutScreen(controller, target, nav)
                         Route.Sensors -> SensorsScreen(controller, nav)
                         Route.WatchSettings -> WatchSettingsScreen(controller, nav)
+                        Route.WatchMenu -> WatchMenuScreen(controller, nav)
+                        Route.Vibration -> VibrationScreen(controller, nav)
                         Route.Forwarding -> ForwardingScreen(controller, nav)
                         Route.Data -> DataScreen(controller, nav)
                         Route.Profile -> ProfileScreen(controller, nav)

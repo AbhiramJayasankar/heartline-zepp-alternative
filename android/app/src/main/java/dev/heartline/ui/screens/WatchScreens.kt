@@ -119,6 +119,8 @@ fun WatchScreen(controller: HeartlineController, nav: Navigator) {
         Gap(18)
         NavRow("Sensors lab", "Raw pulse, motion, compass, GPS and microphone, live") { nav.push(Route.Sensors) }
         NavRow("Watch settings", "All-day heart rate, stress, alerts, display") { nav.push(Route.WatchSettings) }
+        NavRow("Watch apps", "Which apps the watch lists, and their order") { nav.push(Route.WatchMenu) }
+        NavRow("Vibration patterns", "How the watch buzzes for calls, messages, alarms") { nav.push(Route.Vibration) }
         NavRow("Alarms", "Vibration alarms on the watch") { nav.push(Route.Alarms) }
         NavRow("Weather", "Forecast for the watch's weather app") { nav.push(Route.Weather) }
         NavRow("Calendar", "Upcoming events as watch reminders") { nav.push(Route.Reminders) }
@@ -318,8 +320,8 @@ fun WatchSettingsScreen(controller: HeartlineController, nav: Navigator) {
     val conn by controller.connection.collectAsStateWithLifecycle()
     val connected = conn.state == LinkState.CONNECTED
     Screen("Watch settings", onBack = { nav.pop() }, subtitle = "Changes go straight to the watch. It doesn't report settings back, so these show what Heartline last set.") {
-        // Rows keep their order within a section; sections appear in the order of their first row.
-        settings.groupBy { it.section }.forEach { (section, rows) ->
+        // Rows keep their order within a section; sections follow SETTING_SECTIONS.
+        settings.groupBy { it.section }.toList().sortedBy { (s, _) -> dev.heartline.protocol.SETTING_SECTIONS.indexOf(s).let { if (it < 0) 99 else it } }.forEach { (section, rows) ->
             Gap(18); SectionTitle(section); Gap(4)
             rows.forEach { s -> SettingRow(s, connected) { controller.applyWatchSetting(s.key, it) } }
         }
