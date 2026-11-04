@@ -31,7 +31,7 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
 
     override val connection = MutableStateFlow(ConnectionUi(LinkState.CONNECTED, since = now() - 754, rssi = -58))
     override val battery = MutableStateFlow<BatteryUi?>(BatteryUi(68, false, "31 Oct, 04:10"))
-    override val device = MutableStateFlow<DeviceUi?>(DeviceUi("Amazfit GTR 2e", "C1:0B:05:00:0A:46", "V1.7.3.1", "V0.72.19.17", "PVXB33 1400160015"))
+    override val device = MutableStateFlow<DeviceUi?>(DeviceUi("Amazfit GTR 2e", "C1:2A:3B:4C:5D:6E", "V1.7.3.1", "V0.72.19.17", "PVXB00 0000000000"))
     override val liveHr = MutableStateFlow(LiveHrUi(streaming = false, bpm = 72, ts = now() - 30, recent = demoHr()))
     override val steps = MutableStateFlow<StepsUi?>(StepsUi(6412, 4630, 288))
     override val sync = MutableStateFlow(SyncUi(lastActivity = now() - 300, lastHealth = now() - 300))
@@ -47,7 +47,7 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
         EventUi(now() - 754, false, false, "Connected and authenticated"),
         EventUi(now() - 760, true, false, "Watch not found, retrying scan"),
     ))
-    override val prefs = MutableStateFlow(PrefsUi(profile = ProfileUi(age = 27, sex = "male", weightKg = 70.0, heightCm = 175.0), onboarded = true, hasKey = true, watchMac = "C1:0B:05:00:0A:46"))
+    override val prefs = MutableStateFlow(PrefsUi(profile = ProfileUi(age = 27, sex = "male", weightKg = 70.0, heightCm = 175.0), onboarded = true, hasKey = true, watchMac = "C1:2A:3B:4C:5D:6E"))
 
     private var hrJob: Job? = null
     private var rawJob: Job? = null

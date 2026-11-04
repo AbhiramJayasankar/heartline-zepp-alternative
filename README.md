@@ -1,60 +1,151 @@
-# Amazfit GTR 2e, without the Zepp app
+<p align="center">
+  <img src="docs/images/screens.png" alt="Heartline app screens: readiness, live heart rate, activity and sleep, trends, watch controls" width="100%">
+</p>
 
-Talks to the watch directly over Bluetooth LE from Windows, with a local web dashboard.
+<h1 align="center">Heartline: an open-source Zepp app alternative for the Amazfit GTR 2e</h1>
 
-## Run
+<p align="center">
+  Use your <b>Amazfit GTR 2e without the Zepp app</b>. Heartline is an Android app that talks to the watch directly
+  over Bluetooth LE and keeps every reading on your phone: heart rate, sleep stages, SpO2, stress, skin temperature,
+  workouts, notifications, alarms, weather and the watch's Alexa button. No account, no cloud.
+</p>
 
-1. Turn off Bluetooth on your phone (the watch accepts one connection at a time, and Zepp grabs it).
-2. Double-click `run-dashboard.bat`, or run `.venv\Scripts\python.exe -m uvicorn server.app:app --port 8765`.
-3. Open http://localhost:8765 and press **Connect**.
+<p align="center">
+  <a href="https://github.com/AbhiramJayasankar/heartline-zepp-alternative/releases/latest"><img alt="Download APK" src="https://img.shields.io/github/v/release/AbhiramJayasankar/heartline-zepp-alternative?include_prereleases&label=download%20APK&color=e5484d"></a>
+  <img alt="Android 12+" src="https://img.shields.io/badge/Android-12%2B-3ddc84?logo=android&logoColor=white">
+  <img alt="Kotlin and Jetpack Compose" src="https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7f52ff?logo=kotlin&logoColor=white">
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
+</p>
 
-`http://localhost:8765/?demo` shows the page with fake data, for layout work.
+> **Status: alpha.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
+> Other Huami/Zepp watches of the same generation (GTR 2, GTS 2, GTS 2e) speak a similar protocol but are untested.
 
-## What works (verified on firmware V1.7.3.1)
+## Why
 
-- Auth with the key in `watch.json` (fetched from the Zepp account via Watchface Maker; keep it private, and never unpair the watch in Zepp or the key changes).
-- Battery level, charging state, charge timestamps.
-- Device info: serial, hardware and software revision.
-- Live heart rate (continuous mode, a reading every 1–5 s once locked), stored in `data/watch.db`.
-- Raw sensors: optical PPG (u16, ~25 Hz) and accelerometer (int16 x/y/z, 4100 = 1 g, ~25 Hz) on `0x0002`,
-  started with `01 03 19`, `01 03 00 00 00 19`, `02` on `0x0001` (stop `03`). Every sample is recorded to `data/raw/*.csv`.
-- Activity history: one 8-byte record per minute (kind, intensity, steps, HR, ?, sleep, deep, rem) via `0x0004`/`0x0005`.
-  The `03` ack is never sent, because it deletes the fetched data from the watch; Zepp still gets the activity history.
-- More raw sensors: the second byte of the raw start command is a sensor bitmask (Gadgetbridge only sends 0x03):
-  0x01 accel, 0x02 PPG, 0x08 GPS (NMEA text, packet type 0x03), 0x10 gyroscope (0x04), 0x40 magnetometer (0x06).
-  0x20 is the microphone (0x05): length-prefixed Opus SILK narrowband frames (TOC 0x08, 20 ms), decoded with PyAV
-  to a 48 kHz WAV (`server/audio.py`). Verified with PC test tones. The watch's offline voice control, when set to
-  wake with the screen, takes the microphone whenever the screen lights up and the stream does not come back by
-  itself; the server restarts it after 4 s of silence. With voice wake-up off the stream is unbroken.
-  PPG runs at ~50 Hz instead of 25 when more sensors are on.
-  GPS sentences are also saved to `data/raw/*.nmea`.
-- Vibrate (find device): `03` to Alert Level `0x2A06`.
-- Full GATT table.
-- Health data (`POST /api/health/sync`): manual HR, workouts with per-second HR tracks, PAI, automatic stress,
-  sleep SpO2, skin temperature (one sample a minute), and a statistics blob (stored raw, not decoded).
-  The watch accepts but returns nothing for normal SpO2, manual stress, sleep sessions, resting/max HR, sleep breathing and HRV.
-- Live steps (`0x0007`), device events (`0x0010`), watch settings (write-only: the page shows the last value written),
-  text notifications (GTS-family 4-byte extra header after the alert type; without it the watch reboots; chunked at 20 bytes), clock sync.
-- Insights (`server/analytics/`, methods and their limits in `server/analytics/METHODS.md`): beat detection from the raw PPG,
-  HRV, rhythm screening (not a diagnosis), daily readiness, strain, sleep score, body battery, VO2max and fitness age.
+The Zepp app wants an account, uploads your health data, and shows you a fraction of what the watch measures.
+The watch itself records far more: per-minute skin temperature, the raw optical pulse waveform, accelerometer,
+gyroscope, compass, GPS and microphone streams. Heartline reads all of it straight from the watch and turns it into
+numbers you can use, on the phone, offline.
 
-## Careful
+## Features
 
-- Temperature, automatic stress, sleep SpO2 and statistics are handed over once: after a fetch the watch moves past them
-  even without the `03` ack, so Zepp no longer gets those readings. The first fetch (2026-11-01) pulled 40 days of
-  temperature; the copy lives in `data/watch.db` and `data/discovery/`. Back up `data/`.
-- Activity, manual HR, PAI and workouts honour the start time and stay on the watch.
+**Health and sleep**
+- **Readiness, strain, sleep score and body battery** each day, with a short plain-language suggestion.
+- **Heart rate** all day (per-minute history plus live readings), resting heart rate and zones.
+- **Sleep stages** (deep, light, REM, awake) and sleep regularity.
+- **SpO2, stress, PAI and skin temperature.** Temperature is a reading every minute, synced every 5 minutes.
+- **Trends**: two weeks of readiness, resting HR, HRV, sleep, steps, strain and active time against your 28-day
+  baseline, plus **VO2max, fitness age** and acute:chronic training load.
 
-## Not verified yet
+**Heart checks from the raw pulse**
+- Records the watch's raw PPG waveform, finds every beat and measures **HRV (RMSSD), rhythm regularity and
+  breathing rate**. Rhythm screening is a hint, not a diagnosis.
 
-- Activity kind to state mapping (REM and "active" minutes are approximations); AF screening thresholds;
-  PPG breathing rate (reads 7-9/min, probably Mayer waves rather than breathing).
-- Device event `0x13`, the statistics protobuf.
+**Workouts**
+- Imports the watch's own workouts with per-second heart rate and GPS routes.
+- **Gym workout capture**: streams raw accelerometer, gyroscope and pulse during a session and finds your
+  **sets, reps, rest times, heart-rate recovery, zones, load and calories**, tuned on real logged gym sessions.
 
-## Layout
+**Watch control, like Zepp**
+- **Phone notifications** on your wrist (per-app icons), incoming calls, find phone, music control.
+- **Watch settings**: all-day heart rate and stress monitoring, lift-to-wake (scheduled), do not disturb
+  (scheduled), move reminders, high heart rate alerts, disconnect alert, language, wrist, step goal and more.
+- **Watch app list**: choose and order the apps, and what goes in the More screen.
+- **Alarms, calendar reminders, weather** (Open-Meteo, no API key), vibration counts, set clock, find watch.
+- **Alexa button**: the watch's Alexa button works again. Speech is recognised **offline with Vosk**, and replies
+  cover time, heart rate, steps, timers, alarms and reminders that ring on the watch. Optionally, add a free
+  **OpenRouter** key and an AI model answers anything and fixes misheard words.
 
-- `server/` FastAPI + bleak backend (`server/README.md` has the API).
-- `web/` the dashboard (plain HTML/CSS/JS, no build step).
-- `*.py` at the top level: the original exploration scripts.
-- `tests/` run with `.venv\Scripts\python.exe -m pytest`.
-- Python packages in `.venv`: bleak, pycryptodome, fastapi, uvicorn, numpy, scipy, av (PyAV, for the microphone), pytest, httpx.
+**Your data stays yours**
+- Everything is stored in a local database on the phone. Export it, back it up, or share it with other apps through
+  **Health Connect** (heart rate, steps, sleep, SpO2, HRV, resting HR, skin temperature, workouts).
+- **Sensors lab**: live raw pulse, motion, compass, GPS and microphone, saved to CSV.
+
+## Download
+
+Get the APK from the [latest release](https://github.com/AbhiramJayasankar/heartline-zepp-alternative/releases/latest)
+and open it on your phone, or install it with `adb install -r heartline-*.apk`.
+
+## Set up
+
+1. **Get your watch's auth key.** The watch only talks to apps that know its 32-character key. Fetch it from your Zepp
+   account with [huami-token](https://github.com/argrento/huami-token) (or Amazfit Watchface Maker).
+   Keep it private.
+2. **Never unpair the watch in Zepp.** Unpairing changes the key. Instead, force-stop Zepp (or uninstall it):
+   the watch accepts one connection at a time.
+3. Open Heartline, grant Bluetooth and notification access, and enter the watch's Bluetooth address and key.
+   The key is stored encrypted with the Android keystore and never leaves the phone.
+4. Under **Watch → Keep running**, allow background use so syncing continues with the screen off.
+
+## Requirements
+
+| | |
+|---|---|
+| Watch | Amazfit GTR 2e (tested on firmware V1.7.3.1). GTR 2 / GTS 2 family: untested |
+| Phone | Android 12 or newer (arm64). Tested on a Galaxy S24 Ultra, Android 17 |
+| Build | JDK 17+, Android SDK platform 37. The Vosk speech model (40 MB) is downloaded at build time |
+
+## Build from source
+
+```bash
+git clone https://github.com/AbhiramJayasankar/heartline-zepp-alternative.git
+cd heartline-zepp-alternative/android
+./gradlew assembleDebug        # app/build/outputs/apk/debug/app-debug.apk
+./gradlew test                 # unit tests, including real recorded sessions
+```
+
+## How it works
+
+Heartline speaks the watch's Bluetooth LE protocol directly: the Huami authentication handshake, the activity and
+health history fetches (without the acknowledgement that would delete data from the watch), the 2021 chunked
+protocol used by the Alexa button, and the raw sensor stream. The protocol notes are in
+[`android/docs/`](android/docs) and the analysis methods in
+[`android/core/analytics/`](android/core/analytics) and [`server/analytics/METHODS.md`](server/analytics/METHODS.md).
+
+| Folder | What it is |
+|---|---|
+| `android/app` | The Heartline Android app (Kotlin, Jetpack Compose) |
+| `android/core/protocol` | Watch protocol: commands, history parsing, settings, Alexa, event log |
+| `android/core/ble` | Bluetooth LE connection, sync and raw streaming |
+| `android/core/analytics` | Readiness, sleep, HRV, rhythm, workout capture (sets and reps) |
+| `android/core/data` | Local SQLite storage, export, encrypted key store |
+| `server/`, `web/` | A Python (FastAPI + bleak) desktop dashboard that talks to the watch from a PC |
+
+## Good to know
+
+- **Some data is handed over once.** After Heartline syncs skin temperature, stress, SpO2 and the event log, the watch
+  moves past those records, so Zepp won't get them. Activity, heart rate, PAI and workouts stay on the watch.
+- **Not supported:** watch faces, firmware updates and world clocks. Vibration *patterns* don't change on the
+  GTR 2e; the count does.
+- **Automatic workout capture** can start up to about 30 minutes late, because the watch reports workout starts
+  in batches. For a whole gym session, start the capture in the app.
+- Heart rhythm screening and all health scores are estimates for personal use, not medical advice.
+
+## FAQ
+
+**Can I use an Amazfit watch without the Zepp app?**
+Yes. Heartline replaces Zepp for the Amazfit GTR 2e: syncing, settings, notifications and the Alexa button all
+work without a Zepp account or cloud connection once you have the watch's auth key.
+
+**How is this different from Gadgetbridge?**
+[Gadgetbridge](https://gadgetbridge.org) supports hundreds of watches and was a key reference for the protocol.
+Heartline does one watch in depth: it decodes the watch's skin temperature, event log and raw sensor streams, adds
+health scores, heart checks from the raw pulse, gym set and rep detection, and a working Alexa button.
+
+**Does it need the internet?**
+No. Only optional features go online: weather (Open-Meteo) and AI answers for the Alexa button (OpenRouter).
+
+**Will it work on my GTR 2, GTS 2 or GTS 2e?**
+Probably in large part, since they share the protocol, but only the GTR 2e has been tested. Reports are welcome
+in the [issues](https://github.com/AbhiramJayasankar/heartline-zepp-alternative/issues).
+
+## Credits
+
+Protocol knowledge from [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge); auth keys via
+[huami-token](https://github.com/argrento/huami-token); offline speech recognition by
+[Vosk](https://alphacephei.com/vosk/) (Apache 2.0); weather from [Open-Meteo](https://open-meteo.com).
+Not affiliated with Zepp Health or Amazfit.
+
+## License
+
+[MIT](LICENSE)

@@ -267,7 +267,7 @@ class RealController(
     }
     override fun saveWatchKey(mac: String, keyHex: String): String? {
         val address = mac.trim().uppercase(); val hex = keyHex.trim().removePrefix("0x")
-        if (!BluetoothAdapter.checkBluetoothAddress(address)) return "Enter a Bluetooth address such as C1:0B:05:00:0A:46"
+        if (!BluetoothAdapter.checkBluetoothAddress(address)) return "Enter a Bluetooth address such as C1:2A:3B:4C:5D:6E"
         if (!KeyStore.validateHex(hex)) return "The key must contain 32 hex characters"
         return try {
             val key = KeyStore.parseHex(hex); try { keys.save(key) } finally { key.fill(0) }

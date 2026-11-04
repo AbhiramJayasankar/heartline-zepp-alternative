@@ -77,7 +77,7 @@ fun OnboardingScreen(controller: HeartlineController) {
                 Gap(10)
                 Text("The watch only talks to apps that know its 32-character auth key. The PC dashboard project has it in watch.json, or you can fetch it from your Zepp account with huami-token or Watchface Maker.", style = HL.type.body, color = c.ink)
                 Gap(16)
-                OutlinedTextField(mac, { mac = it.uppercase().take(17) }, label = { Text("Bluetooth address, like C1:0B:05:00:0A:46") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(mac, { mac = it.uppercase().take(17) }, label = { Text("Bluetooth address, like C1:2A:3B:4C:5D:6E") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Gap(8)
                 OutlinedTextField(
                     key, { key = it.trim().take(34) }, label = { Text("Auth key (32 hex characters)") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
@@ -94,7 +94,7 @@ fun OnboardingScreen(controller: HeartlineController) {
                     Spacer(Modifier.weight(1f))
                     PillButton("Finish", {
                         val macOk = Regex("([0-9A-F]{2}:){5}[0-9A-F]{2}").matches(mac)
-                        error = if (!macOk) "The address is six pairs like C1:0B:05:00:0A:46." else controller.saveWatchKey(mac, key)
+                        error = if (!macOk) "The address is six pairs like C1:2A:3B:4C:5D:6E." else controller.saveWatchKey(mac, key)
                         if (error == null) { controller.finishOnboarding(); controller.connect() }
                     })
                 }

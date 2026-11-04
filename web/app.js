@@ -701,7 +701,7 @@ function demoApi(path, method) {
       if (Math.random() > 0.15) history.push({ ts: t, bpm: Math.round(base) });
     }
     demo = {
-      status: { connection: "connected", error: null, model: "Amazfit GTR 2e", mac: "C1:0B:05:00:0A:46", firmware: "V1.7.3.1",
+      status: { connection: "connected", error: null, model: "Amazfit GTR 2e", mac: "C1:2A:3B:4C:5D:6E", firmware: "V1.7.3.1",
         battery: { level: 68, charging: false, last_charge_a: "2026-10-24T10:50:35", last_charge_b: "2026-10-31T04:10:58", raw: "", read_at: now },
         hr: { streaming: true, last_bpm: 83, last_ts: now - 4 }, raw: { streaming: true, file: "data/raw/20261101-021500.csv" },
         connected_since: now - 754, rssi: -54 },
@@ -716,7 +716,7 @@ function demoApi(path, method) {
       { ts: now - 4, level: "info", msg: "Heart rate 83 bpm" },
       { ts: now - 700, level: "info", msg: "Live heart rate started" },
       { ts: now - 752, level: "info", msg: "Unlocked with auth key" },
-      { ts: now - 754, level: "info", msg: "Connected to C1:0B:05:00:0A:46" },
+      { ts: now - 754, level: "info", msg: "Connected to C1:2A:3B:4C:5D:6E" },
       { ts: now - 790, level: "warn", msg: "Watch not found, retrying scan" },
     ] }),
     "/api/hr/history": () => ({ samples: demo.history.filter((p) => p.ts > now - state.minutes * 60) }),
