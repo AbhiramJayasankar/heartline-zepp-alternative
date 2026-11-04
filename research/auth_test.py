@@ -3,7 +3,7 @@ import asyncio, json, pathlib
 from bleak import BleakClient, BleakScanner
 from Crypto.Cipher import AES
 
-CFG = json.loads((pathlib.Path(__file__).parent / "watch.json").read_text())
+CFG = json.loads((pathlib.Path(__file__).parent.parent / "watch.json").read_text())
 AUTH = "00000009-0000-3512-2118-0009af100700"
 BATTERY = "00000006-0000-3512-2118-0009af100700"
 

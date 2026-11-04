@@ -8,6 +8,7 @@ import json
 import pathlib
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))  # moved into research/
 from server import health as h
 from server.protocol import parse_fetch_start
 from server.store import Store

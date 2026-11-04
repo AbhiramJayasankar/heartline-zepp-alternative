@@ -3,7 +3,7 @@ import asyncio, json, pathlib, sys, time
 from bleak import BleakClient, BleakScanner
 from Crypto.Cipher import AES
 
-CFG = json.loads((pathlib.Path(__file__).parent / "watch.json").read_text())
+CFG = json.loads((pathlib.Path(__file__).parent.parent / "watch.json").read_text())
 AUTH = "00000009-0000-3512-2118-0009af100700"
 HR_MEASURE = "00002a37-0000-1000-8000-00805f9b34fb"
 HR_CONTROL = "00002a39-0000-1000-8000-00805f9b34fb"

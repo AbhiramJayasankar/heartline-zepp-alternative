@@ -110,6 +110,7 @@ protocol used by the Alexa button, and the raw sensor stream. The protocol notes
 | `android/core/analytics` | Readiness, sleep, HRV, rhythm, workout capture (sets and reps) |
 | `android/core/data` | Local SQLite storage, export, encrypted key store |
 | `server/`, `web/` | A Python (FastAPI + bleak) desktop dashboard that talks to the watch from a PC |
+| `research/` | The first protocol exploration scripts (bleak, Windows) |
 
 ## Good to know
 
