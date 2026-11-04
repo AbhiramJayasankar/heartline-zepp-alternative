@@ -47,15 +47,23 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
         messages.put(JSONObject().put("role", "user").put("content", transcript))
         val body = JSONObject().put("model", config.model)
             .put("models", JSONArray(listOf(config.model, AssistantAiConfig.FALLBACK_MODEL).distinct()))
-            .put("messages", messages).put("temperature", 0.2).put("max_tokens", 300)
+            // Gemma 4 and other free models think first: with reasoning on, a small max_tokens ended in a null content
+            // (2026-11-05). Ask for none, and leave room in case the model reasons anyway.
+            .put("messages", messages).put("temperature", 0.2).put("max_tokens", 1500)
+            .put("reasoning", JSONObject().put("enabled", false))
             .put("response_format", JSONObject().put("type", "json_object"))
         val reply = runCatching {
             post(URL, mapOf("Authorization" to "Bearer ${config.apiKey}", "Content-Type" to "application/json",
                 "HTTP-Referer" to "https://heartline.local", "X-Title" to "Heartline"), body.toString())
         }.onFailure { lastError = it.message }.getOrNull() ?: return null
-        val content = runCatching { JSONObject(reply).getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content") }.getOrNull()
-            ?: return null.also { lastError = "no answer in the reply" }
-        return toAsk(content).also { if (it == null) lastError = "unusable answer: ${content.take(120)}" }
+        val message = runCatching { JSONObject(reply).getJSONArray("choices").getJSONObject(0).getJSONObject("message") }.getOrNull()
+            ?: return null.also { lastError = "no answer in the reply: ${reply.take(160)}" }
+        // The answer belongs in content; some models leave it empty and put the JSON at the end of their reasoning.
+        val texts = listOf("content", "reasoning").mapNotNull { k -> message.optString(k).takeIf { !message.isNull(k) && it.isNotBlank() } }
+        return texts.firstNotNullOfOrNull { toAsk(it) }.also {
+            if (it == null) lastError = "unusable answer (finish ${runCatching { JSONObject(reply).getJSONArray("choices").getJSONObject(0).optString("finish_reason") }.getOrDefault("?")}, " +
+                "model ${JSONObject(reply).optString("model")}): ${texts.firstOrNull()?.take(120) ?: "empty"}"
+        }
     }
 
     /** Why the last [interpret] returned null, for the activity log (never contains the key). */

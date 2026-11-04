@@ -25,6 +25,7 @@ class AssistantAiTest {
         assertEquals(AssistantAiConfig.DEFAULT_MODEL, json.getString("model"))
         assertEquals(listOf(AssistantAiConfig.DEFAULT_MODEL, AssistantAiConfig.FALLBACK_MODEL), (0 until 2).map { json.getJSONArray("models").getString(it) })
         assertEquals("json_object", json.getJSONObject("response_format").getString("type"))
+        assertFalse(json.getJSONObject("reasoning").getBoolean("enabled"))
         val messages = json.getJSONArray("messages")
         assertEquals(4, messages.length()) // system, one past turn, the question
         assertTrue(messages.getJSONObject(0).getString("content").contains("Asia/Kolkata"))
@@ -43,6 +44,15 @@ class AssistantAiTest {
         assertEquals(Ask.Timer(60), AssistantAi.toAsk("Sure!\n```json\n{\"action\":\"timer\",\"seconds\":60}\n```"))
         assertNull(AssistantAi.toAsk("""{"action":"timer"}"""))
         assertNull(AssistantAi.toAsk("no idea"))
+    }
+
+    @Test fun nullContentFallsBackToReasoning() = runBlocking {
+        // A thinking model that left content null (seen with gemma-4-26b-a4b-it:free, 2026-11-05).
+        val r = """{"model":"m","choices":[{"finish_reason":"stop","message":{"content":null,"reasoning":"They want 9:30. {\"action\":\"alarm\",\"alarm_time\":\"09:30\"}"}}]}"""
+        assertEquals(Ask.Alarm(LocalTime.of(9, 30)), AssistantAi { _, _, _ -> r }.interpret("my and thirty", context, emptyList(), config))
+        val empty = AssistantAi { _, _, _ -> """{"model":"m","choices":[{"finish_reason":"length","message":{"content":null}}]}""" }
+        assertNull(empty.interpret("hi", context, emptyList(), config))
+        assertTrue(empty.lastError!!.contains("finish length"))
     }
 
     @Test fun failuresReturnNull() = runBlocking {
