@@ -147,7 +147,11 @@ fun AssistantScreen(controller: HeartlineController, nav: Navigator) {
     var testing by remember { mutableStateOf(false) }
     Screen("Alexa answers", onBack = { nav.pop() },
         subtitle = "With an OpenRouter key, a free AI model reads what the watch heard, fixes misheard numbers, and answers questions. Without one, only the built-in answers work.") {
-        MutedText(ai.keyEnd?.let { "Key saved, ending in $it." } ?: "No key saved.")
+        SpeechSection(controller)
+        Gap(24)
+        Text("Answers", style = HL.type.bodyStrong, color = c.ink)
+        Gap(4)
+        MutedText(ai.keyEnd?.let { "OpenRouter key saved, ending in $it." } ?: "No OpenRouter key saved.")
         Gap(8)
         OutlinedTextField(key, { key = it.trim() }, label = { Text(if (ai.keyEnd == null) "OpenRouter API key" else "Replace the key") }, singleLine = true,
             visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
@@ -171,4 +175,45 @@ fun AssistantScreen(controller: HeartlineController, nav: Navigator) {
         MutedText("Test asks \"set an alarm for my and thirty am\", a real mishearing of \"nine thirty\"; a working setup answers with an alarm at 09:30. " +
             "Free models are rate-limited by OpenRouter. If the model fails, Heartline tries openrouter/free, then its built-in answers. Each question sends the words heard, the time, your latest heart rate and steps to OpenRouter.")
     }
+}
+
+/** Which recognizer hears the Alexa button: the built-in Vosk model, Dictate's model, or Gemini's Live transcription. */
+@Composable
+private fun SpeechSection(controller: HeartlineController) {
+    val c = HL.colors
+    val speech by controller.speech.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    var key by remember { mutableStateOf("") }
+    var dictate by remember { mutableStateOf<String?>(null) }
+    var result by remember { mutableStateOf<String?>(null) }
+    var testing by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(speech.source) { if (speech.source == "dictate") dictate = controller.dictateStatus() }
+    Text("Speech recognition", style = HL.type.bodyStrong, color = c.ink)
+    Gap(8)
+    Segmented(listOf("vosk" to "Built-in", "dictate" to "Dictate", "gemini" to "Gemini"), speech.source, { controller.setSpeech(it, null); result = null })
+    Gap(8)
+    when (speech.source) {
+        "dictate" -> MutedText(dictate ?: "Checking Dictate…")
+        "gemini" -> {
+            MutedText(speech.geminiKeyEnd?.let { "Gemini key saved, ending in $it. Uses Gemini 3.5 Transcribe Live (free tier)." }
+                ?: "Paste a Gemini API key from Google AI Studio. Uses Gemini 3.5 Transcribe Live (free tier).")
+            Gap(8)
+            OutlinedTextField(key, { key = it.trim() }, label = { Text(if (speech.geminiKeyEnd == null) "Gemini API key" else "Replace the Gemini key") }, singleLine = true,
+                visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+            Gap(8)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                PillButton("Save key", { controller.setSpeech("gemini", key); key = "" }, enabled = key.isNotEmpty())
+                if (speech.geminiKeyEnd != null) { Spacer(Modifier.width(10.dp)); PillButton("Remove key", { controller.setSpeech("gemini", "") }, style = ButtonStyle.QUIET) }
+            }
+        }
+        else -> MutedText("Vosk's small English model, on the phone. Often mishears numbers.")
+    }
+    Gap(10)
+    PillButton(if (testing) "Listening…" else "Test with the last question", {
+        testing = true; result = null
+        scope.launch { result = controller.testSpeech(); testing = false }
+    }, style = ButtonStyle.QUIET, enabled = !testing)
+    result?.let { Gap(8); Text(it, style = HL.type.small, color = c.ink) }
+    Gap(6)
+    MutedText("If the chosen one fails, the built-in model answers instead. Gemini receives the recording of each question.")
 }

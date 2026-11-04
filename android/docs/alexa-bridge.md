@@ -48,5 +48,14 @@ variants and others), `20`/`21` capabilities.
 ## Speech-to-text
 
 Android's own recognizer accepts recorded audio (`EXTRA_AUDIO_SOURCE`) but returned nothing for these clips on the
-S24 Ultra, on-device or not (and needs the microphone permission even then). Heartline uses Vosk with the small
-English model instead: about 0.5–1 s per question, offline. The model is fetched into the app's assets at build time.
+S24 Ultra, on-device or not (and needs the microphone permission even then). Heartline has three recognizers
+(`SpeechSources.kt`), chosen on the Alexa answers screen; if the chosen one fails, Vosk answers:
+
+- **Vosk** with the small English model (default): about 0.5–1 s per question, offline, bundled in the app's
+  assets (fetched at build time). Often mishears numbers ("my and thirty" for "nine thirty").
+- **Dictate**, the owner's dictation app, when installed with the same signing key (0.5.1+): its `RecognizerProvider`
+  runs the clip through whichever model is picked in Dictate, so no second copy of a large model is needed. The audio
+  goes over a file descriptor (a 30 s clip is near Binder's 1 MB limit); a signature permission guards it.
+- **Gemini 3.5 Transcribe Live** over the Live API WebSocket with the owner's AI Studio key (free tier: no request
+  limit in 2026-11). One session per question: setup with SMART formatting and automatic activity detection off,
+  then `activityStart`, 100 ms base64 PCM chunks, `activityEnd`; the text arrives as `serverContent.inputTranscription`.

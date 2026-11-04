@@ -314,6 +314,38 @@ class RealController(
                 model.trim().ifEmpty { dev.heartline.service.AssistantAiConfig.DEFAULT_MODEL }).json())
         }
     }
+    override val speech: StateFlow<SpeechUi> = db.meta.observe(dev.heartline.service.SpeechConfig.KEY)
+        .map { dev.heartline.service.SpeechConfig.parse(it).let { c -> SpeechUi(c.source, c.geminiKey.takeIf { k -> k.isNotBlank() }?.takeLast(4)) } }
+        .stateIn(scope, SharingStarted.Eagerly, SpeechUi(dev.heartline.service.SpeechConfig.VOSK, null))
+    override fun setSpeech(source: String, geminiKey: String?) {
+        scope.launch {
+            val saved = dev.heartline.service.SpeechConfig.parse(db.meta.get(dev.heartline.service.SpeechConfig.KEY))
+            db.meta.set(dev.heartline.service.SpeechConfig.KEY, dev.heartline.service.SpeechConfig(source, geminiKey?.trim() ?: saved.geminiKey).json())
+        }
+    }
+    override suspend fun dictateStatus(): String = withContext(Dispatchers.IO) {
+        val d = dev.heartline.service.DictateSpeech(context)
+        d.problem() ?: d.modelName()?.let { "Dictate is ready with $it." } ?: "Dictate has no speech model selected."
+    }
+    override suspend fun testSpeech(): String = withContext(Dispatchers.IO) {
+        val wav = java.io.File(context.filesDir, "alexa").listFiles { f -> f.name.endsWith("-16k.wav") }?.maxByOrNull { it.lastModified() }
+            ?: return@withContext "No Alexa recording yet: ask the watch something first."
+        val d = wav.readBytes()
+        val pcm = ShortArray((d.size - 44) / 2) { i -> ((d[44 + 2 * i].toInt() and 255) or (d[45 + 2 * i].toInt() shl 8)).toShort() }
+        val config = dev.heartline.service.SpeechConfig.parse(db.meta.get(dev.heartline.service.SpeechConfig.KEY))
+        val started = System.nanoTime()
+        runCatching {
+            when (config.source) {
+                dev.heartline.service.SpeechConfig.DICTATE -> dev.heartline.service.DictateSpeech(context).transcribe(pcm)
+                dev.heartline.service.SpeechConfig.GEMINI -> {
+                    check(config.geminiKey.isNotBlank()) { "Save a Gemini key first" }
+                    dev.heartline.service.GeminiSpeech().transcribe(pcm, config.geminiKey)
+                }
+                else -> dev.heartline.service.VoskSpeech(context).transcribe(pcm)
+            }
+        }.fold({ "\"${it.text}\" (${it.engine}, ${(System.nanoTime() - started) / 1_000_000} ms, %.1f s of audio)".format(pcm.size / 16_000.0) },
+            { "Failed after ${(System.nanoTime() - started) / 1_000_000} ms: ${it.message}" })
+    }
     override suspend fun testAssistantAi(question: String): String {
         val config = dev.heartline.service.AssistantAiConfig.parse(db.meta.get(dev.heartline.service.AssistantAiConfig.KEY))
         if (!config.enabled) return "Save a key first."

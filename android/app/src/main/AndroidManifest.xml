@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" tools:targetApi="s" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Granted only when Dictate is signed with the same key (RecognizerProvider in Dictate 0.5.1+). -->
+    <uses-permission android:name="com.chaitu.androidstt.permission.TRANSCRIBE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -36,6 +38,9 @@
     <!-- Lets the notification settings list the user's apps (Android 11 package visibility). -->
     <queries>
         <package android:name="com.google.android.apps.healthdata" />
+        <!-- Dictate (the owner's speech-to-text app) can transcribe Alexa questions with its own model. -->
+        <package android:name="com.chaitu.androidstt" />
+        <provider android:authorities="com.chaitu.androidstt.recognizer" />
         <package android:name="com.miui.securitycenter" />
         <package android:name="com.miui.powerkeeper" />
         <intent>

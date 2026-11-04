@@ -61,6 +61,8 @@ dependencies {
     // Offline speech-to-text for the watch's Alexa button (Apache 2.0). Android's own recognizer returns nothing for recorded audio.
     implementation("com.alphacephei:vosk-android:0.3.47")
     implementation("net.java.dev.jna:jna:5.13.0@aar")
+    // WebSocket client for Gemini's Live transcription (the same version Dictate ships).
+    implementation("com.squareup.okhttp3:okhttp:5.5.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250517")
 }

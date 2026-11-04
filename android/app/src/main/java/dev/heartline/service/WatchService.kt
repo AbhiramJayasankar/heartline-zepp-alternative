@@ -38,7 +38,7 @@ class WatchService : Service() {
         calls = CallForwarder(this, scope, app.settings, watch)
         agenda = WatchAgendaSync(this, scope, app.db, watch)
         scope.launch(kotlinx.coroutines.Dispatchers.IO) { backfillWatchWorkouts() }
-        AlexaBridge(scope, watch, app.db, java.io.File(filesDir, "alexa"), VoskSpeech(this), SampleAssistant(app.db, ai = AssistantAi(),
+        AlexaBridge(scope, watch, app.db, java.io.File(filesDir, "alexa"), SpeechRouter(app.db, VoskSpeech(this), DictateSpeech(this)), SampleAssistant(app.db, ai = AssistantAi(),
             aiConfig = { AssistantAiConfig.parse(app.db.meta.get(AssistantAiConfig.KEY)) })).start()
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Watch connection", NotificationManager.IMPORTANCE_LOW).apply {

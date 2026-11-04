@@ -52,9 +52,10 @@ numbers you can use, on the phone, offline.
   (scheduled), move reminders, high heart rate alerts, disconnect alert, language, wrist, step goal and more.
 - **Watch app list**: choose and order the apps, and what goes in the More screen.
 - **Alarms, calendar reminders, weather** (Open-Meteo, no API key), vibration counts, set clock, find watch.
-- **Alexa button**: the watch's Alexa button works again. Speech is recognised **offline with Vosk**, and replies
-  cover time, heart rate, steps, timers, alarms and reminders that ring on the watch. Optionally, add a free
-  **OpenRouter** key and an AI model answers anything and fixes misheard words.
+- **Alexa button**: the watch's Alexa button works again. Replies cover time, heart rate, steps, timers, alarms and
+  reminders that ring on the watch. Speech is recognised **offline with Vosk**, or with **Gemini 3.5 Transcribe Live**
+  (free tier, paste your Google AI Studio key), or with the model of a companion dictation app.
+  Optionally, add a free **OpenRouter** key and an AI model answers anything and fixes misheard words.
 
 **Your data stays yours**
 - Everything is stored in a local database on the phone. Export it, back it up, or share it with other apps through
@@ -134,7 +135,7 @@ Heartline does one watch in depth: it decodes the watch's skin temperature, even
 health scores, heart checks from the raw pulse, gym set and rep detection, and a working Alexa button.
 
 **Does it need the internet?**
-No. Only optional features go online: weather (Open-Meteo) and AI answers for the Alexa button (OpenRouter).
+No. Only optional features go online: weather (Open-Meteo), and for the Alexa button Gemini speech recognition and AI answers (OpenRouter).
 
 **Will it work on my GTR 2, GTS 2 or GTS 2e?**
 Probably in large part, since they share the protocol, but only the GTR 2e has been tested. Reports are welcome

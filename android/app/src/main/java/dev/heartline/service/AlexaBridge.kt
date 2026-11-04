@@ -39,7 +39,7 @@ import java.io.File
  * ends the bridge works through [STOPS], moving on whenever voice is still arriving [ESCALATE_MS] later.
  */
 class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchConnection, private val db: HeartlineDatabase, private val folder: File,
-                  private val speech: VoskSpeech, private val assistant: SampleAssistant) {
+                  private val speech: SpeechToText, private val assistant: SampleAssistant) {
     private var voice = ByteArrayOutputStream()
     private var packets = 0
     private var decoder: MicDecoder? = null

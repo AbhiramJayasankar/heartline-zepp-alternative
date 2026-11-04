@@ -72,6 +72,15 @@ interface HeartlineController {
     /** One sample question through the saved key and model: the answer or why it failed. */
     suspend fun testAssistantAi(question: String): String
 
+    /** Which recognizer turns Alexa questions into text: "vosk", "dictate" or "gemini" (the key's last 4 shown only). */
+    val speech: StateFlow<SpeechUi>
+    /** [geminiKey] null keeps the saved one, blank removes it. */
+    fun setSpeech(source: String, geminiKey: String?)
+    /** Whether Dictate can be used, and with which model. */
+    suspend fun dictateStatus(): String
+    /** The last Alexa recording through the chosen recognizer, with no fallback: the text or why it failed. */
+    suspend fun testSpeech(): String
+
     /** The watch's app list in order; saved locally, sent by [sendWatchMenu]. */
     val watchMenu: StateFlow<List<MenuAppUi>>
     fun setWatchMenu(apps: List<MenuAppUi>)
@@ -211,6 +220,7 @@ data class CaptureAnalysisUi(
 
 data class PlaceUi(val name: String, val region: String?, val lat: Double, val lon: Double)
 data class AssistantAiUi(val keyEnd: String?, val model: String)
+data class SpeechUi(val source: String, val geminiKeyEnd: String?)
 
 data class WeatherUi(
     val enabled: Boolean = false, val place: PlaceUi? = null, val tempC: Int? = null, val condition: String? = null,
