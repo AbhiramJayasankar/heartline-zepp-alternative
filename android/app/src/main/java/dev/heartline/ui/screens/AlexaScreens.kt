@@ -95,7 +95,7 @@ fun AlexaScreen(controller: HeartlineController, nav: Navigator) {
         NavRow("Instructions", if (s.prompt.isBlank()) "Heartline's own" else "Your own, ${s.prompt.length} characters") { nav.push(Route.AlexaPage(AlexaPages.PROMPT)) }
         val toolCount = controller.alexaTools.size
         NavRow("Tools", "${controller.alexaTools.count { s.enabled(it.name) }} of $toolCount on") { nav.push(Route.AlexaPage(AlexaPages.TOOLS)) }
-        NavRow("On the watch", "Replies up to ${s.replyBytes} bytes, then up to ${s.maxNotifications} notifications") { nav.push(Route.AlexaPage(AlexaPages.WATCH)) }
+        NavRow("On the watch", "Replies up to ${"%,d".format(s.replyBytes)} bytes, then up to ${s.maxNotifications} notifications") { nav.push(Route.AlexaPage(AlexaPages.WATCH)) }
         Gap(20)
         SectionTitle("What it did")
         NavRow("Conversation log", if (turns.isEmpty()) "Empty" else "${turns.size} question" + (if (turns.size > 1) "s" else "") + ", with every step") { nav.push(Route.AlexaPage(AlexaPages.LOG)) }
@@ -178,7 +178,7 @@ fun AlexaTurnScreen(controller: HeartlineController, at: Long, nav: Navigator) {
     val t = turns.firstOrNull { it.at == at }
     Screen("Question", onBack = { nav.pop() }, subtitle = t?.let { dateTimeOf(it.at / 1000) + ", " + it.source.lowercase() }) {
         if (t == null) { MutedText("This question is no longer in the log."); return@Screen }
-        SectionTitle("Heard")
+        SectionTitle(if (t.audioS == null) "Asked" else "Heard")
         Gap(6)
         Text(t.heard?.let { "“$it”" } ?: "Nothing heard", style = HL.type.body, color = c.ink)
         MutedText(listOfNotNull(t.audioS?.let { String.format(Locale.ROOT, "%.1f s of audio", it) }, t.speechMs?.let { "Gemini took ${secs(it)}" }).joinToString(", ").ifEmpty { "Typed in the app" })
@@ -327,7 +327,7 @@ private fun ToolsPage(controller: HeartlineController, nav: Navigator) {
                 Row(Modifier.fillMaxWidth().clickable { nav.push(Route.AlexaTool(t.name)) }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(t.name, style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 14.sp, color = if (s.enabled(t.name)) c.ink else c.inkSoft))
-                        Text((s.toolDescriptions[t.name] ?: t.description), style = HL.type.small, color = c.inkSoft, maxLines = 2)
+                        Text((s.toolDescriptions[t.name] ?: t.description), style = HL.type.small, color = c.inkSoft, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                         if (s.toolDescriptions.containsKey(t.name)) Text("Your description", style = HL.type.label, color = c.pulse)
                     }
                     Spacer(Modifier.width(12.dp))
