@@ -477,6 +477,23 @@ class WatchConnection(
         }
         log("info", "Sent $what")
     }
+    /**
+     * Ask the watch for a value without changing anything, e.g. `FE 05 01` (is sleep breathing quality on?), and
+     * return its raw answer on CONFIG, or null when it doesn't answer. Zepp's two-way settings: `FE id 01` reads,
+     * `FE id 00 v` writes.
+     */
+    suspend fun queryConfig(cmd: ByteArray): ByteArray? = actions.withLock {
+        val c = requireClient()
+        val answer = route(setOf(Uuids.CONFIG)) { channel ->
+            c.enableNotification(Uuids.CONFIG)
+            try {
+                c.write(Uuids.CONFIG, cmd)
+                runCatching { reply(c, channel, 3000).value }.getOrNull()
+            } finally { c.enableNotification(Uuids.CONFIG, false) }
+        }
+        log("info", "Asked ${cmd.joinToString("") { "%02x".format(it) }}: ${answer?.joinToString("") { "%02x".format(it) } ?: "no answer"}")
+        answer
+    }
     /** Height, weight, age and sex for the watch's own calorie, distance and heart-rate zone estimates ([userInfoCommand]). */
     suspend fun writeUserInfo(command: ByteArray) = actions.withLock {
         require(command.isNotEmpty() && command[0] == 0x4F.toByte())

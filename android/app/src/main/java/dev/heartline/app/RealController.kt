@@ -541,6 +541,16 @@ class RealController(
 
 
     override val probe = MutableStateFlow<List<String>>(emptyList())
+    override val watchReadback = MutableStateFlow<List<Pair<String, String>>>(emptyList())
+    override fun readWatchHealth() = action { w ->
+        // Zepp 6.3 two-way reads (`FE id 01`, answer `10 FE id 01 01 value`). The GTR 2e answers only Pressure (stress, id 6);
+        // HrInterval 1, HighHrReminder 3, Osa 5, Rem 8, AtrialFib 10 and RelaxationPromptSwitch 35 come back `10 FE 05`, unsupported.
+        watchReadback.value = listOf(6 to "All-day stress").mapNotNull { (id, name) ->
+            val a = runCatching { w.queryConfig(byteArrayOf(0xFE.toByte(), id.toByte(), 1)) }.getOrNull() ?: return@mapNotNull null
+            if (a.size >= 6 && a[0] == 0x10.toByte() && a[1] == 0xFE.toByte() && a[2] == id.toByte() && a[4] == 1.toByte())
+                name to (if (a[5].toInt() != 0) "on" else "off") else null
+        }
+    }
     override fun probeUnknownSensors() = action { w ->
         probe.value = listOf("Probing…")
         // Probe 2 (3 Nov): 0x80 gives ~50 Hz PPG. Probe 3: does the start command's last byte (0x19 = 25) set the rate,

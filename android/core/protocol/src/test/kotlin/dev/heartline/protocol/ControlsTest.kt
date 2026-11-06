@@ -100,6 +100,7 @@ class ControlsTest {
     @Test fun settingsPythonCommandVectors() {
         assertEquals(SettingTarget.HR to "1401", settingCommand("hr_interval", 1).let { it.first to it.second.hex() })
         assertEquals(SettingTarget.CONFIG to "fe060001", settingCommand("stress_monitoring", true).let { it.first to it.second.hex() })
+        assertEquals(SettingTarget.CONFIG to "063d0001", settingCommand("sleep_breathing", true).let { it.first to it.second.hex() })
         assertEquals(SettingTarget.CONFIG to "061a00018c", settingCommand("hr_alert_threshold", 140, mapOf("hr_alert" to true)).let { it.first to it.second.hex() })
         assertEquals(5, validateSetting("hr_interval", 5))
     }

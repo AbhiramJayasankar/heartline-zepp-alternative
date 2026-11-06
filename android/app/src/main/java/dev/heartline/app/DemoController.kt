@@ -240,6 +240,8 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override suspend fun captureDetail(id: String): CaptureAnalysisUi? = demoCapture()
     override fun deleteCapture(id: String) = captures.update { l -> l.filter { it.id != id } }
     override val probe = MutableStateFlow<List<String>>(emptyList())
+    override val watchReadback = MutableStateFlow<List<Pair<String, String>>>(emptyList())
+    override fun readWatchHealth() { watchReadback.value = listOf("All-day stress" to "on") }
     override fun probeUnknownSensors() { probe.value = listOf("mask 0x04: nothing", "mask 0x80: nothing") }
 
     private fun addEvent(msg: String) = events.update { listOf(EventUi(now(), false, false, msg)) + it }

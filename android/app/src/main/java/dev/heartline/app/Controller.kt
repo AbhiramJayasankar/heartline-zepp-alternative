@@ -154,6 +154,9 @@ interface HeartlineController {
 
     /** Tries the raw-stream mask bits nobody has mapped yet; one line of results per bit. */
     val probe: StateFlow<List<String>>
+    /** Settings the watch itself reports (name to "on"/"off"), read with Zepp's two-way setting reads; empty until [readWatchHealth]. */
+    val watchReadback: StateFlow<List<Pair<String, String>>>
+    fun readWatchHealth()
     fun probeUnknownSensors()
 }
 

@@ -263,8 +263,11 @@ fun WatchSettingsScreen(controller: HeartlineController, nav: Navigator) {
     val settings by controller.watchSettings.collectAsStateWithLifecycle()
     val conn by controller.connection.collectAsStateWithLifecycle()
     val connected = conn.state == LinkState.CONNECTED
-    Screen("Watch settings", onBack = { nav.pop() }, subtitle = "Changes go straight to the watch. It doesn't report settings back, so these show what Heartline last set.") {
+    Screen("Watch settings", onBack = { nav.pop() }, subtitle = "Changes go straight to the watch. It can report only its stress switch back, so the rest show what Heartline last set.") {
         MaxTrackingCard(settings, connected) { k, v -> controller.applyWatchSetting(k, v) }
+        val readback by controller.watchReadback.collectAsStateWithLifecycle()
+        androidx.compose.runtime.LaunchedEffect(connected) { if (connected) controller.readWatchHealth() }
+        if (readback.isNotEmpty()) { Gap(6); MutedText("The watch itself reports: " + readback.joinToString(", ") { (n, v) -> "${n.lowercase()} $v" } + ".") }
         // Rows keep their order within a section; sections follow SETTING_SECTIONS.
         settings.groupBy { it.section }.toList().sortedBy { (s, _) -> dev.heartline.protocol.SETTING_SECTIONS.indexOf(s).let { if (it < 0) 99 else it } }.forEach { (section, rows) ->
             Gap(18); SectionTitle(section)
@@ -279,7 +282,7 @@ fun WatchSettingsScreen(controller: HeartlineController, nav: Navigator) {
 }
 
 /** What "maximum tracking" sets: every sensor the watch lets the phone switch, at its most frequent. */
-private val MAX_TRACKING: List<Pair<String, Any>> = listOf("hr_interval" to 1, "hr_sleep_detection" to true, "hr_activity_monitoring" to true, "stress_monitoring" to true)
+private val MAX_TRACKING: List<Pair<String, Any>> = listOf("hr_interval" to 1, "hr_sleep_detection" to true, "hr_activity_monitoring" to true, "stress_monitoring" to true, "sleep_breathing" to true)
 
 @Composable
 private fun MaxTrackingCard(settings: List<WatchSettingUi>, connected: Boolean, apply: (String, Any) -> Unit) {
@@ -302,6 +305,7 @@ private fun MaxTrackingCard(settings: List<WatchSettingUi>, connected: Boolean, 
             "Heart rate as an aid to sleep stages" to isMax("hr_sleep_detection", true),
             "Faster heart rate while you move" to isMax("hr_activity_monitoring", true),
             "Stress all day" to isMax("stress_monitoring", true),
+            "Blood oxygen and breathing while asleep" to isMax("sleep_breathing", true),
         ).forEach { (label, ok) ->
             Row(Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(if (ok) "✓" else "–", style = HL.type.bodyStrong, color = if (ok) c.ok else c.inkSoft, modifier = Modifier.width(22.dp))
@@ -309,7 +313,7 @@ private fun MaxTrackingCard(settings: List<WatchSettingUi>, connected: Boolean, 
             }
         }
         Gap(8)
-        MutedText("Blood oxygen during sleep is switched on the watch itself and has no phone command Heartline knows yet; your watch is already recording it, and Heartline reads it every sync. More frequent tracking uses more battery.")
+        MutedText("Sleep breathing quality is the switch Zepp calls by that name: the watch measures blood oxygen through the night and flags breathing dips. More frequent tracking uses more battery.")
         if (!connected) { Gap(6); MutedText("Connect to the watch to change these.") }
     }
 }

@@ -31,6 +31,8 @@ val SETTINGS: List<SettingDef> = listOf(
     SettingDef("hr_sleep_detection", "Heart rate during sleep", "bool", target = SettingTarget.HR),
     SettingDef("hr_activity_monitoring", "Heart rate during activity", "bool"),
     SettingDef("stress_monitoring", "All-day stress", "bool"),
+    // Zepp 6.3 ExtendCmd.Osa: the GTR 2e answers only the older 06-prefixed form (its two-way FE 05 reads come back "not supported").
+    SettingDef("sleep_breathing", "Sleep breathing quality (blood oxygen while asleep)", "bool", androidOnly = true),
     SettingDef("hr_alert", "High heart rate alert", "bool"),
     SettingDef("hr_alert_threshold", "High heart rate threshold", "int", min = 100, max = 180),
     SettingDef("expose_hr", "Share heart rate with other apps (BLE heart rate broadcast)", "bool"),
@@ -158,6 +160,7 @@ fun settingCommand(key: String, value: Any, current: Map<String, Any?> = emptyMa
         "hr_sleep_detection" -> bytes(0x15, 0, b(v))
         "hr_activity_monitoring" -> bytes(6, 0x22, 0, b(v))
         "stress_monitoring" -> bytes(0xFE, 6, 0, b(v))
+        "sleep_breathing" -> bytes(6, 0x3D, 0, b(v))
         "hr_alert", "hr_alert_threshold" -> {
             val on = if (key == "hr_alert") v else if (current.containsKey("hr_alert")) current["hr_alert"] else true
             val thr = if (key == "hr_alert_threshold") v else if (current.containsKey("hr_alert_threshold")) current["hr_alert_threshold"] else 150
