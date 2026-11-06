@@ -54,6 +54,8 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
     private var stopSent = 0L
     private var active = false
     private var replied = false
+    /** The answer reached the watch; only voice after this is a follow-up question. */
+    @Volatile private var answered = false
     private var probed = false
     private var session = 0
     private var turn = 0
@@ -112,7 +114,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         answerJob?.cancel(); answerJob = null
         closeDecoder()
         synchronized(pcm16) { pcm16.reset() }; down = 0; downN = 0
-        active = true; replied = false; stopSent = 0; voice = ByteArrayOutputStream(); packets = 0; pending.clear()
+        active = true; replied = false; answered = false; stopSent = 0; voice = ByteArrayOutputStream(); packets = 0; pending.clear()
         started = System.currentTimeMillis(); name = "alexa-%d".format(started / 1000)
         stop = 0; turn++
         endpointer = SpeechEndpointer()
@@ -122,6 +124,9 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
 
     private suspend fun voiceArrived(payload: ByteArray) {
         if (replied) {
+            // Voice still arriving after the stop, before the answer, is the tail of this question: starting a new turn
+            // on it cancelled the answer being worked out, and the watch said "I didn't hear you clearly" (2026-11-06).
+            if (!answered) return
             // Voice after our reply: the follow-up button. Save the last turn and listen to the new one.
             saveTurn()
             newTurn()
@@ -245,7 +250,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
             if (answer == null) {
                 handedOff = true
                 watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple("Still thinking. I'll send the answer as a notification."))
-                repliedAt = System.currentTimeMillis()
+                repliedAt = System.currentTimeMillis(); answered = true
                 db.events.add("info", "Alexa: no answer %.1f s after the stop; it will come as a notification".format((repliedAt - stoppedAt) / 1000.0))
                 scope.launch { deliverLate(work.await(), stoppedAt) }
                 return
@@ -254,7 +259,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
             val (shown, rest) = WatchAssistant.splitReply(answer.text?.let { WatchAssistant.watchText(it) }, replyLimit)
             shown?.let { watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple(it)) }
             if (rest.isNotEmpty()) scope.launch { notifyAll(rest) }
-            repliedAt = System.currentTimeMillis()
+            repliedAt = System.currentTimeMillis(); answered = true
             db.events.add("info", "Alexa replied ${secs(repliedAt - stoppedAt)} s after the stop: ${answer.text ?: "(card)"}" + if (answer.listenAgain) "; listening again" else "")
             if (answer.listenAgain) { delay(600); watch.send2021(Endpoint2021.ALEXA, Alexa.listenAgain) }
         } catch (e: CancellationException) { if (!handedOff) work.cancel(); throw e }
