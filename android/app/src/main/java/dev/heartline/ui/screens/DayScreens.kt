@@ -176,7 +176,7 @@ private fun BandBar(bands: List<BandTimeUi>, color: (String) -> Color) {
 // ---- Heart rate ----
 
 @Composable
-private fun HeartDay(d: HealthDayUi, nav: Navigator) {
+internal fun HeartDay(d: HealthDayUi, nav: Navigator) {
     val c = HL.colors
     if (d.hr.isEmpty()) { MutedText("No heart rate recorded this day."); return }
     Stats(listOf(

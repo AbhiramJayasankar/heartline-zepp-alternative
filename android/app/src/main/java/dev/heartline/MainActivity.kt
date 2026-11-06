@@ -30,11 +30,7 @@ class MainActivity : ComponentActivity() {
         if (!demo) app.realController.startFromActivity(app.debuggable && intent.getBooleanExtra("verify_idle", false))
         setContent {
             val prefs by controller.prefs.collectAsStateWithLifecycle()
-            val dark = when (prefs.theme) {
-                ThemeMode.SYSTEM -> isSystemInDarkTheme()
-                ThemeMode.LIGHT -> false
-                ThemeMode.DARK -> true
-            }
+            val dark = dev.heartline.ui.theme.paletteFor(prefs.theme, isSystemInDarkTheme()).isDark
             // Status and navigation bar icons follow the app's theme, not the phone's.
             DisposableEffect(dark) {
                 val style = if (dark) SystemBarStyle.dark(Color.TRANSPARENT) else SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)

@@ -337,6 +337,28 @@ class RealController(
     override val alexaTurns: StateFlow<List<dev.heartline.service.TurnRecord>> = db.meta.observe(dev.heartline.service.AlexaLog.KEY)
         .map { dev.heartline.service.AlexaLog.parse(it) }.flowOn(Dispatchers.Default).stateIn(scope, SharingStarted.Eagerly, emptyList())
     override fun clearAlexaTurns() { scope.launch { db.meta.set(dev.heartline.service.AlexaLog.KEY, "[]") } }
+    private val insightsRun = MutableStateFlow<Pair<Boolean, String?>>(false to null)
+    override val insights: StateFlow<InsightsUi> = db.meta.observe(dev.heartline.service.InsightReport.KEY)
+        .map { dev.heartline.service.InsightReport.parse(it) }
+        .combine(insightsRun) { report, (running, error) -> InsightsUi(report, running, error) }
+        .stateIn(scope, SharingStarted.Eagerly, InsightsUi())
+    override val insightsSettings: StateFlow<dev.heartline.service.InsightsSettings> = db.meta.observe(dev.heartline.service.InsightsSettings.KEY)
+        .map { dev.heartline.service.InsightsSettings.parse(it) }.stateIn(scope, SharingStarted.Eagerly, dev.heartline.service.InsightsSettings())
+    override fun setInsightsSettings(s: dev.heartline.service.InsightsSettings) { scope.launch { db.meta.set(dev.heartline.service.InsightsSettings.KEY, s.json()) } }
+    override fun refreshInsights() {
+        if (insightsRun.value.first) return
+        insightsRun.value = true to null
+        scope.launch {
+            val error = try {
+                val writer = dev.heartline.service.HealthInsights(dev.heartline.service.HealthTools(this@RealController), dev.heartline.service.AssistantAi(),
+                    { dev.heartline.service.AssistantAiConfig.parse(db.meta.get(dev.heartline.service.AssistantAiConfig.KEY)) },
+                    { dev.heartline.service.InsightsSettings.parse(db.meta.get(dev.heartline.service.InsightsSettings.KEY)) },
+                    { dev.heartline.service.SpeechConfig.parse(db.meta.get(dev.heartline.service.SpeechConfig.KEY)).geminiKey })
+                db.meta.set(dev.heartline.service.InsightReport.KEY, writer.generate().json()); null
+            } catch (e: CancellationException) { throw e } catch (e: Exception) { e.message ?: e.toString() }
+            insightsRun.value = false to error
+        }
+    }
     override val alexaTools: List<AlexaToolUi> by lazy {
         testAssistant.allTools.map { t ->
             val group = when {

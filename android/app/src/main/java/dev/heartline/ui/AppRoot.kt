@@ -42,7 +42,6 @@ import dev.heartline.ui.screens.OnboardingScreen
 import dev.heartline.ui.screens.PreferencesScreen
 import dev.heartline.ui.screens.ProfileScreen
 import dev.heartline.ui.screens.SensorsScreen
-import dev.heartline.ui.screens.TodayScreen
 import dev.heartline.ui.screens.TrendsScreen
 import dev.heartline.ui.screens.WatchScreen
 import dev.heartline.ui.screens.WatchSettingsScreen
@@ -52,8 +51,8 @@ import dev.heartline.ui.screens.WorkoutScreen
 import dev.heartline.ui.theme.HL
 
 enum class Tab(val label: String, val icon: ImageVector) {
-    TODAY("Today", Icons.today), HEART("Heart", Icons.heart), ACTIVITY("Activity", Icons.activity),
-    TRENDS("Trends", Icons.trends), WATCH("Watch", Icons.watch),
+    TODAY("Today", Icons.today), SLEEP("Sleep", Icons.sleep), HEART("Heart", Icons.heart), ACTIVITY("Activity", Icons.activity),
+    WATCH("Watch", Icons.watch),
 }
 
 /** Screens pushed on top of a tab. */
@@ -87,6 +86,9 @@ sealed interface Route {
     /** A day detail page; [metric] is a DayMetric name. */
     data class Day(val metric: String, val epochDay: Long) : Route
     data class Trend(val key: String) : Route
+    data object Trends : Route
+    data object Insights : Route
+    data object SendNotification : Route
 }
 
 class Navigator {
@@ -122,6 +124,7 @@ fun AppRoot(controller: HeartlineController) {
                             selected = tab == t,
                             onClick = { tab = t },
                             icon = { Icon(t.icon, contentDescription = null, modifier = Modifier.size(24.dp)) },
+                            alwaysShowLabel = true,
                             label = { Text(t.label, style = HL.type.label) },
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = c.pulse, selectedTextColor = c.ink, indicatorColor = c.wash,
@@ -148,12 +151,14 @@ fun AppRoot(controller: HeartlineController) {
                     androidx.compose.runtime.CompositionLocalProvider(dev.heartline.ui.screens.LocalTabScroll provides (target as? Tab)?.let { tabScroll[it] },
                         dev.heartline.ui.screens.LocalPageRefresh provides pageRefresh) {
                     when (target) {
-                        Tab.TODAY -> TodayScreen(controller, onOpenHeart = { tab = Tab.HEART }, onOpenActivity = { tab = Tab.ACTIVITY },
-                            onOpenDay = { m -> nav.push(dev.heartline.ui.screens.dayRoute(m, java.time.LocalDate.now().toEpochDay())) })
+                        Tab.TODAY -> dev.heartline.ui.screens.OverviewScreen(controller, nav) { tab = it }
+                        Tab.SLEEP -> dev.heartline.ui.screens.SleepScreen(controller, nav)
                         Tab.HEART -> HeartScreen(controller, nav)
                         Tab.ACTIVITY -> ActivityScreen(controller, nav)
-                        Tab.TRENDS -> TrendsScreen(controller, nav)
-                        Tab.WATCH -> WatchScreen(controller, nav)
+                        Route.Trends -> TrendsScreen(controller, nav) { nav.pop() }
+                        Route.Insights -> dev.heartline.ui.screens.InsightsScreen(controller, nav)
+                        Tab.WATCH -> dev.heartline.ui.screens.WatchHubScreen(controller, nav)
+                        Route.SendNotification -> dev.heartline.ui.screens.SendNotificationScreen(controller, nav)
                         Route.CheckRun -> CheckRunScreen(controller, nav)
                         is Route.CheckResult -> CheckResultScreen(controller, target.id, nav)
                         is Route.Workout -> WorkoutScreen(controller, target, nav)

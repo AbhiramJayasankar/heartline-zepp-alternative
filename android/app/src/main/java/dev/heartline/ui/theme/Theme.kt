@@ -35,6 +35,8 @@ data class Palette(
     val sleepRem: Color,
     val idle: Color,
     val isDark: Boolean,
+    /** Blood oxygen and body readings. */
+    val oxygen: Color = Color(0xFF2A7FA8),
 )
 
 val LightPalette = Palette(
@@ -52,8 +54,62 @@ val DarkPalette = Palette(
     wash = Color(0xFF19213A), line = Color(0xFF273152), surface = Color(0xFF161D33),
     ok = Color(0xFF6FCF97), warn = Color(0xFFF0B35E),
     sleepDeep = Color(0xFF96A2EA), sleepLight = Color(0xFF4F5A8E), sleepRem = Color(0xFFB88AB4), idle = Color(0xFF252F4F),
-    isDark = true,
+    isDark = true, oxygen = Color(0xFF6CC4E8),
 )
+
+/** True black for OLED screens: the page and header are #000 (pixels off); cards are a near-black grey, text and accents bright. */
+val BlackPalette = Palette(
+    paper = Color(0xFF000000), gridMinor = Color(0xFF0B0B0B), gridMajor = Color(0xFF1C1C1C),
+    ink = Color(0xFFF2F2F2), inkSoft = Color(0xFF9B9B9B), pulse = Color(0xFFFF5A4E),
+    wash = Color(0xFF000000), line = Color(0xFF242424), surface = Color(0xFF0E0E0E),
+    ok = Color(0xFF4ADE80), warn = Color(0xFFF5B041),
+    sleepDeep = Color(0xFF8E9BFF), sleepLight = Color(0xFF465094), sleepRem = Color(0xFFD08CE0), idle = Color(0xFF1E1E1E),
+    isDark = true, oxygen = Color(0xFF4FC3F7),
+)
+
+/** Warm dark: espresso and plum with a coral accent. */
+val DuskPalette = Palette(
+    paper = Color(0xFF191214), gridMinor = Color(0xFF21181B), gridMajor = Color(0xFF33262A),
+    ink = Color(0xFFF6ECE7), inkSoft = Color(0xFFB9A7A1), pulse = Color(0xFFFF8A65),
+    wash = Color(0xFF221A1D), line = Color(0xFF3A2D31), surface = Color(0xFF211A1D),
+    ok = Color(0xFF8CD3A1), warn = Color(0xFFF2C46D),
+    sleepDeep = Color(0xFFB4A4F2), sleepLight = Color(0xFF5E5089), sleepRem = Color(0xFFE09AC2), idle = Color(0xFF2E2427),
+    isDark = true, oxygen = Color(0xFF7FCBE0),
+)
+
+/** Cool light: sage paper and pine ink. */
+val SagePalette = Palette(
+    paper = Color(0xFFF2F5F0), gridMinor = Color(0xFFE2EADF), gridMajor = Color(0xFFC6D4C1),
+    ink = Color(0xFF17251E), inkSoft = Color(0xFF55665C), pulse = Color(0xFFC9402F),
+    wash = Color(0xFFE5EDE2), line = Color(0xFFD2DCCE), surface = Color(0xFFFCFDFB),
+    ok = Color(0xFF237A4B), warn = Color(0xFFA9620E),
+    sleepDeep = Color(0xFF2E4A7D), sleepLight = Color(0xFF8DA2C9), sleepRem = Color(0xFFB98DB8), idle = Color(0xFFDDE5D9),
+    isDark = false, oxygen = Color(0xFF1F7A9E),
+)
+
+/** A ready-made theme: its name, what it's like, and its palette ([ThemeMode.SYSTEM] has none of its own). */
+data class ThemeInfo(val mode: ThemeMode, val name: String, val about: String)
+val THEMES = listOf(
+    ThemeInfo(ThemeMode.SYSTEM, "Follow phone", "Paper by day, Night when the phone is dark"),
+    ThemeInfo(ThemeMode.LIGHT, "Paper", "Warm ECG-paper light"),
+    ThemeInfo(ThemeMode.DARK, "Night", "Deep navy"),
+    ThemeInfo(ThemeMode.BLACK, "OLED Black", "True black; pixels off on OLED screens"),
+    ThemeInfo(ThemeMode.DUSK, "Dusk", "Warm espresso dark"),
+    ThemeInfo(ThemeMode.SAGE, "Sage", "Cool green light"),
+)
+
+/** The palette for [mode]; [systemDark] decides "Follow phone". */
+fun paletteFor(mode: ThemeMode, systemDark: Boolean): Palette = when (mode) {
+    ThemeMode.SYSTEM -> if (systemDark) DarkPalette else LightPalette
+    ThemeMode.LIGHT -> LightPalette; ThemeMode.DARK -> DarkPalette; ThemeMode.BLACK -> BlackPalette
+    ThemeMode.DUSK -> DuskPalette; ThemeMode.SAGE -> SagePalette
+}
+
+/** One hue per part of health, used for its page accent, tile and charts. */
+enum class Area { SLEEP, HEART, MOVE, STRESS, BODY, RECOVERY }
+fun Palette.hue(a: Area): Color = when (a) {
+    Area.SLEEP -> sleepDeep; Area.HEART -> pulse; Area.MOVE -> ok; Area.STRESS -> warn; Area.BODY -> oxygen; Area.RECOVERY -> ink
+}
 
 val Display = FontFamily(
     Font(R.font.display_500, FontWeight.Medium),
@@ -91,22 +147,17 @@ object HL {
     val type: HeartlineType @Composable get() = LocalType.current
 }
 
-enum class ThemeMode { SYSTEM, LIGHT, DARK }
+enum class ThemeMode { SYSTEM, LIGHT, DARK, BLACK, DUSK, SAGE }
 
 @Composable
 fun HeartlineTheme(mode: ThemeMode = ThemeMode.SYSTEM, content: @Composable () -> Unit) {
-    val dark = when (mode) {
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-    }
-    val p = if (dark) DarkPalette else LightPalette
+    val p = paletteFor(mode, isSystemInDarkTheme())
     // Material components (dialogs, text fields, switches) pick up the same tokens.
-    val scheme = if (dark) {
+    val scheme = if (p.isDark) {
         darkColorScheme(
             primary = p.pulse, onPrimary = p.paper, secondary = p.ink, background = p.paper, onBackground = p.ink,
             surface = p.surface, onSurface = p.ink, surfaceVariant = p.wash, onSurfaceVariant = p.inkSoft,
-            outline = p.line, error = p.pulse,
+            outline = p.line, error = p.pulse, surfaceContainer = p.surface, surfaceContainerHigh = p.surface,
         )
     } else {
         lightColorScheme(

@@ -137,14 +137,12 @@ fun WatchScreen(controller: HeartlineController, nav: Navigator) {
 }
 
 @Composable
-private fun NotifyComposer(controller: HeartlineController, connected: Boolean) {
+internal fun NotifyComposer(controller: HeartlineController, connected: Boolean) {
     var title by remember { mutableStateOf("Heartline") }
     var body by remember { mutableStateOf("Time to stand up and stretch.") }
     var kind by remember { mutableStateOf(NotifyKind.MESSAGE) }
     var asApp by remember { mutableStateOf("") }
     var sent by remember { mutableStateOf<String?>(null) }
-    SectionTitle("Send to your wrist")
-    Gap(8)
     Text("Show it as", style = HL.type.label, color = HL.colors.inkSoft)
     Gap(6)
     androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -468,16 +466,14 @@ private fun NumberField(label: String, value: String?, decimal: Boolean = false,
 @Composable
 fun PreferencesScreen(controller: HeartlineController, nav: Navigator) {
     val prefs by controller.prefs.collectAsStateWithLifecycle()
-    Screen("App settings", onBack = { nav.pop() }) {
-        Text("Theme", style = HL.type.label, color = HL.colors.inkSoft)
-        Gap(6)
-        Segmented(listOf(ThemeMode.SYSTEM to "Follow phone", ThemeMode.LIGHT to "Light", ThemeMode.DARK to "Dark"), prefs.theme, controller::setTheme)
-        Gap(20)
+    Screen("Look and units", onBack = { nav.pop() }, subtitle = "Pick a theme; it changes at once.") {
+        ThemeGallery(prefs.theme, controller::setTheme)
+        Gap(24)
         Text("Units", style = HL.type.label, color = HL.colors.inkSoft)
         Gap(6)
         Segmented(listOf(true to "Metric", false to "Imperial"), prefs.metric, controller::setMetric)
         Gap(28)
-        MutedText("Heartline 0.1.0. Talks to the watch directly over Bluetooth; no account, no cloud.")
+        MutedText("Heartline ${androidx.compose.ui.platform.LocalContext.current.let { it.packageManager.getPackageInfo(it.packageName, 0).versionName }}. Talks to the watch directly over Bluetooth; no account, no cloud.")
     }
 }
 

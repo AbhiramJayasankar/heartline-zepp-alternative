@@ -1,6 +1,6 @@
 package dev.heartline.data.model
 
-enum class Theme { SYSTEM, LIGHT, DARK }
+enum class Theme { SYSTEM, LIGHT, DARK, BLACK, DUSK, SAGE }
 enum class Units { METRIC, IMPERIAL }
 enum class Sex { MALE, FEMALE }
 enum class RawSensor { ACCEL, PPG, GPS, GYROSCOPE, MAGNETOMETER, MICROPHONE }

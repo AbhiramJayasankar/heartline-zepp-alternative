@@ -178,6 +178,11 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
             dev.heartline.service.RoundLog("nvidia/nemotron-3.5-super-vl:free", 1, "off", 1800, 3100, 60, emptyList(), "You slept 6 h 50 min with 1 h 20 min deep.")),
         "You slept 6 h 50 min with 1 h 20 min deep.", "Reply on the watch", null, 5200, null)))
     override fun clearAlexaTurns() { alexaTurns.value = emptyList() }
+    override val insights = MutableStateFlow(InsightsUi(dev.heartline.service.InsightReport(System.currentTimeMillis() / 1000 - 3600, "demo", "Sleep is your lever this week.",
+        listOf(dev.heartline.service.Insight("sleep", "Short nights add up", "You averaged 5.3 h over 14 nights, 1.5 h under your best weeks.", "Aim for lights out by 23:30.", "watch")))))
+    override fun refreshInsights() {}
+    override val insightsSettings = MutableStateFlow(dev.heartline.service.InsightsSettings())
+    override fun setInsightsSettings(s: dev.heartline.service.InsightsSettings) { insightsSettings.value = s }
     override val alexaTools = listOf(AlexaToolUi("get_sleep", "Health data", "The night's sleep that ended on the morning of a date.", "{}"),
         AlexaToolUi("web_search", "Web", "Search the web.", "{}"), AlexaToolUi("set_timer", "Watch and Heartline actions", "Start a countdown timer on the watch.", "{}"))
     override suspend fun alexaPromptPreview(template: String) = dev.heartline.service.AssistantAi.renderPrompt(template,
