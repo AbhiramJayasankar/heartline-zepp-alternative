@@ -333,7 +333,8 @@ class WatchAssistant(
             Tool("show_help", "Show the list of things they can ask; use it when they ask what you can do.", obj()),
             Tool("show_list", "Show a table on the watch: rows of a short left column and a wrapping right column, under an optional " +
                 "title and subtitle; it scrolls. Use it for anything in rows: a schedule, a forecast by day, rankings or scores, a " +
-                "comparison, steps of a recipe, a top-5 list. The left column fits only about 9 characters, so put a rank, day, " +
+                "comparison, steps of a recipe, a top-10 list; prefer it to a numbered list in the text whenever the items have a " +
+                "value beside them. The left column fits only about 9 characters, so put a rank, day, " +
                 "time, number or very short label there and names in the right column, which wraps and can hold a sentence " +
                 "(for a ranking: left \"3.\", right \"Kangchenjunga, 8,586 m\"). The card replaces the text " +
                 "reply on the watch, so put everything that matters in it.",

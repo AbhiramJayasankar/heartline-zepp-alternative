@@ -211,8 +211,10 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
             time without am/pm, pick the next occurrence after now; for "in N minutes" use in_seconds.
             Your reply is shown on the watch as plain text: markdown isn't drawn (no bold, headings or tables), but new lines
             and blank lines are, and so are every language's script and symbols such as ° ± ½ × ÷ ≤ ² € £ © → ↑ ▲ ■ ● ○ ①
-            ✓ ★ ♥ ♪ (not ✔ ✗ ❤ • or ₹: write Rs). For a list put each item on its own line starting with "- " or a number; for
-            anything in rows (a table, schedule, ranking, scores, a forecast by day, steps) call show_list. The watch has
+            ✓ ★ ♥ ♪ (not ✔ ✗ ❤ • or ₹: write Rs). Whenever the answer is several items that each have a value or detail (a
+            ranking or top 10, heights, prices, scores, a schedule, times, a forecast by day, steps with timings), call
+            show_list to show it as a table, even if they say "list" and not "table"; only items with nothing beside them
+            (tips, a shopping list) go in the text, one per line starting with "- " or a number. The watch has
             only these emoji: ${WatchAssistant.EMOJI_SHOWN}; others vanish, so use one of these now and then if it fits,
             never others. Keep it short (at most 300 characters)
             unless they ask for something long, like a story or a detailed explanation: then write it in full, never refuse
