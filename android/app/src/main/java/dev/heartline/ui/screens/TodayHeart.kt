@@ -133,10 +133,9 @@ fun CheckResultScreen(controller: HeartlineController, id: String, nav: Navigato
     }
     Screen("Heart check", onBack = { nav.pop() }, subtitle = session?.let { "${dateTimeOf(it.start)}, ${it.durationS.toInt()} s" }) {
         val s = session ?: run { MutedText("Loading…"); return@Screen }
-        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.wash)) {
-            Box(Modifier.width(4.dp).height(120.dp).background(rhythmColor(s.rhythm)))
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.wash)) {
             Column(Modifier.padding(16.dp)) {
-                Text("Rhythm", style = HL.type.label, color = c.inkSoft)
+                dev.heartline.ui.components.AreaLabel("Rhythm", rhythmColor(s.rhythm))
                 Text(rhythmText(s.rhythm), style = HL.type.section.copy(fontSize = 28.sp), color = if (s.rhythm == RhythmStatus.POSSIBLE_AF) c.pulse else c.ink)
                 Gap(4)
                 MutedText((s.notes.filterNot { it.contains("diagnosis") } + DISCLAIMER).joinToString(" "))

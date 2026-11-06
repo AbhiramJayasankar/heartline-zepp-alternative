@@ -38,6 +38,9 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.border
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import dev.heartline.ui.Icons
 import dev.heartline.ui.theme.HL
 import java.time.Instant
@@ -80,6 +83,9 @@ fun Screen(
     subtitle: String? = null,
     trailing: (@Composable () -> Unit)? = null,
     contentPadding: PaddingValues = PaddingValues(horizontal = Gutter),
+    /** With an icon, the subtitle sits beside a tinted badge in a header card, so each inner page has its own face. */
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    tint: androidx.compose.ui.graphics.Color? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     ScrollPage {
@@ -89,11 +95,25 @@ fun Screen(
                 if (onBack != null) {
                     IconButton(onClick = onBack) { Icon(Icons.back, contentDescription = "Back", tint = HL.colors.ink) }
                 }
-                if (title != null) Text(title, style = HL.type.title, color = HL.colors.ink, modifier = Modifier.weight(1f))
+                if (title != null) Text(title, style = HL.type.title, color = HL.colors.ink, modifier = Modifier.weight(1f).semantics { heading() })
                 else Spacer(Modifier.weight(1f))
                 trailing?.invoke()
             }
-            if (subtitle != null) Text(subtitle, style = HL.type.small, color = HL.colors.inkSoft, modifier = Modifier.padding(horizontal = Gutter, vertical = 4.dp))
+            if (icon != null) {
+                val c = HL.colors; val t = tint ?: c.pulse
+                val shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp)
+                Row(Modifier.padding(horizontal = Gutter, vertical = 10.dp).fillMaxWidth().clip(shape)
+                    .background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(t.copy(alpha = 0.16f), c.surface)))
+                    .border(1.dp, c.line, shape).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(52.dp).clip(androidx.compose.foundation.shape.CircleShape).background(t.copy(alpha = 0.20f)), contentAlignment = Alignment.Center) {
+                        Icon(icon, null, tint = t, modifier = Modifier.size(26.dp))
+                    }
+                    if (subtitle != null) {
+                        Spacer(Modifier.width(14.dp))
+                        Text(subtitle, style = HL.type.small.copy(fontSize = 14.sp, lineHeight = 20.sp), color = c.ink, modifier = Modifier.weight(1f))
+                    }
+                }
+            } else if (subtitle != null) Text(subtitle, style = HL.type.small, color = HL.colors.inkSoft, modifier = Modifier.padding(horizontal = Gutter, vertical = 4.dp))
             Spacer(Modifier.height(12.dp))
         }
         Column(Modifier.padding(contentPadding), verticalArrangement = Arrangement.spacedBy(0.dp), content = content)

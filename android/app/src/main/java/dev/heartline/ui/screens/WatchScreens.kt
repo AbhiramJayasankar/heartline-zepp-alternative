@@ -1,5 +1,8 @@
 package dev.heartline.ui.screens
 
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.semantics.semantics
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.MediaPlayer
@@ -113,7 +116,10 @@ fun SensorsScreen(controller: HeartlineController, nav: Navigator) {
     val connected = conn.state == LinkState.CONNECTED
     val names = listOf(Sensor.PPG to "Pulse", Sensor.ACCEL to "Accelerometer", Sensor.GYRO to "Gyroscope", Sensor.MAG to "Compass", Sensor.GPS to "GPS", Sensor.MIC to "Microphone")
 
-    Screen("Sensors lab", onBack = { nav.pop() }, subtitle = "Raw streams straight from the watch. Every sample is saved while streaming.") {
+    Screen("Sensors lab", onBack = { nav.pop() }, subtitle = "Raw streams straight from the watch. Every sample is saved while streaming.",
+        icon = dev.heartline.ui.Icons.wave, tint = c.pulse) {
+        Text("Sensors to stream", style = HL.type.label, color = c.inkSoft)
+        Gap(8)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             names.forEach { (sensor, label) ->
                 val on = sensor in s.selected
@@ -136,7 +142,7 @@ fun SensorsScreen(controller: HeartlineController, nav: Navigator) {
         Gap(18)
 
         if (Sensor.PPG in s.selected) {
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).paper().padding(12.dp)) {
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).paper().border(1.dp, c.line, RoundedCornerShape(18.dp)).padding(12.dp)) {
                 Row(verticalAlignment = Alignment.Bottom) {
                     Text("Optical pulse", style = HL.type.label, color = c.inkSoft, modifier = Modifier.weight(1f))
                     Text(s.ppgBpm?.let { "$it bpm" } ?: "–", style = HL.type.stat.copy(fontSize = 20.sp), color = c.pulse)
@@ -201,16 +207,17 @@ fun SensorsScreen(controller: HeartlineController, nav: Navigator) {
         Gap(10)
         val probe by controller.probe.collectAsStateWithLifecycle()
         SectionTitle("Unknown sensors")
-        Gap(4)
-        MutedText("Two of the watch's sensor switches have never been mapped; one may be the red and infrared light it uses for SpO2. Wear the watch, stop streaming, then probe and keep your arm still for about 2½ minutes: eleven combinations run for 12 seconds each.")
-        Gap(10)
-        PillButton("Probe unknown sensors", { controller.probeUnknownSensors() }, style = ButtonStyle.QUIET, enabled = connected && !s.streaming)
-        probe.forEach { Gap(6); Text(it, style = HL.type.small, color = c.ink) }
+        Gap(8)
+        Panel {
+            MutedText("Two of the watch's sensor switches have never been mapped; one may be the red and infrared light it uses for SpO2. Wear the watch, stop streaming, then probe and keep your arm still for about 2½ minutes: eleven combinations run for 12 seconds each.")
+            Gap(10)
+            PillButton("Probe unknown sensors", { controller.probeUnknownSensors() }, style = ButtonStyle.QUIET, enabled = connected && !s.streaming)
+            probe.forEach { Gap(6); Text(it, style = HL.type.small, color = c.ink) }
+        }
         Gap(24)
         SectionTitle("Recordings")
-        Gap(4)
-        if (recordings.isEmpty()) MutedText("Nothing recorded yet.")
-        recordings.forEach { r -> RecordingRow(controller, r.file, "${dateTimeOf(r.start)}, ${r.durationS.toInt()} s", r.hasAudio) }
+        if (recordings.isEmpty()) { Gap(4); MutedText("Nothing recorded yet.") }
+        else NavGroup { recordings.forEach { r -> RecordingRow(controller, r.file, "${dateTimeOf(r.start)}, ${r.durationS.toInt()} s", r.hasAudio) } }
     }
 }
 
@@ -319,28 +326,33 @@ fun ForwardingScreen(controller: HeartlineController, nav: Navigator) {
             .distinctBy { it.first }.filter { it.first != ctx.packageName }.sortedBy { it.second.lowercase() }
     }
     fun set(u: ForwardingUi) = controller.setForwarding(u)
-    Screen("Phone notifications", onBack = { nav.pop() }, subtitle = "Heartline shows your phone's notifications on the watch, the way Zepp did.") {
-        ToggleRow("Forward notifications", null, f.enabled) { set(f.copy(enabled = it)) }
-        Gap(8)
-        PillButton("Allow notification access", { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }, style = ButtonStyle.QUIET)
-        Gap(6)
-        MutedText("Android asks you to switch Heartline on in its notification access list once.")
-        Gap(16)
-        ToggleRow("Incoming calls", null, f.calls) { set(f.copy(calls = it)) }
-        Gap(8)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Quiet hours", style = HL.type.body, color = c.ink, modifier = Modifier.weight(1f))
-            Segmented(listOf(false to "Off", true to "23:00 to 07:00"), f.quietStart != null, { on -> set(f.copy(quietStart = if (on) 23 else null, quietEnd = if (on) 7 else null)) })
+    var search by remember { mutableStateOf("") }
+    Screen("Phone notifications", onBack = { nav.pop() }, subtitle = "Heartline shows your phone's notifications on the watch, the way Zepp did.",
+        icon = dev.heartline.ui.Icons.bell, tint = c.pulse) {
+        NavGroup {
+            ToggleRow("Forward notifications", if (f.enabled) "${f.allowed.size} apps reach your wrist" else "Off", f.enabled) { set(f.copy(enabled = it)) }
+            HorizontalDivider(color = c.line)
+            ToggleRow("Incoming calls", "Shows the caller and lets you decline on the watch", f.calls) { set(f.copy(calls = it)) }
+            HorizontalDivider(color = c.line)
+            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Quiet hours", style = HL.type.bodyStrong, color = c.ink, modifier = Modifier.weight(1f))
+                Segmented(listOf(false to "Off", true to "23:00–07:00"), f.quietStart != null, { on -> set(f.copy(quietStart = if (on) 23 else null, quietEnd = if (on) 7 else null)) })
+            }
         }
+        Gap(10)
+        PillButton("Allow notification access", { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }, style = ButtonStyle.QUIET)
+        Gap(4)
+        MutedText("Android asks you to switch Heartline on in its notification access list once.")
         Gap(20)
         SectionTitle("Apps")
-        MutedText("Only ticked apps reach your wrist.")
-        Gap(6)
-        apps.forEach { (pkg, label) ->
-            val on = pkg in f.allowed
-            Row(Modifier.fillMaxWidth().clickable { set(f.copy(allowed = if (on) f.allowed - pkg else f.allowed + pkg)) }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(on, { set(f.copy(allowed = if (on) f.allowed - pkg else f.allowed + pkg)) }, colors = CheckboxDefaults.colors(checkedColor = c.ink))
-                Text(label, style = HL.type.body, color = c.ink)
+        MutedText("Only switched-on apps reach your wrist.")
+        Gap(8)
+        OutlinedTextField(search, { search = it }, label = { Text("Find an app") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        val shown = apps.filter { search.isBlank() || it.second.contains(search.trim(), ignoreCase = true) }.sortedByDescending { it.first in f.allowed }
+        NavGroup {
+            shown.forEachIndexed { i, (pkg, label) ->
+                if (i > 0) HorizontalDivider(color = c.line)
+                ToggleRow(label, null, pkg in f.allowed) { on -> set(f.copy(allowed = if (on) f.allowed + pkg else f.allowed - pkg)) }
             }
         }
     }
@@ -352,18 +364,20 @@ fun ForwardingScreen(controller: HeartlineController, nav: Navigator) {
 fun DataScreen(controller: HeartlineController, nav: Navigator) {
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(controller::importPcData) }
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri -> uri?.let(controller::exportData) }
-    Screen("Data", onBack = { nav.pop() }, subtitle = "Everything stays on this phone unless you export it.") {
-        SectionTitle("Import from the PC dashboard")
-        Gap(4)
-        MutedText("Pick the dashboard's watch.db to bring over its history, including the 40 days of skin temperature that exist nowhere else. Importing twice adds nothing.")
-        Gap(10)
-        PillButton("Choose watch.db", { importer.launch(arrayOf("*/*")) })
-        Gap(26)
-        SectionTitle("Export")
-        Gap(4)
-        MutedText("A zip with one CSV per table: heart rate, activity minutes, health data, workouts and heart checks.")
-        Gap(10)
-        PillButton("Export all data", { exporter.launch("heartline-export.zip") }, style = ButtonStyle.QUIET)
+    Screen("Export and backup", onBack = { nav.pop() }, subtitle = "Everything stays on this phone unless you export it.", icon = dev.heartline.ui.Icons.data, tint = HL.colors.ink) {
+        Panel {
+            Text("Export", style = HL.type.bodyStrong, color = HL.colors.ink)
+            MutedText("A zip with one CSV per table: heart rate, activity minutes, health data, workouts and heart checks. Open it in a spreadsheet or keep it as a backup.")
+            Gap(12)
+            PillButton("Export all data", { exporter.launch("heartline-export.zip") })
+        }
+        Gap(12)
+        Panel {
+            Text("Import from the PC dashboard", style = HL.type.bodyStrong, color = HL.colors.ink)
+            MutedText("Pick the dashboard's watch.db to bring over its history, including the 40 days of skin temperature that exist nowhere else. Importing twice adds nothing.")
+            Gap(12)
+            PillButton("Choose watch.db", { importer.launch(arrayOf("*/*")) }, style = ButtonStyle.QUIET)
+        }
     }
 }
 
@@ -372,7 +386,19 @@ fun ProfileScreen(controller: HeartlineController, nav: Navigator) {
     val prefs by controller.prefs.collectAsStateWithLifecycle()
     var p by remember(prefs.profile) { mutableStateOf(prefs.profile) }
     var saved by remember { mutableStateOf(false) }
-    Screen("Your profile", onBack = { nav.pop() }, subtitle = "Used for heart rate zones, VO2max, fitness age and calories. Stays on this phone.") {
+    Screen("Your profile", onBack = { nav.pop() }, subtitle = "Used for heart rate zones, VO2max, fitness age and calories. Stays on this phone.",
+        icon = dev.heartline.ui.Icons.person, tint = HL.colors.sleepDeep) {
+        // What the numbers give, live as you type.
+        val maxHr = p.maxHr ?: p.age?.let { 220 - it }
+        val bmi = if (p.weightKg != null && p.heightCm != null && p.heightCm!! > 0) p.weightKg!! / ((p.heightCm!! / 100) * (p.heightCm!! / 100)) else null
+        dev.heartline.ui.components.Card(padding = 16.dp) {
+            dev.heartline.ui.components.FactGrid(listOf(
+                dev.heartline.ui.components.FactItem("Max heart rate", maxHr?.toString() ?: "–", "bpm", note = if (p.maxHr != null) "as set" else "220 minus age"),
+                dev.heartline.ui.components.FactItem("BMI", bmi?.let { "%.1f".format(it) } ?: "–", note = bmi?.let { when { it < 18.5 -> "under"; it < 25 -> "healthy range"; it < 30 -> "over"; else -> "high" } }),
+                dev.heartline.ui.components.FactItem("Zone 2", maxHr?.let { "${(it * 0.6).toInt()}–${(it * 0.7).toInt()}" } ?: "–", "bpm", note = "easy aerobic"),
+            ))
+        }
+        Gap(16)
         NumberField("Age", p.age?.toString()) { p = p.copy(age = it?.toInt()) }
         Gap(10)
         Text("Sex", style = HL.type.label, color = HL.colors.inkSoft)
@@ -405,7 +431,7 @@ private fun NumberField(label: String, value: String?, decimal: Boolean = false,
 @Composable
 fun PreferencesScreen(controller: HeartlineController, nav: Navigator) {
     val prefs by controller.prefs.collectAsStateWithLifecycle()
-    Screen("Look and units", onBack = { nav.pop() }, subtitle = "Pick a theme; it changes at once.") {
+    Screen("Look and units", onBack = { nav.pop() }, subtitle = "Pick a theme; it changes at once.", icon = dev.heartline.ui.Icons.palette, tint = HL.colors.pulse) {
         ThemeGallery(prefs.theme, controller::setTheme)
         Gap(24)
         Text("Units", style = HL.type.label, color = HL.colors.inkSoft)
@@ -419,14 +445,28 @@ fun PreferencesScreen(controller: HeartlineController, nav: Navigator) {
 @Composable
 fun EventsScreen(controller: HeartlineController, nav: Navigator) {
     val events by controller.events.collectAsStateWithLifecycle()
-    Screen("Activity log", onBack = { nav.pop() }) {
-        if (events.isEmpty()) MutedText("Nothing yet.")
-        events.forEach { e ->
-            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                Text(timeOf(e.ts), style = HL.type.small, color = HL.colors.inkSoft, modifier = Modifier.width(56.dp))
-                Text(e.message, style = HL.type.small, color = when { e.error -> HL.colors.pulse; e.warn -> HL.colors.warn; else -> HL.colors.ink })
+    var filter by remember { mutableStateOf("all") }
+    val c = HL.colors
+    Screen("Activity log", onBack = { nav.pop() }, subtitle = "Every connection step, sync, AI request and error, newest first.", icon = dev.heartline.ui.Icons.list, tint = c.ink) {
+        val warn = events.count { it.warn || it.error }
+        Segmented(listOf("all" to "All ${events.size}", "problems" to "Problems $warn", "syncs" to "Syncs"), filter, { filter = it })
+        Gap(12)
+        val shown = events.filter { e -> when (filter) { "problems" -> e.warn || e.error; "syncs" -> e.message.contains("sync", ignoreCase = true); else -> true } }
+        if (shown.isEmpty()) MutedText("Nothing here.")
+        shown.groupBy { java.time.Instant.ofEpochSecond(it.ts).atZone(java.time.ZoneId.systemDefault()).toLocalDate() }.forEach { (day, list) ->
+            Text(dayLabel(day), style = HL.type.label, color = c.inkSoft, modifier = Modifier.padding(top = 12.dp))
+            NavGroup {
+                list.forEachIndexed { i, e ->
+                    if (i > 0) HorizontalDivider(color = c.line)
+                    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.Top) {
+                        val col = when { e.error -> c.pulse; e.warn -> c.warn; else -> c.ok }
+                        Box(Modifier.padding(top = 5.dp).size(8.dp).clip(CircleShape).background(col))
+                        Spacer(Modifier.width(10.dp))
+                        Text(timeOf(e.ts), style = HL.type.small, color = c.inkSoft, modifier = Modifier.width(48.dp))
+                        Text(e.message, style = HL.type.small, color = if (e.error) c.pulse else c.ink, modifier = Modifier.weight(1f))
+                    }
+                }
             }
-            HorizontalDivider(color = HL.colors.line)
         }
     }
 }

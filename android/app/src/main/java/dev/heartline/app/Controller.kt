@@ -87,6 +87,8 @@ interface HeartlineController {
     /** Which AI writes the insights (Gemini or OpenRouter) and its model. */
     val insightsSettings: StateFlow<dev.heartline.service.InsightsSettings>
     fun setInsightsSettings(s: dev.heartline.service.InsightsSettings)
+    /** The Gemini text models the saved key can use. */
+    suspend fun geminiModels(): List<String>
     /** Every tool the brain can be given, as defined (before the owner's choices). */
     val alexaTools: List<AlexaToolUi>
     /** [template] filled in as the brain would get it now. */
@@ -251,7 +253,9 @@ data class PlaceUi(val name: String, val region: String?, val lat: Double, val l
 data class AlexaToolUi(val name: String, val group: String, val description: String, val parameters: String)
 data class AlexaAlertUi(val id: Int, val kind: String, val text: String, val at: Long)
 /** The latest insights, whether new ones are being written, and why the last attempt failed. */
-data class InsightsUi(val report: dev.heartline.service.InsightReport? = null, val running: Boolean = false, val error: String? = null)
+data class InsightsUi(val report: dev.heartline.service.InsightReport? = null, val running: Boolean = false, val error: String? = null,
+    /** Every request of the last failed run, to show which models were tried and what each answered. */
+    val failedAttempts: List<dev.heartline.service.InsightAttempt> = emptyList())
 data class WebSearchUi(val tavilyEnd: String? = null, val exaEnd: String? = null)
 data class AssistantAiUi(val keyEnd: String?, val model: String, val key2End: String? = null, val key3End: String? = null)
 data class SpeechUi(val geminiKeyEnd: String?)

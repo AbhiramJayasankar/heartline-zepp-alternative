@@ -337,26 +337,65 @@ class RealController(
     override val alexaTurns: StateFlow<List<dev.heartline.service.TurnRecord>> = db.meta.observe(dev.heartline.service.AlexaLog.KEY)
         .map { dev.heartline.service.AlexaLog.parse(it) }.flowOn(Dispatchers.Default).stateIn(scope, SharingStarted.Eagerly, emptyList())
     override fun clearAlexaTurns() { scope.launch { db.meta.set(dev.heartline.service.AlexaLog.KEY, "[]") } }
-    private val insightsRun = MutableStateFlow<Pair<Boolean, String?>>(false to null)
+    private class InsightsRun(val running: Boolean = false, val error: String? = null, val attempts: List<dev.heartline.service.InsightAttempt> = emptyList())
+    private val insightsRun = MutableStateFlow(InsightsRun())
     override val insights: StateFlow<InsightsUi> = db.meta.observe(dev.heartline.service.InsightReport.KEY)
         .map { dev.heartline.service.InsightReport.parse(it) }
-        .combine(insightsRun) { report, (running, error) -> InsightsUi(report, running, error) }
+        .combine(insightsRun) { report, r -> InsightsUi(report, r.running, r.error, r.attempts) }
         .stateIn(scope, SharingStarted.Eagerly, InsightsUi())
     override val insightsSettings: StateFlow<dev.heartline.service.InsightsSettings> = db.meta.observe(dev.heartline.service.InsightsSettings.KEY)
         .map { dev.heartline.service.InsightsSettings.parse(it) }.stateIn(scope, SharingStarted.Eagerly, dev.heartline.service.InsightsSettings())
     override fun setInsightsSettings(s: dev.heartline.service.InsightsSettings) { scope.launch { db.meta.set(dev.heartline.service.InsightsSettings.KEY, s.json()) } }
-    override fun refreshInsights() {
-        if (insightsRun.value.first) return
-        insightsRun.value = true to null
+    override suspend fun geminiModels(): List<String> = dev.heartline.service.GeminiText().listModels(
+        dev.heartline.service.SpeechConfig.parse(db.meta.get(dev.heartline.service.SpeechConfig.KEY)).geminiKey)
+
+    /** Heart checks for the insights, newest first (they aren't among the Alexa tools). */
+    private fun checksSummary(): String = checks.value.take(8).takeIf { it.isNotEmpty() }?.joinToString("\n", "## heart checks (HRV from a 1 to 5 minute rest recording, newest first)\n") { c ->
+        val t = java.time.Instant.ofEpochSecond(c.start).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("EEE d MMM HH:mm", java.util.Locale.ENGLISH))
+        "$t: HRV (RMSSD) ${c.rmssd?.let { "%.0f ms".format(it) } ?: "not measured"}, heart rate ${c.hr?.let { "%.0f bpm".format(it) } ?: "-"}, rhythm ${c.rhythm.name.lowercase().replace('_', ' ')}"
+    }.orEmpty()
+
+    override fun refreshInsights() = runInsights(auto = false)
+    private fun runInsights(auto: Boolean) {
+        if (insightsRun.value.running) return
+        insightsRun.value = InsightsRun(running = true)
         scope.launch {
-            val error = try {
+            val failure = try {
                 val writer = dev.heartline.service.HealthInsights(dev.heartline.service.HealthTools(this@RealController), dev.heartline.service.AssistantAi(),
                     { dev.heartline.service.AssistantAiConfig.parse(db.meta.get(dev.heartline.service.AssistantAiConfig.KEY)) },
                     { dev.heartline.service.InsightsSettings.parse(db.meta.get(dev.heartline.service.InsightsSettings.KEY)) },
-                    { dev.heartline.service.SpeechConfig.parse(db.meta.get(dev.heartline.service.SpeechConfig.KEY)).geminiKey })
-                db.meta.set(dev.heartline.service.InsightReport.KEY, writer.generate().json()); null
-            } catch (e: CancellationException) { throw e } catch (e: Exception) { e.message ?: e.toString() }
-            insightsRun.value = false to error
+                    { dev.heartline.service.SpeechConfig.parse(db.meta.get(dev.heartline.service.SpeechConfig.KEY)).geminiKey },
+                    extra = { checksSummary() })
+                db.meta.set(dev.heartline.service.InsightReport.KEY, writer.generate(auto).json()); null
+            } catch (e: CancellationException) { throw e } catch (e: dev.heartline.service.InsightsFailed) { e
+            } catch (e: Exception) { dev.heartline.service.InsightsFailed(listOf(dev.heartline.service.InsightAttempt("heartline", "-", 0, e.message ?: e.toString()))) }
+            insightsRun.value = InsightsRun(false, failure?.message, failure?.attempts ?: emptyList())
+            if (auto) autoInsights.lastTry = System.currentTimeMillis()
+            if (failure != null) db.events.add("warn", "AI insights failed: ${failure.message}") else db.events.add("info", "AI insights written" + if (auto) " (daily)" else "")
+        }
+    }
+
+    /**
+     * Daily insights: from the set hour, if today's haven't been written, try; if every model fails (Gemini's free
+     * tier is often busy), try again every 30 minutes, up to 10 times a day.
+     */
+    private object autoInsights { var lastTry = 0L; var day = 0L; var tries = 0 }
+    private val autoInsightsJob = scope.launch {
+        while (true) {
+            delay(5 * 60_000L)
+            runCatching {
+                val s = insightsSettings.value
+                if (!s.auto || insightsRun.value.running) return@runCatching
+                val now = java.time.ZonedDateTime.now()
+                val today = now.toLocalDate().toEpochDay()
+                if (autoInsights.day != today) { autoInsights.day = today; autoInsights.tries = 0 }
+                val due = now.toLocalDate().atTime(s.autoHour, 0).atZone(now.zone).toEpochSecond()
+                val last = insights.value.report?.at ?: 0L
+                if (now.toEpochSecond() < due || last >= due || autoInsights.tries >= 10) return@runCatching
+                if (System.currentTimeMillis() - autoInsights.lastTry < 30 * 60_000L) return@runCatching
+                autoInsights.tries++; autoInsights.lastTry = System.currentTimeMillis()
+                runInsights(auto = true)
+            }
         }
     }
     override val alexaTools: List<AlexaToolUi> by lazy {

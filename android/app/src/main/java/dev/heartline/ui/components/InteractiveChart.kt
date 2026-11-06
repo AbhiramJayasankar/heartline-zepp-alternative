@@ -1,5 +1,16 @@
 package dev.heartline.ui.components
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -52,6 +63,9 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 
+/** The title of the panel a chart sits in, for its full-screen view. */
+val LocalChartTitle = androidx.compose.runtime.compositionLocalOf<String?> { null }
+
 /** One plotted series. [format] renders a value for the readout; [gap] breaks the line across missing data (x units).
  * A zero [width] shows the series in the readout only. */
 data class ChartLine(
@@ -86,18 +100,28 @@ fun InteractiveChart(
     xLabel: (Double) -> String = { epochClock(it) }, readoutX: (Double) -> String = { epochClock(it, seconds = true) },
     minSpan: Double = 600.0, idleHint: String? = "Touch the chart for exact values. Pinch to zoom.",
     summary: (@Composable () -> Unit)? = null,
+    /** Shown on the full-screen view (the surrounding panel's title by default); null keeps the chart inline only. */
+    title: String? = LocalChartTitle.current ?: "Chart",
+    fullscreen: Boolean = false,
 ) {
     val c = HL.colors
     val tm = rememberTextMeasurer()
+    var expanded by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    if (expanded) FullscreenChart(title ?: "Chart", { expanded = false }) { h ->
+        InteractiveChart(lines, xStart, xEnd, Modifier, h, yMin, yMax, bars, bands, spans, xLabel, readoutX, minSpan,
+            "Touch or drag for exact values. Pinch to zoom, double-tap to zoom out.", null, title, fullscreen = true)
+    }
     var view by remember(xStart, xEnd) { mutableStateOf(xStart to xEnd) }
     var selected by remember(xStart, xEnd) { mutableStateOf<Double?>(null) }
     var widthPx by remember { mutableStateOf(1f) }
-    val rightPad = with(androidx.compose.ui.platform.LocalDensity.current) { 34.dp.toPx() }
-    fun toX(px: Float): Double { val (a, b) = view; return a + (px / (widthPx - rightPad)).coerceIn(0f, 1f) * (b - a) }
+    val rightPad = with(androidx.compose.ui.platform.LocalDensity.current) { 36.dp.toPx() }
+    val leftPad = with(androidx.compose.ui.platform.LocalDensity.current) { 6.dp.toPx() }
+    fun toX(px: Float): Double { val (a, b) = view; return a + ((px - leftPad) / (widthPx - rightPad - leftPad)).coerceIn(0f, 1f) * (b - a) }
 
     Column(modifier.fillMaxWidth()) {
         // Readout: values at the touched moment, or the chart's own summary/hint at rest.
-        Box(Modifier.fillMaxWidth().heightIn(min = 62.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Box(Modifier.weight(1f).heightIn(min = 62.dp)) {
             val sel = selected
             if (sel == null) {
                 if (summary != null) summary() else if (idleHint != null) MutedText(idleHint)
@@ -111,6 +135,17 @@ fun InteractiveChart(
                     }
                 }
             }
+        }
+        if (title != null && !fullscreen) Box(Modifier.size(44.dp).clip(CircleShape).background(c.wash)
+            .clickable(onClickLabel = "Open full screen", role = Role.Button) { expanded = true }
+            .semantics { contentDescription = "Open $title full screen" }, contentAlignment = Alignment.Center) {
+            Canvas(Modifier.size(16.dp)) {
+                val w = size.width; val k = w * 0.38f; val st = Stroke(1.8.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                listOf(Offset(0f, 0f) to Offset(1f, 1f), Offset(w, 0f) to Offset(-1f, 1f), Offset(0f, w) to Offset(1f, -1f), Offset(w, w) to Offset(-1f, -1f)).forEach { (o, d) ->
+                    drawPath(Path().apply { moveTo(o.x + d.x * k, o.y); lineTo(o.x, o.y); lineTo(o.x, o.y + d.y * k) }, c.ink, style = st)
+                }
+            }
+        }
         }
         Spacer(Modifier.height(4.dp))
         Canvas(
@@ -164,7 +199,7 @@ fun InteractiveChart(
             widthPx = size.width
             val right = size.width - rightPad; val top = 4.dp.toPx(); val bottom = size.height - 18.dp.toPx()
             val (a, b) = view
-            fun x(t: Double) = ((t - a) / (b - a)).toFloat() * right
+            fun x(t: Double) = leftPad + ((t - a) / (b - a)).toFloat() * (right - leftPad)
             val visible = lines.filter { it.axis }.flatMap { l -> l.points.filter { it.t in a..b }.map { it.v } } +
                 bars.flatMap { s -> s.points.filter { it.t + s.width >= a && it.t <= b }.map { it.v } }
             var lo = yMin ?: (visible.minOrNull() ?: 0.0); var hi = yMax ?: (visible.maxOrNull() ?: 1.0)
@@ -175,15 +210,15 @@ fun InteractiveChart(
 
             bands.forEach { band ->
                 val y1 = y(band.high.coerceAtMost(hi)); val y2 = y(band.low.coerceAtLeast(lo))
-                if (y2 > top && y1 < bottom) drawRect(band.color, Offset(0f, y1.coerceAtLeast(top)), Size(right, y2.coerceAtMost(bottom) - y1.coerceAtLeast(top)))
+                if (y2 > top && y1 < bottom) drawRect(band.color, Offset(leftPad, y1.coerceAtLeast(top)), Size(right - leftPad, y2.coerceAtMost(bottom) - y1.coerceAtLeast(top)))
             }
             spans.forEach { s ->
-                val x1 = x(s.start).coerceAtLeast(0f); val x2 = x(s.end).coerceAtMost(right)
+                val x1 = x(s.start).coerceAtLeast(leftPad); val x2 = x(s.end).coerceAtMost(right)
                 if (x2 > x1) drawRect(s.color, Offset(x1, top), Size(max(x2 - x1, 1.5f), bottom - top))
             }
             // Grid and y labels at round values.
             niceTicks(lo, hi, 4).forEach { v ->
-                drawLine(c.line, Offset(0f, y(v)), Offset(right, y(v)), 1f)
+                drawLine(c.line, Offset(leftPad, y(v)), Offset(right, y(v)), 1f)
                 label(tm, formatTick(v), right + 4.dp.toPx(), y(v) - 7.dp.toPx(), c.inkSoft)
             }
             bars.forEach { s ->
@@ -200,6 +235,28 @@ fun InteractiveChart(
                 if (l.width.value <= 0f) return@forEach // readout-only series
                 val pts = l.points.filter { it.t >= a - l.gap && it.t <= b + l.gap }
                 if (pts.isEmpty()) return@forEach
+                val colPx = 3.dp.toPx()
+                if (!l.step && !l.dashed && pts.size > (right - leftPad) / colPx) {
+                    // More points than room: per column, the range as a faint bar and the average as a thin line.
+                    val cols = java.util.TreeMap<Int, DoubleArray>()
+                    pts.forEach { p ->
+                        val k = ((x(p.t) - leftPad) / colPx).toInt()
+                        val acc = cols.getOrPut(k) { doubleArrayOf(p.v, p.v, 0.0, 0.0, p.t) }
+                        acc[0] = min(acc[0], p.v); acc[1] = max(acc[1], p.v); acc[2] += p.v; acc[3] += 1.0; acc[4] = p.t
+                    }
+                    val avgPath = Path(); var lastT: Double? = null
+                    cols.forEach { (k, acc) ->
+                        val cx = leftPad + (k + 0.5f) * colPx
+                        if (cx < leftPad || cx > right) return@forEach
+                        drawLine(l.color.copy(alpha = 0.16f), Offset(cx, y(acc[1])), Offset(cx, y(acc[0])), colPx * 0.7f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                        val ay = y(acc[2] / acc[3])
+                        if (lastT == null || acc[4] - lastT!! > l.gap + (b - a) / ((right - leftPad) / colPx)) avgPath.moveTo(cx, ay) else avgPath.lineTo(cx, ay)
+                        lastT = acc[4]
+                    }
+                    if (l.fill) drawPath(Path().apply { addPath(avgPath) }, l.color.copy(alpha = 0f))
+                    drawPath(avgPath, l.color, style = Stroke(1.6.dp.toPx(), join = StrokeJoin.Round))
+                    return@forEach
+                }
                 val path = Path(); var started = false; var prev: SeriesPoint? = null
                 pts.forEach { p ->
                     val px = x(p.t); val py = y(p.v)
@@ -211,17 +268,26 @@ fun InteractiveChart(
                     val area = Path().apply { addPath(path); lineTo(x(pts.last().t), bottom); lineTo(x(pts.first().t), bottom); close() }
                     drawPath(area, l.color.copy(alpha = 0.12f))
                 }
-                drawPath(path, l.color, style = Stroke(l.width.toPx(), join = StrokeJoin.Round,
+                drawPath(path, l.color, style = Stroke(min(l.width.toPx(), 2.dp.toPx()), join = StrokeJoin.Round,
                     pathEffect = if (l.dashed) PathEffect.dashPathEffect(floatArrayOf(10f, 7f)) else null))
                 if (pts.size == 1) drawCircle(l.color, l.width.toPx() * 1.5f, Offset(x(pts[0].t), y(pts[0].v)))
             }
             // X labels at a round step for the visible span.
             val span = b - a
-            val step = listOf(60.0, 300.0, 900.0, 1800.0, 3600.0, 7200.0, 10800.0, 21600.0, 43200.0, 86400.0, 7 * 86400.0)
-                .firstOrNull { span / it <= 6 } ?: (30 * 86400.0)
+            val maxTicks = ((right - leftPad) / 64.dp.toPx()).toInt().coerceIn(3, 14)
+            val step = listOf(60.0, 300.0, 600.0, 900.0, 1800.0, 3600.0, 7200.0, 10800.0, 21600.0, 43200.0, 86400.0, 7 * 86400.0)
+                .firstOrNull { span / it <= maxTicks } ?: (30 * 86400.0)
             val zoneOffset = ZoneId.systemDefault().rules.getOffset(Instant.ofEpochSecond(a.toLong())).totalSeconds
             var t = ceil((a + zoneOffset) / step) * step - zoneOffset
-            while (t <= b) { label(tm, xLabel(t), x(t), bottom + 3.dp.toPx(), c.inkSoft, center = true); t += step }
+            while (t <= b) {
+                val px = x(t); val text = xLabel(t)
+                val w = tm.measure(text, axisStyle).size.width
+                // Keep edge labels inside the chart instead of half off it.
+                val lx = (px - w / 2f).coerceIn(0f, right - w.toFloat())
+                drawLine(c.line.copy(alpha = 0.5f), Offset(px, bottom), Offset(px, bottom + 3.dp.toPx()), 1f)
+                label(tm, text, lx, bottom + 9.dp.toPx(), c.inkSoft)
+                t += step
+            }
             // Crosshair and the value dots.
             selected?.let { s ->
                 if (s in a..b) {
@@ -267,3 +333,35 @@ private fun niceTicks(lo: Double, hi: Double, count: Int): List<Double> {
 }
 
 private fun formatTick(v: Double): String = if (abs(v) >= 100 || v == floor(v)) "%.0f".format(v) else "%.1f".format(v)
+
+
+/** A chart on its own, full screen and turned to landscape, with a close button. [content] gets the height to fill. */
+@Composable
+fun FullscreenChart(title: String, onClose: () -> Unit, content: @Composable (Dp) -> Unit) {
+    val activity = androidx.compose.ui.platform.LocalContext.current as? android.app.Activity
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        val before = activity?.requestedOrientation
+        activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        onDispose { activity?.requestedOrientation = before ?: android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
+    }
+    androidx.compose.ui.window.Dialog(onClose, androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        val c = HL.colors
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().background(c.paper).padding(androidx.compose.foundation.layout.WindowInsets.safeDrawing.asPaddingValues()).padding(horizontal = 16.dp, vertical = 8.dp)) {
+            val fill = maxHeight
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(title, style = HL.type.section, color = c.ink, modifier = Modifier.weight(1f))
+                    Box(Modifier.size(48.dp).clip(CircleShape).clickable(onClickLabel = "Close", role = Role.Button, onClick = onClose)
+                        .semantics { contentDescription = "Close" }, contentAlignment = Alignment.Center) {
+                        Canvas(Modifier.size(16.dp)) {
+                            val st = 2.dp.toPx()
+                            drawLine(c.ink, Offset(0f, 0f), Offset(size.width, size.height), st, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                            drawLine(c.ink, Offset(size.width, 0f), Offset(0f, size.height), st, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                        }
+                    }
+                }
+                content((fill - 140.dp).coerceAtLeast(160.dp))
+            }
+        }
+    }
+}

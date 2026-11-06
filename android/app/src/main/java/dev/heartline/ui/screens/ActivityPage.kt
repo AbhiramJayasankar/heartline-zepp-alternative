@@ -117,7 +117,7 @@ fun ActivityScreen(controller: HeartlineController, nav: Navigator) {
                 Card(padding = 14.dp) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            AreaLabel("PAI, last 7 days", c.pulse)
+                            AreaLabel("PAI, last 7 days", c.pulse, dot = false)
                             BigValue("%.0f".format(pai), "/ 100", size = 28)
                         }
                         d.paiToday?.let { Fact("Today", "+%.0f".format(it), Modifier.padding(start = 12.dp)) }
@@ -137,14 +137,14 @@ fun ActivityScreen(controller: HeartlineController, nav: Navigator) {
                     InteractiveChart(emptyList(), dayStart.toDouble(), dayStart + 86_400.0, height = 150.dp,
                         bars = listOf(ChartBars(hourly, 3600.0, move, "Steps", "", format = { "%,.0f".format(it) })),
                         readoutX = { t -> "%s–%s".format(epochClock(t - (t - dayStart) % 3600), epochClock(t - (t - dayStart) % 3600 + 3600)) },
-                        minSpan = 3 * 3600.0, idleHint = "Touch an hour for its steps.")
+                        minSpan = 3 * 3600.0, idleHint = "Touch an hour for its steps.", title = "Steps hour by hour")
                     hourly.maxByOrNull { it.v }?.let { top -> Gap(6); MutedText("Busiest hour: ${epochClock(top.t)}, ${fmtInt(top.v.roundToInt())} steps.") }
                 }
             }
             if (d != null && d.minutes.isNotEmpty()) {
                 Heading("Minute by minute")
                 Card(padding = 12.dp) {
-                    DayTimeline(d.minutes, dayStart)
+                    dev.heartline.ui.components.MinuteChart(d.minutes, dayStart, title = "Minute by minute, ${date.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.ENGLISH))}")
                     Gap(8)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         listOf("Deep" to MinuteState.SLEEP_DEEP, "Light" to MinuteState.SLEEP_LIGHT, "REM" to MinuteState.SLEEP_REM, "Active" to MinuteState.ACTIVE,
@@ -181,7 +181,7 @@ fun ActivityScreen(controller: HeartlineController, nav: Navigator) {
             trends.seriesOf("active")?.let { s ->
                 Gap(10)
                 Card(padding = 14.dp) {
-                    AreaLabel("Active time", c.pulse)
+                    AreaLabel("Active time", c.pulse, dot = false)
                     Gap(4)
                     DayBars(s.points, c.pulse, height = 110.dp, unit = "min", reference = 30.0, referenceLabel = "30 min a day")
                     Gap(6)

@@ -183,6 +183,7 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override fun refreshInsights() {}
     override val insightsSettings = MutableStateFlow(dev.heartline.service.InsightsSettings())
     override fun setInsightsSettings(s: dev.heartline.service.InsightsSettings) { insightsSettings.value = s }
+    override suspend fun geminiModels(): List<String> = listOf("gemini-3.8-flash", "gemini-3.8-flash-lite")
     override val alexaTools = listOf(AlexaToolUi("get_sleep", "Health data", "The night's sleep that ended on the morning of a date.", "{}"),
         AlexaToolUi("web_search", "Web", "Search the web.", "{}"), AlexaToolUi("set_timer", "Watch and Heartline actions", "Start a countdown timer on the watch.", "{}"))
     override suspend fun alexaPromptPreview(template: String) = dev.heartline.service.AssistantAi.renderPrompt(template,

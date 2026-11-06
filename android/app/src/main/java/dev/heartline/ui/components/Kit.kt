@@ -42,6 +42,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -102,10 +103,12 @@ fun Heading(text: String, modifier: Modifier = Modifier, action: String? = null,
 
 /** A small coloured label before a tile's title. */
 @Composable
-fun AreaLabel(text: String, color: Color, modifier: Modifier = Modifier) {
+fun AreaLabel(text: String, color: Color, modifier: Modifier = Modifier, dot: Boolean = true) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(8.dp).clip(CircleShape).background(color))
-        Spacer(Modifier.width(7.dp))
+        if (dot) {
+            Box(Modifier.size(8.dp).clip(CircleShape).background(color))
+            Spacer(Modifier.width(7.dp))
+        }
         Text(text, style = HL.type.label, color = HL.colors.inkSoft)
     }
 }
@@ -188,12 +191,10 @@ data class FactItem(val label: String, val value: String, val unit: String? = nu
 @Composable
 fun Note(text: String, modifier: Modifier = Modifier, color: Color = HL.colors.inkSoft, title: String? = null) {
     val c = HL.colors
-    Row(modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.wash)) {
-        Box(Modifier.width(3.dp).heightIn(min = 40.dp).background(color))
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-            if (title != null) Text(title, style = HL.type.bodyStrong.copy(fontSize = 14.sp), color = c.ink)
-            Text(text, style = HL.type.small, color = c.inkSoft)
-        }
+    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(if (color == c.inkSoft) c.wash else color.copy(alpha = 0.10f))
+        .semantics(mergeDescendants = true) {}.padding(horizontal = 14.dp, vertical = 12.dp)) {
+        if (title != null) Text(title, style = HL.type.bodyStrong.copy(fontSize = 14.sp), color = if (color == c.inkSoft) c.ink else color)
+        Text(text, style = HL.type.small, color = c.inkSoft)
     }
 }
 
@@ -245,7 +246,8 @@ fun DayBars(points: List<DayPoint>, color: Color, modifier: Modifier = Modifier,
             }
         }
         Canvas(Modifier.fillMaxWidth().height(height).semantics { contentDescription = spoken }
-            .pointerInput(points) { detectTapGestures { o -> picked = ((o.x / size.width) * points.size).toInt().coerceIn(0, points.lastIndex) } }) {
+            .pointerInput(points) { detectTapGestures { o -> val i = ((o.x / size.width) * points.size).toInt().coerceIn(0, points.lastIndex); picked = if (picked == i) null else i } }
+            .pointerInput(points) { detectHorizontalDragGestures { ch, _ -> picked = ((ch.position.x / size.width) * points.size).toInt().coerceIn(0, points.lastIndex); ch.consume() } }) {
             if (points.isEmpty()) return@Canvas
             val padB = 18.dp.toPx(); val plotH = size.height - padB - 4.dp.toPx()
             val vals = valid + listOfNotNull(reference)
@@ -317,16 +319,27 @@ fun Hypnogram(minutes: List<MinuteUi>, start: Long, end: Long, modifier: Modifie
     }
 }
 
-/** Stage share against the usual adult range: a bar of the share with the range marked behind it. */
+/**
+ * A share against its typical range on a 0-100% track: the typical range is the tinted stretch with end ticks, your
+ * value the dot. [scale] is the track's top value (a stage never takes the whole night, so 0-80% reads better).
+ */
 @Composable
-fun RangeBar(fraction: Float, low: Float, high: Float, color: Color, modifier: Modifier = Modifier) {
+fun RangeBar(fraction: Float, low: Float, high: Float, color: Color, modifier: Modifier = Modifier, scale: Float = 0.8f) {
     val c = HL.colors
-    Canvas(modifier.fillMaxWidth().height(10.dp)) {
-        val r = CornerRadius(size.height / 2)
-        drawRoundRect(c.line, size = size, cornerRadius = r)
-        drawRoundRect(c.ok.copy(alpha = 0.25f), Offset(size.width * low, 0f), Size(size.width * (high - low), size.height), r)
-        drawRoundRect(color, size = Size(size.width * fraction.coerceIn(0f, 1f), size.height), cornerRadius = r)
+    Canvas(modifier.fillMaxWidth().height(18.dp)) {
+        val h = 6.dp.toPx(); val cy = size.height / 2
+        fun x(f: Float) = (f / scale).coerceIn(0f, 1f) * (size.width - h) + h / 2
+        drawRoundRect(c.line, Offset(0f, cy - h / 2), Size(size.width, h), CornerRadius(h / 2))
+        drawRoundRect(color.copy(alpha = 0.35f), Offset(x(low), cy - h / 2), Size(x(high) - x(low), h), CornerRadius(h / 2))
+        listOf(low, high).forEach { f -> drawLine(color.copy(alpha = 0.8f), Offset(x(f), cy - h), Offset(x(f), cy + h), 1.5.dp.toPx()) }
+        drawCircle(c.surface, 7.dp.toPx(), Offset(x(fraction), cy))
+        drawCircle(color, 5.dp.toPx(), Offset(x(fraction), cy))
     }
+}
+
+/** Where a share sits against its typical range, in words. */
+fun rangeWord(fraction: Float, low: Float, high: Float): String = when {
+    fraction < low -> "below typical"; fraction > high -> "above typical"; else -> "in the typical range"
 }
 
 /** Minutes as "7h 05m" for headlines. */

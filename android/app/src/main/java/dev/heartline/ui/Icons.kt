@@ -94,9 +94,9 @@ object Icons {
         moveTo(4f, 10f); lineTo(20f, 10f); moveTo(8f, 3.5f); lineTo(8f, 7.5f); moveTo(16f, 3.5f); lineTo(16f, 7.5f)
     }
     val music = icon("music") {
-        moveTo(9f, 17.5f); arcTo(2.5f, 2.5f, 0f, true, true, 8.99f, 17.5f)
-        moveTo(11.5f, 17.5f); lineTo(11.5f, 4.5f); lineTo(19f, 3f); lineTo(19f, 15f)
-        moveTo(19f, 15f); arcTo(2.5f, 2.5f, 0f, true, true, 18.99f, 15f)
+        moveTo(13f, 17f); arcTo(3f, 3f, 0f, true, true, 12.99f, 17f)
+        moveTo(13f, 17f); lineTo(13f, 3.5f)
+        moveTo(13f, 3.5f); arcTo(5f, 5f, 0f, false, false, 18f, 8.5f)
     }
     val mic = icon("mic") {
         moveTo(9f, 6f); arcTo(3f, 3f, 0f, false, true, 15f, 6f); lineTo(15f, 11f); arcTo(3f, 3f, 0f, false, true, 9f, 11f); close()

@@ -57,7 +57,8 @@ fun WatchMenuScreen(controller: HeartlineController, nav: Navigator) {
         controller.setWatchMenu(apps.toMutableList().also { it[i] = apps[j]; it[j] = apps[i] })
     }
     Screen("Watch apps", onBack = { nav.pop() },
-        subtitle = "Pick the apps your watch lists, and their order, then send the list. Apps below More open from the watch's More screen. Apps your watch doesn't have are skipped.") {
+        subtitle = "Pick the apps your watch lists, and their order, then send the list. Apps below More open from the watch's More screen.",
+        icon = dev.heartline.ui.Icons.grid, tint = c.ink) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             PillButton("Send to watch", { controller.sendWatchMenu() }, enabled = connected)
             Spacer(Modifier.width(12.dp))
@@ -69,9 +70,9 @@ fun WatchMenuScreen(controller: HeartlineController, nav: Navigator) {
             Text("Nothing is below More, so the watch hides its More screen. Move apps below it, or use Put the rest under More.", style = HL.type.small, color = c.warn)
             Gap(8)
         }
-        apps.forEachIndexed { i, a ->
+        NavGroup { apps.forEachIndexed { i, a ->
             if (a.key == "more" && a.shown) {
-                Gap(10); Text("Inside More", style = HL.type.label, color = c.inkSoft); Gap(2)
+                Gap(10); Text("Inside More", style = HL.type.label, color = c.pulse); Gap(2)
             }
             Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Switch(a.shown, { on -> controller.setWatchMenu(apps.map { if (it.key == a.key) it.copy(shown = on) else it }) },
@@ -82,7 +83,7 @@ fun WatchMenuScreen(controller: HeartlineController, nav: Navigator) {
                 IconButton({ move(i, 1) }, enabled = i < apps.lastIndex) { Icon(Icons.chevron, "Move ${a.label} down", Modifier.size(18.dp).rotate(90f), tint = c.inkSoft) }
             }
             HorizontalDivider(color = c.line)
-        }
+        } }
         Gap(16)
         PillButton("Put the rest under More", {
             // Shown apps stay on the main list in their order; More follows, then every other app inside it.
@@ -106,9 +107,10 @@ fun VibrationScreen(controller: HeartlineController, nav: Navigator) {
     val conn by controller.connection.collectAsStateWithLifecycle()
     val connected = conn.state == LinkState.CONNECTED
     Screen("Vibration patterns", onBack = { nav.pop() },
-        subtitle = "How the watch buzzes for each kind of alert. Picking a pattern or count sets it on the watch; Try buzzes it once. On the GTR 2e the count is what you feel; the patterns themselves buzz alike.") {
-        if (!connected) { MutedText("Connect the watch to try or set patterns."); Gap(8) }
-        list.forEach { v ->
+        subtitle = "How the watch buzzes for each kind of alert. On the GTR 2e the count is what you feel; the patterns themselves buzz alike.",
+        icon = dev.heartline.ui.Icons.vibrate, tint = c.ink) {
+        if (!connected) { dev.heartline.ui.components.Note("Connect the watch to try or set patterns."); Gap(8) }
+        NavGroup { list.forEach { v ->
             val profile = v.profile ?: "short"
             var open by remember { mutableStateOf(false) }
             // Choosing a pattern or a count sets it on the watch straight away; Try only buzzes.
@@ -133,7 +135,7 @@ fun VibrationScreen(controller: HeartlineController, nav: Navigator) {
                 Segmented(listOf(1 to "×1", 2 to "×2", 3 to "×3", 5 to "×5"), v.repeat, { if (connected) set(profile, it) })
             }
             Gap(14); HorizontalDivider(color = c.line)
-        }
+        } }
     }
 }
 

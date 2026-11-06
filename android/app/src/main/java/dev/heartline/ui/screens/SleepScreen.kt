@@ -114,7 +114,7 @@ fun SleepScreen(controller: HeartlineController, nav: Navigator) {
             scoreSeries?.takeIf { it.points.any { p -> p.value != null } }?.let { s ->
                 Gap(10)
                 Card(padding = 14.dp) {
-                    AreaLabel("Sleep score", c.hue(Area.SLEEP))
+                    AreaLabel("Sleep score", c.hue(Area.SLEEP), dot = false)
                     Gap(4)
                     DayBars(s.points, c.hue(Area.SLEEP), line = true, height = 110.dp, unit = "", format = { "%.0f".format(it) })
                 }
@@ -149,7 +149,7 @@ private fun NightDetail(n: SleepNightUi, minutes: List<dev.heartline.app.MinuteU
     Card {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f).semantics(mergeDescendants = true) {}) {
-                AreaLabel("Asleep", c.hue(Area.SLEEP))
+                AreaLabel("Asleep", c.hue(Area.SLEEP), dot = false)
                 BigValue(hm(asleep), size = 40)
                 Text("${timeOf(n.start)} → ${timeOf(n.end)}", style = HL.type.bodyStrong, color = c.ink)
                 Text("${hm(inBed)} in bed · ${if (inBed > 0) 100 * asleep / inBed else 0}% asleep", style = HL.type.small, color = c.inkSoft)
@@ -172,7 +172,7 @@ private fun NightDetail(n: SleepNightUi, minutes: List<dev.heartline.app.MinuteU
     Gap(10)
     // ---- Stages ----
     Card(padding = 14.dp) {
-        AreaLabel("Stages through the night", c.hue(Area.SLEEP))
+        AreaLabel("Stages through the night", c.hue(Area.SLEEP), dot = false)
         Gap(8)
         Hypnogram(minutes, n.start, n.end)
         Gap(12)
@@ -194,7 +194,9 @@ private fun NightDetail(n: SleepNightUi, minutes: List<dev.heartline.app.MinuteU
                 }
                 Gap(4)
                 RangeBar(share, s.low, s.high, s.color)
-                Text("Typical ${(s.low * 100).roundToInt()}–${(s.high * 100).roundToInt()}%. ${s.about}", style = HL.type.small.copy(fontSize = 12.sp), color = c.inkSoft, modifier = Modifier.padding(top = 3.dp))
+                val word = dev.heartline.ui.components.rangeWord(share, s.low, s.high)
+                Text("${word.replaceFirstChar { it.uppercase() }} (${(s.low * 100).roundToInt()}–${(s.high * 100).roundToInt()}% for adults, the tinted stretch). ${s.about}",
+                    style = HL.type.small.copy(fontSize = 12.sp), color = c.inkSoft, modifier = Modifier.padding(top = 3.dp))
             }
         }
     }

@@ -104,7 +104,10 @@ object SystemScreens {
 private fun CheckItem(ok: Boolean?, title: String, detail: String, action: String?, onAction: () -> Unit) {
     val c = HL.colors
     Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalAlignment = Alignment.Top) {
-        Box(Modifier.padding(top = 6.dp)) { Dot(when (ok) { true -> c.ok; false -> c.pulse; null -> c.warn }, 10.dp) }
+        val mark = when (ok) { true -> c.ok; false -> c.pulse; null -> c.warn }
+        Box(Modifier.padding(top = 2.dp).size(26.dp).clip(CircleShape).background(mark.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
+            Text(when (ok) { true -> "✓"; false -> "!"; null -> "?" }, style = HL.type.label, color = mark)
+        }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(title, style = HL.type.bodyStrong, color = c.ink)
@@ -126,7 +129,21 @@ fun KeepRunningScreen(controller: HeartlineController, nav: Navigator) {
     var linkError by remember { mutableStateOf<String?>(null) }
     val linkSheet = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { controller.refreshBackground() }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { controller.refreshBackground() }
-    Screen("Keep running", onBack = { nav.pop() }, subtitle = "Heartline has to stay connected while the screen is off to sync, forward notifications and ring the phone. Phones shut background apps down unless you allow them.") {
+    val checks = listOf(bg.batteryUnrestricted, bg.companionLinked, bg.notificationAccess, bg.postNotifications, bg.bluetoothOn)
+    val ready = checks.count { it }
+    Screen("Keep running", onBack = { nav.pop() }, subtitle = "Heartline has to stay connected while the screen is off to sync, forward notifications and ring the phone. Phones shut background apps down unless you allow them.",
+        icon = dev.heartline.ui.Icons.battery, tint = if (ready == checks.size) HL.colors.ok else HL.colors.warn) {
+        dev.heartline.ui.components.Card(padding = 16.dp) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                dev.heartline.ui.components.BigValue("$ready of ${checks.size}", size = 30, modifier = Modifier.weight(1f))
+                dev.heartline.ui.components.Delta(if (ready == checks.size) "All set" else "${checks.size - ready} to fix", ready == checks.size)
+            }
+            Text("checks pass", style = HL.type.small, color = HL.colors.inkSoft)
+            Gap(10)
+            dev.heartline.ui.components.Meter(ready / checks.size.toFloat(), if (ready == checks.size) HL.colors.ok else HL.colors.warn, description = "$ready of ${checks.size} checks pass")
+        }
+        Gap(14)
+        NavGroup {
         CheckItem(
             bg.batteryUnrestricted, "Battery: unrestricted",
             if (bg.batteryUnrestricted) "Android won't pause Heartline to save battery." else "Android pauses Heartline when the screen is off. Allow it to run unrestricted.",
@@ -162,6 +179,7 @@ fun KeepRunningScreen(controller: HeartlineController, nav: Navigator) {
         ) { SystemScreens.notificationAccess(ctx) }
         CheckItem(bg.postNotifications, "Heartline's own notification", if (bg.postNotifications) "The small connection notification keeps the service alive." else "Without it Android may stop the connection service.", if (bg.postNotifications) null else "Open app settings") { SystemScreens.appDetails(ctx) }
         CheckItem(bg.bluetoothOn, "Bluetooth", if (bg.bluetoothOn) "On." else "Turn Bluetooth on so Heartline can reach the watch.", null) {}
+        }
     }
 }
 
@@ -203,7 +221,9 @@ fun WeatherScreen(controller: HeartlineController, nav: Navigator) {
     val followsPhone = w.useLocation && located
     // While this screen is open Android gives Heartline the location even without "all the time": update it now.
     LaunchedEffect(followsPhone) { if (followsPhone && w.enabled) controller.refreshWeather() }
-    Screen("Weather", onBack = { nav.pop() }, subtitle = "The watch's weather app and widgets, kept up to date every hour while connected.") {
+    Screen("Weather", onBack = { nav.pop() }, subtitle = "The watch's weather app and widgets, kept up to date every hour while connected.",
+        icon = dev.heartline.ui.Icons.cloud, tint = c.oxygen) {
+        NavGroup {
         ToggleRow("Use this phone's location", when {
             !located -> "Needs location access (approximate is enough)"
             followsPhone -> w.place?.let { "Now ${it.name}" } ?: "Finding the phone…"
@@ -215,9 +235,11 @@ fun WeatherScreen(controller: HeartlineController, nav: Navigator) {
             PillButton("Allow all the time", { askAlways.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) }, style = ButtonStyle.QUIET)
             Gap(8)
         }
+        HorizontalDivider(color = c.line)
         ToggleRow("Show weather on the watch", w.place?.let { "${it.name}${it.region?.let { r -> ", $r" } ?: ""}" } ?: "Pick a place first", w.enabled,
             enabled = w.place != null || followsPhone) { controller.setWeather(it, null) }
-        Gap(8)
+        }
+        Gap(14)
         if (w.place != null && !searching) {
             Panel {
                 Row(verticalAlignment = Alignment.Bottom) {
@@ -273,9 +295,10 @@ fun AlarmsScreen(controller: HeartlineController, nav: Navigator) {
     val alarms by controller.alarms.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<AlarmUi?>(null) }
     val free = (0 until ALARM_SLOTS).firstOrNull { s -> alarms.none { it.slot == s } }
-    Screen("Alarms", onBack = { nav.pop() }, subtitle = "The watch wakes you with a vibration. Heartline writes alarms to the watch whenever it's connected.") {
-        if (alarms.isEmpty()) MutedText("No alarms yet.")
-        alarms.forEach { a ->
+    Screen("Alarms", onBack = { nav.pop() }, subtitle = "The watch wakes you with a vibration. Heartline writes alarms to the watch whenever it's connected.",
+        icon = dev.heartline.ui.Icons.alarm, tint = c.warn) {
+        if (alarms.isEmpty()) dev.heartline.ui.components.Note("No alarms yet. Add one below; it's written to the watch the next time it's connected.")
+        if (alarms.isNotEmpty()) NavGroup { alarms.forEach { a ->
             Row(Modifier.fillMaxWidth().clickable { editing = a }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("%02d:%02d".format(a.hour, a.minute), style = HL.type.stat.copy(fontSize = 34.sp), color = if (a.enabled) c.ink else c.inkSoft)
@@ -288,7 +311,7 @@ fun AlarmsScreen(controller: HeartlineController, nav: Navigator) {
                 )
             }
             HorizontalDivider(color = c.line)
-        }
+        } }
         Gap(16)
         PillButton(if (free == null) "All $ALARM_SLOTS alarm slots are used" else "Add alarm", { free?.let { editing = AlarmUi(it, true, 7, 0, week.take(5).toSet()) } }, enabled = free != null)
     }
@@ -347,7 +370,8 @@ fun RemindersScreen(controller: HeartlineController, nav: Navigator) {
         controller.setReminderSync(granted, r.selected)
     }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { controller.refreshBackground() }
-    Screen("Calendar", onBack = { nav.pop() }, subtitle = "Your next events appear on the watch with a reminder vibration.") {
+    Screen("Calendar", onBack = { nav.pop() }, subtitle = "Your next events appear on the watch with a reminder vibration.",
+        icon = dev.heartline.ui.Icons.calendar, tint = c.sleepDeep) {
         if (!r.permission) {
             Panel {
                 Text("Heartline needs to read your calendar", style = HL.type.bodyStrong, color = c.ink)
@@ -357,13 +381,12 @@ fun RemindersScreen(controller: HeartlineController, nav: Navigator) {
             }
             return@Screen
         }
-        ToggleRow("Send events to the watch", "Up to ${r.maxSlots} events from the next 14 days", r.enabled) { controller.setReminderSync(it, r.selected) }
-        Gap(12)
+        NavGroup { ToggleRow("Send events to the watch", "Up to ${r.maxSlots} events from the next 14 days", r.enabled) { controller.setReminderSync(it, r.selected) } }
+        Gap(20)
         SectionTitle("Calendars")
-        Gap(4)
         if (r.calendars.isEmpty()) MutedText("No calendars on this phone.")
         else if (r.enabled && r.selected.isEmpty()) Text("Tick at least one calendar to send its events.", style = HL.type.small, color = c.pulse)
-        r.calendars.forEach { cal ->
+        if (r.calendars.isNotEmpty()) NavGroup { r.calendars.forEach { cal ->
             val on = cal.id in r.selected
             Row(Modifier.fillMaxWidth().clickable { controller.setReminderSync(r.enabled, if (on) r.selected - cal.id else r.selected + cal.id) }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(on, { controller.setReminderSync(r.enabled, if (on) r.selected - cal.id else r.selected + cal.id) }, colors = CheckboxDefaults.colors(checkedColor = c.ink))
@@ -373,18 +396,17 @@ fun RemindersScreen(controller: HeartlineController, nav: Navigator) {
                     cal.account?.takeIf { it != "account_name_local" && it != cal.name }?.let { MutedText(it) }
                 }
             }
-        }
+        } }
         Gap(20)
         SectionTitle("Coming up on the watch")
-        Gap(4)
         if (!r.enabled || r.upcoming.isEmpty()) MutedText(when { !r.enabled -> "Turn on sending to see what goes to the watch."; r.selected.isEmpty() -> "No calendars ticked."; else -> "Nothing in the next 14 days." })
-        else r.upcoming.forEach { e ->
-            Row(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
+        else NavGroup { r.upcoming.forEach { e ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(e.title, style = HL.type.body, color = c.ink, modifier = Modifier.weight(1f))
                 MutedText(dateTimeOf(e.start))
             }
             HorizontalDivider(color = c.line)
-        }
+        } }
         r.lastSync?.let { Gap(10); MutedText("Last sent to the watch ${agoOf(it)}.") }
     }
 }
@@ -395,9 +417,10 @@ fun PhoneLinkScreen(controller: HeartlineController, nav: Navigator) {
     val ctx = LocalContext.current
     val p by controller.phoneLink.collectAsStateWithLifecycle()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { controller.refreshBackground() }
-    Screen("Music and find phone", onBack = { nav.pop() }, subtitle = "Control what's playing from your wrist, and make a lost phone ring from the watch.") {
+    Screen("Music and find phone", onBack = { nav.pop() }, subtitle = "Control what's playing from your wrist, and make a lost phone ring from the watch.",
+        icon = dev.heartline.ui.Icons.music, tint = c.ok) {
         SectionTitle("Music")
-        ToggleRow("Control music from the watch", p.nowPlaying?.let { "Playing: $it" } ?: "Play, pause, skip and volume for whatever is playing on this phone.", p.musicEnabled) { controller.setMusicControl(it) }
+        NavGroup { ToggleRow("Control music from the watch", p.nowPlaying?.let { "Playing: $it" } ?: "Play, pause, skip and volume for whatever is playing on this phone.", p.musicEnabled) { controller.setMusicControl(it) } }
         if (p.musicEnabled && !p.musicAccess) {
             Gap(4)
             MutedText("Music control needs notification access, the same permission notification forwarding uses.")
@@ -406,8 +429,11 @@ fun PhoneLinkScreen(controller: HeartlineController, nav: Navigator) {
         }
         Gap(24)
         SectionTitle("Find phone")
-        Gap(4)
-        MutedText("Start Find phone on the watch and this phone rings at alarm volume, even when it's on silent, for up to a minute.")
+        Gap(8)
+        dev.heartline.ui.components.Card(padding = 16.dp) {
+            Text(if (p.findPhoneRinging) "Ringing now" else "Ready", style = HL.type.bodyStrong, color = if (p.findPhoneRinging) c.pulse else c.ink)
+            MutedText("Start Find phone on the watch and this phone rings at alarm volume, even when it's on silent, for up to a minute.")
+        }
         Gap(12)
         if (p.findPhoneRinging) PillButton("Stop ringing", { controller.stopFindPhone() }, Modifier.fillMaxWidth(), style = ButtonStyle.PULSE)
     }
@@ -440,7 +466,19 @@ fun HealthConnectScreen(controller: HeartlineController, nav: Navigator) {
         controller.refreshBackground(); if (granted.isNotEmpty()) controller.setHealthConnect(true)
     }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { controller.refreshBackground() }
-    Screen("Health Connect", onBack = { nav.pop() }, subtitle = "Share your heart rate, sleep, steps, SpO2, workouts and HRV with apps that read from Health Connect. Heartline only writes; it never reads other apps' data.") {
+    Screen("Health Connect", onBack = { nav.pop() }, subtitle = "Share your data with apps that read from Health Connect. Heartline only writes; it never reads other apps' data.",
+        icon = dev.heartline.ui.Icons.share, tint = HL.colors.ok) {
+        dev.heartline.ui.components.Card(padding = 16.dp) {
+            Text("What Heartline writes", style = HL.type.label, color = HL.colors.inkSoft)
+            Gap(8)
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("Heart rate", "Resting heart rate", "HRV", "Steps", "Distance", "Calories", "Sleep stages", "SpO2", "Breathing rate", "Skin temperature", "Workouts").forEach { t ->
+                    Box(Modifier.clip(RoundedCornerShape(50)).background(HL.colors.wash).padding(horizontal = 10.dp, vertical = 5.dp)) { Text(t, style = HL.type.small.copy(fontSize = 12.sp), color = HL.colors.ink) }
+                }
+            }
+            hc.lastExport?.let { Gap(10); MutedText("Last written ${agoOf(it)}" + (hc.lastResult?.let { r -> ": $r" } ?: "")) }
+        }
+        Gap(14)
         when (hc.status) {
             dev.heartline.app.HealthConnectStatus.UNAVAILABLE -> MutedText("Health Connect isn't available on this phone.")
             dev.heartline.app.HealthConnectStatus.NEEDS_INSTALL -> {

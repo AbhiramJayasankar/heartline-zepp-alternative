@@ -224,7 +224,7 @@ fun OverviewScreen(controller: HeartlineController, nav: Navigator, onTab: (Tab)
             if (d != null && d.minutes.isNotEmpty()) {
                 Heading("Through the day", action = "Open", onAction = { onTab(Tab.ACTIVITY) })
                 Card(padding = 12.dp) {
-                    DayTimeline(d.minutes, rememberDayStart(date.toEpochDay()))
+                    dev.heartline.ui.components.MinuteChart(d.minutes, rememberDayStart(date.toEpochDay()), height = 170.dp, title = "Today, minute by minute")
                     Gap(8)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         listOf("Asleep" to MinuteState.SLEEP_LIGHT, "Active" to MinuteState.ACTIVE, "Still" to MinuteState.IDLE, "Charging" to MinuteState.CHARGING).forEach { (l, s) ->
@@ -234,8 +234,6 @@ fun OverviewScreen(controller: HeartlineController, nav: Navigator, onTab: (Tab)
                             }
                         }
                     }
-                    Gap(4)
-                    MutedText("Top band: what you were doing. Bars: steps each minute. Line: heart rate.")
                 }
             }
 

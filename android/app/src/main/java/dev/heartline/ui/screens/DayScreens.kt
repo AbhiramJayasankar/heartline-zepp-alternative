@@ -115,7 +115,8 @@ private fun Stats(items: List<Triple<String, String, String?>>) {
 @Composable
 private fun ChartPanel(title: String, content: @Composable () -> Unit) {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(HL.colors.surface).paper().border(1.dp, HL.colors.line, RoundedCornerShape(18.dp)).padding(12.dp)) {
-        Text(title, style = HL.type.label, color = HL.colors.inkSoft); Gap(6); content()
+        Text(title, style = HL.type.label, color = HL.colors.inkSoft); Gap(6)
+        androidx.compose.runtime.CompositionLocalProvider(dev.heartline.ui.components.LocalChartTitle provides title) { content() }
     }
 }
 

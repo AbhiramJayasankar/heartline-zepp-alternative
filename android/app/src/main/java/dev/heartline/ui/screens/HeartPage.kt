@@ -107,11 +107,17 @@ fun HeartScreen(controller: HeartlineController, nav: Navigator) {
         }
 
         Column(Modifier.padding(horizontal = Gutter)) {
+            // ---- The day ----
+            Heading("Through the day")
+            DateStepper(if (date == today) "Today" else if (date == today.minusDays(1)) "Yesterday" else date.format(DateTimeFormatter.ofPattern("EEEE", Locale.ENGLISH)),
+                date.format(DateTimeFormatter.ofPattern("d MMMM", Locale.ENGLISH)), onPrev = { epochDay-- }, onNext = { epochDay++ }, nextEnabled = date < today)
+            Gap(14)
+            day?.let { HeartDay(it, nav) } ?: MutedText("Loading…")
             // ---- Two weeks ----
             val rhr = trends.seriesOf("rhr")
             val hrv = trends.seriesOf("hrv")
             if (rhr != null) {
-                Heading("Resting heart rate", action = "Trend", onAction = { nav.push(Route.Trend("rhr")) })
+                Heading("Resting heart rate, 2 weeks", action = "Trend", onAction = { nav.push(Route.Trend("rhr")) })
                 Card(padding = 14.dp) {
                     val latest = rhr.points.lastOrNull { it.value != null }?.value
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -130,7 +136,7 @@ fun HeartScreen(controller: HeartlineController, nav: Navigator) {
             if (hrv != null && hrv.points.any { it.value != null }) {
                 Gap(10)
                 Card(padding = 14.dp) {
-                    AreaLabel("Heart rate variability (from heart checks)", c.ok)
+                    AreaLabel("Heart rate variability (from heart checks)", c.ok, dot = false)
                     Gap(4)
                     DayBars(hrv.points, c.ok, line = true, height = 110.dp, reference = hrv.baseline, referenceLabel = hrv.baseline?.let { "your usual, ${it.roundToInt()} ms" }, unit = "ms")
                     Gap(6)
@@ -138,12 +144,6 @@ fun HeartScreen(controller: HeartlineController, nav: Navigator) {
                 }
             }
 
-            // ---- The day ----
-            Heading("Day in detail")
-            DateStepper(if (date == today) "Today" else if (date == today.minusDays(1)) "Yesterday" else date.format(DateTimeFormatter.ofPattern("EEEE", Locale.ENGLISH)),
-                date.format(DateTimeFormatter.ofPattern("d MMMM", Locale.ENGLISH)), onPrev = { epochDay-- }, onNext = { epochDay++ }, nextEnabled = date < today)
-            Gap(14)
-            day?.let { HeartDay(it, nav) } ?: MutedText("Loading…")
 
             // ---- Heart check ----
             Heading("Heart check")

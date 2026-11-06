@@ -11,7 +11,18 @@ import java.net.URI
  * One-shot text generation with the Gemini API (generateContent) and the owner's AI Studio key, the same key the
  * Alexa button's speech uses. [post] is replaceable for tests.
  */
-class GeminiText(private val post: suspend (url: String, headers: Map<String, String>, body: String) -> String = ::httpPost) {
+class GeminiText(private val post: suspend (url: String, headers: Map<String, String>, body: String) -> String = ::httpPost,
+                 private val get: suspend (url: String, headers: Map<String, String>) -> String = ::httpGet) {
+    /** The text models this key can use (generateContent), newest names first. */
+    suspend fun listModels(key: String): List<String> {
+        check(key.isNotBlank()) { "no Gemini key saved" }
+        val o = JSONObject(get("$BASE?pageSize=200", mapOf("x-goog-api-key" to key)))
+        val models = o.optJSONArray("models") ?: JSONArray()
+        return (0 until models.length()).mapNotNull { models.optJSONObject(it) }
+            .filter { m -> m.optJSONArray("supportedGenerationMethods")?.let { a -> (0 until a.length()).any { a.optString(it) == "generateContent" } } == true }
+            .map { it.optString("name").removePrefix("models/") }.filter { it.isNotEmpty() }.sortedDescending()
+    }
+
     class Reply(val text: String, val model: String, val promptTokens: Int?, val outputTokens: Int?)
 
     suspend fun generate(key: String, model: String, system: String, user: String, json: Boolean = true, temperature: Double = 0.4,
@@ -40,6 +51,18 @@ class GeminiText(private val post: suspend (url: String, headers: Map<String, St
         /** The smartest free text model on the owner's AI Studio plan (2026-11: 5 requests a minute, 20 a day). */
         const val DEFAULT_MODEL = "gemini-3.8-flash"
         const val TIMEOUT_MS = 120_000
+
+        suspend fun httpGet(url: String, headers: Map<String, String>): String = withContext(Dispatchers.IO) {
+            val c = URI(url).toURL().openConnection() as HttpURLConnection
+            try {
+                c.connectTimeout = 10_000; c.readTimeout = 30_000
+                headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
+                val code = c.responseCode
+                val text = (if (code in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
+                if (code !in 200..299) error("Gemini $code: " + (runCatching { JSONObject(text).getJSONObject("error").getString("message") }.getOrNull() ?: text.take(200)))
+                text
+            } finally { c.disconnect() }
+        }
 
         suspend fun httpPost(url: String, headers: Map<String, String>, body: String): String = withContext(Dispatchers.IO) {
             val c = URI(url).toURL().openConnection() as HttpURLConnection

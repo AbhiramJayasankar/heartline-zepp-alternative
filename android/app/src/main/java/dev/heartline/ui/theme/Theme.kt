@@ -13,6 +13,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.heartline.R
 
@@ -167,6 +168,9 @@ fun HeartlineTheme(mode: ThemeMode = ThemeMode.SYSTEM, content: @Composable () -
         )
     }
     CompositionLocalProvider(LocalPalette provides p, LocalType provides HeartlineType()) {
-        MaterialTheme(colorScheme = scheme, content = content)
+        MaterialTheme(colorScheme = scheme, shapes = androidx.compose.material3.Shapes(
+            extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(14.dp), small = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+            medium = androidx.compose.foundation.shape.RoundedCornerShape(18.dp), large = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
+            extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(28.dp)), content = content)
     }
 }
