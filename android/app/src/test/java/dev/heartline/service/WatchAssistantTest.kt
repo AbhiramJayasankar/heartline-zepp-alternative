@@ -33,12 +33,20 @@ class WatchAssistantTest {
     private var brain: () -> String = { """{"action":"answer","reply":"Hi."}""" }
     private var lastSystem = ""
     private var key = "sk-test"
+    private var health: String? = "Readiness: 62 out of 100\nLast night's sleep: 01:10 to 08:40, 7 h 5 min asleep"
+    private val did = ArrayList<String>()
+    private var running: String? = null
+    private val actions = object : AssistantActions {
+        override fun startWorkout(label: String, minutes: Int) { check(running == null) { "A workout capture is already running" }; running = label; did += "start $label $minutes" }
+        override fun stopWorkout(): String? = running?.let { did += "stop"; running = null; "$it after 12 min" }
+        override fun sync() { did += "sync" }
+    }
     private fun assistant() = WatchAssistant(
         AssistantAi { _, _, body ->
             lastSystem = JSONObject(body).getJSONArray("messages").getJSONObject(0).getString("content")
             JSONObject().put("choices", JSONArray().put(JSONObject().put("message", JSONObject().put("content", brain())))).toString()
         },
-        { AssistantAiConfig(key) }, { WatchAssistant.Facts("72 bpm at 3:39 PM", 4200) }, weather, store, { now })
+        { AssistantAiConfig(key) }, { WatchAssistant.Facts("72 bpm at 3:39 PM", 4200, health = health) }, weather, store, actions, { now })
 
     @Test fun answersAreShownAsText() = runBlocking {
         brain = { """{"action":"answer","reply":"Your heart rate was 72 bpm.","follow_up":false}""" }
@@ -95,6 +103,32 @@ class WatchAssistantTest {
         val a = assistant().answer("Timer for a minute", dryRun = true)
         assertEquals("Timer set for 1 minute (sets a watch timer).", a.summary)
         assertNull(saved[WatchAssistant.ALERTS])
+    }
+
+    @Test fun healthDataIsInTheContext() = runBlocking {
+        brain = { """{"action":"answer","reply":"You slept 7 hours 5 minutes."}""" }
+        assertEquals("You slept 7 hours 5 minutes.", assistant().answer("How did I sleep?").text)
+        assertTrue(lastSystem.contains("- Readiness: 62 out of 100\n- Last night's sleep: 01:10 to 08:40"))
+        assertTrue(lastSystem.contains("Workout capture in Heartline: not running"))
+        health = null
+        assistant().answer("How did I sleep?")
+        assertTrue(lastSystem.contains("- not available"))
+    }
+
+    @Test fun workoutCaptureStartsAndStopsByVoice() = runBlocking {
+        val a = assistant()
+        brain = { """{"action":"start_workout","label":"Gym","minutes":45}""" }
+        assertEquals("Started Gym capture for 45 minutes. Say stop my workout to end it.", a.answer("Start a gym workout for 45 minutes").text)
+        assertEquals("Couldn't do that: A workout capture is already running", a.answer("Start a gym workout").text)
+        brain = { """{"action":"stop_workout"}""" }
+        assertEquals("Stopped Gym after 12 min. Heartline is working out your sets and reps.", a.answer("Stop my workout").text)
+        assertEquals("No workout capture is running.", a.answer("Stop my workout").text)
+        brain = { """{"action":"sync"}""" }
+        assertEquals("Syncing the watch now.", a.answer("Sync my watch").text)
+        assertEquals(listOf("start Gym 45", "stop", "sync"), did)
+        brain = { """{"action":"start_workout","label":"Run"}""" }
+        assertTrue(a.answer("Start a run", dryRun = true).summary.contains("(starts Heartline's workout capture)"))
+        assertEquals(listOf("start Gym 45", "stop", "sync"), did)
     }
 
     @Test fun weatherIsARealCard() = runBlocking {

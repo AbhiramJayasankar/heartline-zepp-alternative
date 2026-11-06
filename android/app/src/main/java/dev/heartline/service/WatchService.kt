@@ -38,7 +38,14 @@ class WatchService : Service() {
         calls = CallForwarder(this, scope, app.settings, watch)
         agenda = WatchAgendaSync(this, scope, app.db, watch)
         scope.launch(kotlinx.coroutines.Dispatchers.IO) { backfillWatchWorkouts() }
-        AlexaBridge(scope, watch, app.db, java.io.File(filesDir, "alexa"), GeminiSpeech(), watchAssistant(app.db, app.settings)).start()
+        val alexaActions = object : AssistantActions {
+            override fun startWorkout(label: String, minutes: Int) = captureRunner.start(label, minutes)
+            override fun stopWorkout(): String? = captureRunner.run.value?.let { r -> captureRunner.stop(); "${r.label} after ${r.seconds / 60} min" }
+            override fun sync() = app.realController.syncNow()
+        }
+        val workoutNow = { captureRunner.run.value?.let { r -> "${r.label}, ${r.seconds / 60} of ${r.plannedS / 60} minutes" + (r.hr?.let { ", heart rate $it" } ?: "") } }
+        AlexaBridge(scope, watch, app.db, java.io.File(filesDir, "alexa"), GeminiSpeech(),
+            watchAssistant(this, app.db, app.settings, app.realController, alexaActions, workoutNow)).start()
         // The offline Vosk model unpacked by older versions (about 70 MB).
         scope.launch(Dispatchers.IO) { java.io.File(filesDir, "vosk-en").takeIf { it.exists() }?.deleteRecursively() }
         val manager = getSystemService(NotificationManager::class.java)

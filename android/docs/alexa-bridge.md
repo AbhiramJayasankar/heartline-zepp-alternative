@@ -57,17 +57,23 @@ formatting (numbers and times as digits) and automatic activity detection off, t
 ## Answers: OpenRouter
 
 `AssistantAi.kt` sends what Gemini heard to the owner's OpenRouter model (default `google/gemma-4-31b-it:free`, then
-`openrouter/free`) with the time, latest heart rate, today's steps, the Open-Meteo forecast for the place chosen in
-Heartline's weather settings, the alarms, timers and reminders set by voice (with ids) and the last six turns of the
-conversation (a 2-minute pause starts a new one). It asks for one JSON action: `answer` (text, optionally asking back,
-which reopens the mic), `timer`, `alarm`, `reminder`, `cancel` (by id), `weather` (the card) or `help` (the list).
-Reasoning is turned off for speed; a model that requires it (`Reasoning is mandatory for this endpoint`) is asked
-again with it on. `WatchAssistant.kt` carries the action out on the watch and keeps the alerts it set in
+`openrouter/free`) with the time, the latest heart rate (live or synced per-minute, whichever is newer), today's steps,
+the Open-Meteo forecast for the phone's location (or the place picked in Heartline's weather settings), the alarms,
+timers and reminders set by voice (with ids), the workout capture running, a health summary (`healthSummary` in
+`AssistantSetup.kt`: readiness and its factors, sleep score and last night's stages, strain, body battery, heart rate,
+zones, stress, SpO2, skin temperature, activity, PAI, today's workouts, VO2max and the last 7 days of each trend) and
+the last six turns of the conversation (a 2-minute pause starts a new one). Health questions are answered from that
+summary in one call, which keeps within the watch's wait. It asks for one JSON action: `answer` (text, optionally
+asking back, which reopens the mic), `timer`, `alarm`, `reminder`, `cancel` (by id), `weather` (the card), `help` (the
+list), `start_workout` / `stop_workout` (Heartline's workout capture) or `sync`. Reasoning is turned off for speed; a
+model that requires it (`Reasoning is mandatory for this endpoint`) is asked again with low-effort reasoning and 4000
+tokens. Reasoning cut off by the token limit is never taken as the answer. `WatchAssistant.kt` carries the action out on the watch and keeps the alerts it set in
 `meta["alexa_alerts"]` until they ring, so they can be cancelled by voice.
 
 There are no built-in answers. Whatever fails is shown on the watch instead: no Gemini or OpenRouter key, Gemini or
 OpenRouter errors (OpenRouter's own message, e.g. a rate limit), no words heard, or no weather. The watch waits about
-40 s on "Thinking"; Gemini plus OpenRouter usually take 3 to 6 s.
+40 s on "Thinking"; Gemini plus OpenRouter usually take 3 to 6 s. If there is no answer 34 s after the stop, the watch
+is told "Still thinking" and the answer arrives later as a watch notification (OpenRouter may take up to 90 s).
 
 Each turn is saved under `files/alexa/` (the voice messages `.bin`, 48 kHz `.wav` and the 16 kHz `-16k.wav` sent to
 Gemini); the newest 30 turns are kept. The Alexa answers screen can run the last recording or a typed question through

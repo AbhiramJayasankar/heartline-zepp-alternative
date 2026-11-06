@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.*
 
 /** Owned by the foreground service, including when the activity is absent. */
 class PhoneFeatures(private val context: Context, private val scope: CoroutineScope, private val db: HeartlineDatabase, private val watch: WatchConnection, settings: AppSettings) {
-    val weather = WatchWeatherSync(scope, db, watch, settings)
+    val weather = WatchWeatherSync(scope, db, watch, settings, dev.heartline.app.PhoneLocation(context, db))
     val phoneLink = MutableStateFlow(PhoneLinkUi())
     private val find = FindPhone(context, scope) { ringing -> phoneLink.update { it.copy(findPhoneRinging = ringing) } }
     private val music = MusicControls(context, scope, db, watch) { enabled, access, text ->

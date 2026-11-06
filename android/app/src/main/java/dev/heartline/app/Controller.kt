@@ -61,7 +61,10 @@ interface HeartlineController {
     val phoneLink: StateFlow<PhoneLinkUi>
     /** Free-text place search (Open-Meteo geocoding); empty query returns nothing. */
     suspend fun searchPlaces(query: String): List<PlaceUi>
+    /** A [place] picked here replaces the phone's location. */
     fun setWeather(enabled: Boolean, place: PlaceUi?)
+    /** Follow the phone's location (needs location permission) instead of the picked place. */
+    fun setWeatherLocation(use: Boolean)
     fun refreshWeather()
     fun setMusicControl(enabled: Boolean)
 
@@ -221,7 +224,7 @@ data class AssistantAiUi(val keyEnd: String?, val model: String)
 data class SpeechUi(val geminiKeyEnd: String?)
 
 data class WeatherUi(
-    val enabled: Boolean = false, val place: PlaceUi? = null, val tempC: Int? = null, val condition: String? = null,
+    val enabled: Boolean = false, val place: PlaceUi? = null, val useLocation: Boolean = true, val tempC: Int? = null, val condition: String? = null,
     val highC: Int? = null, val lowC: Int? = null, val updatedAt: Long? = null, val sentToWatchAt: Long? = null, val error: String? = null,
 )
 data class PhoneLinkUi(val findPhoneRinging: Boolean = false, val musicEnabled: Boolean = false, val musicAccess: Boolean = false, val nowPlaying: String? = null)

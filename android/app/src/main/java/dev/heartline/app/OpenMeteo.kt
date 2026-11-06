@@ -10,8 +10,9 @@ import java.net.URLEncoder
 import java.time.*
 import kotlin.math.roundToInt
 
-data class WeatherConfig(val enabled: Boolean = false, val place: PlaceUi? = null) {
-    fun json(): String = JSONObject().put("enabled", enabled).apply {
+/** [useLocation]: follow the phone's location ([PhoneLocation]); [place] is the picked place, used when that's off or unknown. */
+data class WeatherConfig(val enabled: Boolean = false, val place: PlaceUi? = null, val useLocation: Boolean = true) {
+    fun json(): String = JSONObject().put("enabled", enabled).put("use_location", useLocation).apply {
         place?.let { put("place", JSONObject().put("name", it.name).put("region", it.region).put("lat", it.lat).put("lon", it.lon)) }
     }.toString()
     companion object {
@@ -21,7 +22,7 @@ data class WeatherConfig(val enabled: Boolean = false, val place: PlaceUi? = nul
             val p = json.optJSONObject("place")?.let {
                 PlaceUi(it.getString("name"), it.optString("region").takeIf { s -> s.isNotBlank() && s != "null" }, it.getDouble("lat"), it.getDouble("lon"))
             }?.takeIf { validPlace(it) }
-            WeatherConfig(json.optBoolean("enabled"), p)
+            WeatherConfig(json.optBoolean("enabled"), p, json.optBoolean("use_location", true))
         }.getOrDefault(WeatherConfig())
     }
 }

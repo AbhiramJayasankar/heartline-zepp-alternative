@@ -42,6 +42,21 @@ interface AssistantStore {
     suspend fun set(key: String, value: String)
 }
 
+/** What the Alexa button can make Heartline do. Each throws with a message the watch can show when it can't. */
+interface AssistantActions {
+    fun startWorkout(label: String, minutes: Int)
+    /** The capture that was stopped, as words, or null if none was running. */
+    fun stopWorkout(): String?
+    fun sync()
+
+    /** For the app's test buttons, which never act. */
+    object None : AssistantActions {
+        override fun startWorkout(label: String, minutes: Int) = error("only the watch can start a capture")
+        override fun stopWorkout(): String? = error("only the watch can stop a capture")
+        override fun sync() = error("only the watch can sync")
+    }
+}
+
 /**
  * The Alexa button's answers: the words Gemini heard go to the OpenRouter brain ([AssistantAi]) with the clock,
  * Heartline's latest numbers, the weather and the alerts it set, and the [Ask] it returns is carried out on the
@@ -53,9 +68,14 @@ class WatchAssistant(
     private val facts: suspend (ZonedDateTime) -> Facts,
     private val weather: AssistantWeather,
     private val store: AssistantStore,
+    private val actions: AssistantActions = AssistantActions.None,
     private val now: () -> ZonedDateTime = { ZonedDateTime.now() },
 ) {
-    data class Facts(val heartRate: String? = null, val stepsToday: Int? = null)
+    /**
+     * [dataAsOf]: the time of the newest activity minute synced from the watch; [health]: Heartline's health summary,
+     * one fact per line; [workout]: the capture running now.
+     */
+    data class Facts(val heartRate: String? = null, val stepsToday: Int? = null, val dataAsOf: String? = null, val health: String? = null, val workout: String? = null)
 
     /**
      * What to send: [frames] in order (alerts, cards), then [text] as the visible reply, then 0b if [listenAgain].
@@ -79,7 +99,9 @@ class WatchAssistant(
         // The forecast is usually cached; don't hold the watch up for long if it has to be fetched.
         val forecast = withTimeoutOrNull(4_000) { runCatching { weather.latest() }.getOrNull() }
         val ask = try {
-            ai.interpret(transcript, AiContext(t, f.heartRate, f.stepsToday, forecast?.let { describe(it) }, alerts), history.toList(), config)
+            withTimeoutOrNull(AssistantAi.TIMEOUT_MS) {
+                ai.interpret(transcript, AiContext(t, f.heartRate, f.stepsToday, forecast?.let { describe(it) }, alerts, f.dataAsOf, f.health, f.workout), history.toList(), config)
+            } ?: return Answer("OpenRouter isn't working: no answer within ${AssistantAi.TIMEOUT_MS / 1000} s.")
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
             return Answer("OpenRouter isn't working: ${e.message}")
         }
@@ -128,10 +150,28 @@ class WatchAssistant(
                 Answer(null, listOf(card(w, t)), summary = "Shows the weather card: ${describe(w)}")
             }
             Ask.Help -> Answer(null, listOf(Alexa.list("Heartline", "Things to ask", listOf(
-                "What's my heart rate", "How many steps today", "Timer for 5 minutes", "Alarm at 7 am", "Remind me at 6 pm to call home",
-                "Cancel my alarm", "What's the weather", "Ask me anything").mapIndexed { i, q -> "${i + 1}" to q })), summary = "Shows the list of things to ask")
+                "How did I sleep", "What's my readiness", "How's my stress today", "What's my heart rate", "Start a gym workout",
+                "Timer for 5 minutes", "Alarm at 7 am", "Remind me at 6 pm to call home", "Cancel my alarm", "What's the weather",
+                "Ask me anything").mapIndexed { i, q -> "${i + 1}" to q })), summary = "Shows the list of things to ask")
+            is Ask.StartWorkout -> {
+                val text = "Started ${ask.label} capture for ${spoken(ask.minutes * 60)}. Say stop my workout to end it."
+                if (dryRun) return Answer(text, summary = "$text (starts Heartline's workout capture)")
+                act { actions.startWorkout(ask.label, ask.minutes) } ?: Answer(text)
+            }
+            Ask.StopWorkout -> {
+                if (dryRun) return Answer("Stopped the workout capture.", summary = "Stopped the workout capture. (stops Heartline's workout capture)")
+                var stopped: String? = null
+                act { stopped = actions.stopWorkout() } ?: Answer(stopped?.let { "Stopped $it. Heartline is working out your sets and reps." } ?: "No workout capture is running.")
+            }
+            Ask.Sync -> {
+                if (dryRun) return Answer("Syncing the watch now.", summary = "Syncing the watch now. (starts a sync)")
+                act { actions.sync() } ?: Answer("Syncing the watch now.")
+            }
         }
     }
+
+    /** Runs [block]; null when it worked, else an answer saying why it didn't. */
+    private inline fun act(block: () -> Unit): Answer? = try { block(); null } catch (e: Exception) { Answer("Couldn't do that: ${e.message}") }
 
     /** The saved alerts that haven't gone off yet. */
     private suspend fun alerts(t: ZonedDateTime): List<AlexaAlert> = runCatching {

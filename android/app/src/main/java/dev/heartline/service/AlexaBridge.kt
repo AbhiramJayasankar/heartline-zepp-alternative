@@ -10,6 +10,8 @@ import dev.heartline.protocol.SpeechEndpointer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -218,27 +220,57 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         fun snapshot() = a.copyOf(size)
     }
 
-    /** Gemini on the turn's audio, then the OpenRouter brain; the watch is on "Thinking" (it waits about 40 s). */
+    /**
+     * Gemini on the turn's audio, then the OpenRouter brain; the watch is on "Thinking". A thinking model can take
+     * longer than the ~40 s the watch waits, so at [WATCH_WAIT_MS] the watch is told the answer will come as a
+     * notification, and it does once the model finishes.
+     */
     private suspend fun respond() {
+        val stoppedAt = stopSent
         val audio = synchronized(pcm16) { pcm16.snapshot() }
         runCatching { File(folder, "$name-16k.wav").writeBytes(wav16k(audio)) }
+        val work = scope.async { understand(audio) }
+        var handedOff = false
+        try {
+            val answer = withTimeoutOrNull((WATCH_WAIT_MS - (System.currentTimeMillis() - stoppedAt)).coerceAtLeast(1)) { work.await() }
+            if (answer == null) {
+                handedOff = true
+                watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple("Still thinking. I'll send the answer as a notification."))
+                repliedAt = System.currentTimeMillis()
+                db.events.add("info", "Alexa: no answer %.1f s after the stop; it will come as a notification".format((repliedAt - stoppedAt) / 1000.0))
+                scope.launch { deliverLate(work.await(), stoppedAt) }
+                return
+            }
+            answer.frames.forEach { watch.send2021(Endpoint2021.ALEXA, it) }
+            answer.text?.let { watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple(it)) }
+            repliedAt = System.currentTimeMillis()
+            db.events.add("info", "Alexa replied %.1f s after the stop: ${answer.text ?: "(card)"}".format((repliedAt - stoppedAt) / 1000.0) + if (answer.listenAgain) "; listening again" else "")
+            if (answer.listenAgain) { delay(600); watch.send2021(Endpoint2021.ALEXA, Alexa.listenAgain) }
+        } catch (e: CancellationException) { if (!handedOff) work.cancel(); throw e }
+    }
+
+    /** What was said, and the answer to it; failures become an answer saying what went wrong. */
+    private suspend fun understand(audio: ShortArray): WatchAssistant.Answer {
         val key = SpeechConfig.parse(db.meta.get(SpeechConfig.KEY)).geminiKey
+        if (key.isBlank()) return WatchAssistant.Answer("Add a Gemini key in Heartline (Watch, Alexa answers) so I can hear you.")
         val t0 = System.currentTimeMillis()
-        val answer = if (key.isBlank()) WatchAssistant.Answer("Add a Gemini key in Heartline (Watch, Alexa answers) so I can hear you.")
-        else try {
-            val heard = gemini.transcribe(audio, key)
-            db.events.add("info", "Alexa heard (%.1f s audio, %d ms): \"${heard.text}\"".format(audio.size / 16_000.0, System.currentTimeMillis() - t0))
-            val t1 = System.currentTimeMillis()
-            assistant.answer(heard.text).also { db.events.add("info", "Alexa answer (%d ms): ${it.summary}".format(System.currentTimeMillis() - t1)) }
-        } catch (e: CancellationException) { throw e } catch (e: Exception) {
+        val heard = try { gemini.transcribe(audio, key) } catch (e: CancellationException) { throw e } catch (e: Exception) {
             db.events.add("warn", "Alexa: Gemini failed after %d ms: ${e.message}".format(System.currentTimeMillis() - t0))
-            WatchAssistant.Answer("Gemini isn't working: ${e.message}")
+            return WatchAssistant.Answer("Gemini isn't working: ${e.message}")
         }
-        answer.frames.forEach { watch.send2021(Endpoint2021.ALEXA, it) }
-        answer.text?.let { watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple(it)) }
-        repliedAt = System.currentTimeMillis()
-        db.events.add("info", "Alexa replied %.1f s after the stop: ${answer.text ?: "(card)"}".format((repliedAt - stopSent) / 1000.0) + if (answer.listenAgain) "; listening again" else "")
-        if (answer.listenAgain) { delay(600); watch.send2021(Endpoint2021.ALEXA, Alexa.listenAgain) }
+        db.events.add("info", "Alexa heard (%.1f s audio, %d ms): \"${heard.text}\"".format(audio.size / 16_000.0, System.currentTimeMillis() - t0))
+        val t1 = System.currentTimeMillis()
+        return try { assistant.answer(heard.text) } catch (e: CancellationException) { throw e } catch (e: Exception) {
+            WatchAssistant.Answer("Heartline hit an error: ${e.message}")
+        }.also { db.events.add("info", "Alexa answer (%d ms): ${it.summary}".format(System.currentTimeMillis() - t1)) }
+    }
+
+    /** An answer that came after the watch stopped waiting: alerts are still sent, and the words come as a notification. */
+    private suspend fun deliverLate(answer: WatchAssistant.Answer, stoppedAt: Long) {
+        answer.frames.forEach { runCatching { watch.send2021(Endpoint2021.ALEXA, it) } }
+        runCatching { watch.notify("Alexa", answer.text ?: answer.summary) }
+            .onFailure { db.events.add("warn", "Alexa: couldn't send the late answer: ${it.message}") }
+        db.events.add("info", "Alexa answered by notification %.1f s after the stop: ${answer.summary}".format((System.currentTimeMillis() - stoppedAt) / 1000.0))
     }
 
     private suspend fun closeDecoder() {
@@ -253,5 +285,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         val ORPHAN_STOPS = listOf("triggered (06)", "a card", "a simple reply", "an error (0f)", "end (02)")
         val STOPS = listOf("triggered (06)", "an error (0f)")
         const val KEEP_TURNS = 30
+        /** The watch shows "I didn't hear you clearly" about 40 s after the stop; answer before that or say it's coming later. */
+        const val WATCH_WAIT_MS = 34_000L
     }
 }

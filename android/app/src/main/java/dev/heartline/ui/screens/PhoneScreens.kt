@@ -190,8 +190,29 @@ fun WeatherScreen(controller: HeartlineController, nav: Navigator) {
         delay(350)
         results = runCatching { controller.searchPlaces(query.trim()) }.getOrDefault(emptyList())
     }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    fun has(permission: String) = context.checkSelfPermission(permission) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    var located by remember { mutableStateOf(has(Manifest.permission.ACCESS_COARSE_LOCATION)) }
+    var always by remember { mutableStateOf(has(Manifest.permission.ACCESS_BACKGROUND_LOCATION)) }
+    val askLocation = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> located = ok; if (ok) controller.setWeatherLocation(true) }
+    val askAlways = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { always = it }
+    val followsPhone = w.useLocation && located
+    // While this screen is open Android gives Heartline the location even without "all the time": update it now.
+    LaunchedEffect(followsPhone) { if (followsPhone && w.enabled) controller.refreshWeather() }
     Screen("Weather", onBack = { nav.pop() }, subtitle = "The watch's weather app and widgets, kept up to date every hour while connected.") {
-        ToggleRow("Show weather on the watch", w.place?.let { "${it.name}${it.region?.let { r -> ", $r" } ?: ""}" } ?: "Pick a place first", w.enabled, enabled = w.place != null) { controller.setWeather(it, null) }
+        ToggleRow("Use this phone's location", when {
+            !located -> "Needs location access (approximate is enough)"
+            followsPhone -> w.place?.let { "Now ${it.name}" } ?: "Finding the phone…"
+            else -> "Off: weather is for the place picked below"
+        }, followsPhone) { on -> if (on && !located) askLocation.launch(Manifest.permission.ACCESS_COARSE_LOCATION) else controller.setWeatherLocation(on) }
+        if (followsPhone && !always) {
+            MutedText("Android gives Heartline the location only while it's open. To keep the weather following you while it's closed, allow location all the time.")
+            Gap(8)
+            PillButton("Allow all the time", { askAlways.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) }, style = ButtonStyle.QUIET)
+            Gap(8)
+        }
+        ToggleRow("Show weather on the watch", w.place?.let { "${it.name}${it.region?.let { r -> ", $r" } ?: ""}" } ?: "Pick a place first", w.enabled,
+            enabled = w.place != null || followsPhone) { controller.setWeather(it, null) }
         Gap(8)
         if (w.place != null && !searching) {
             Panel {
@@ -209,11 +230,11 @@ fun WeatherScreen(controller: HeartlineController, nav: Navigator) {
                 Gap(12)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     PillButton("Refresh now", { controller.refreshWeather() }, style = ButtonStyle.QUIET, enabled = w.enabled)
-                    PillButton("Change place", { searching = true }, style = ButtonStyle.QUIET)
+                    PillButton(if (followsPhone) "Pick a place instead" else "Change place", { searching = true }, style = ButtonStyle.QUIET)
                 }
             }
         }
-        if (w.place == null || searching) {
+        if (searching || (w.place == null && !followsPhone)) {
             OutlinedTextField(query, { query = it.take(60) }, label = { Text("Search a city or town") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Gap(6)
             results.forEach { p ->
@@ -227,7 +248,7 @@ fun WeatherScreen(controller: HeartlineController, nav: Navigator) {
             if (searching) { Gap(8); PillButton("Cancel", { searching = false; query = "" }, style = ButtonStyle.QUIET) }
         }
         Gap(20)
-        MutedText("Forecasts come from Open-Meteo, a free weather service. Only the place you pick is sent to it: no account and no location tracking.")
+        MutedText("Forecasts come from Open-Meteo, a free weather service. Only coordinates are sent to it: the phone's approximate location, or the place you pick. No account.")
     }
 }
 

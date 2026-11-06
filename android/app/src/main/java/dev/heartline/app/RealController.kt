@@ -321,7 +321,7 @@ class RealController(
         scope.launch { db.meta.set(dev.heartline.service.SpeechConfig.KEY, dev.heartline.service.SpeechConfig(key.trim()).json()) }
     }
     /** The same assistant the watch uses; the test buttons run it as a dry run. */
-    private val testAssistant by lazy { dev.heartline.service.watchAssistant(db, settings) }
+    private val testAssistant by lazy { dev.heartline.service.watchAssistant(context, db, settings, this) }
     override suspend fun testSpeech(): String = withContext(Dispatchers.IO) {
         val wav = java.io.File(context.filesDir, "alexa").listFiles { f -> f.name.endsWith("-16k.wav") }?.maxByOrNull { it.lastModified() }
             ?: return@withContext "No Alexa recording yet: ask the watch something first."
@@ -343,6 +343,7 @@ class RealController(
     override val phoneLink = taskA.phoneLink
     override suspend fun searchPlaces(query: String): List<PlaceUi> = taskA.searchPlaces(query)
     override fun setWeather(enabled: Boolean, place: PlaceUi?) = taskA.setWeather(enabled, place)
+    override fun setWeatherLocation(use: Boolean) = taskA.setWeatherLocation(use)
     override fun refreshWeather() = taskA.refreshWeather()
     override fun setMusicControl(enabled: Boolean) = taskA.setMusicControl(enabled)
     private val customize = WatchCustomizeController(scope, db) { block -> action(block) }

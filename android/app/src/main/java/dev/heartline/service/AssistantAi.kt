@@ -29,7 +29,11 @@ data class AssistantAiConfig(val apiKey: String = "", val model: String = DEFAUL
 
 /** What the brain is told besides the words: the clock, Heartline's latest numbers, the weather and what's set on the watch. */
 data class AiContext(val now: ZonedDateTime, val heartRate: String? = null, val stepsToday: Int? = null, val weather: String? = null,
-                     val alerts: List<AlexaAlert> = emptyList())
+                     val alerts: List<AlexaAlert> = emptyList(), val dataAsOf: String? = null,
+                     /** Heartline's health summary (readiness, sleep, stress, heart rate, trends), one fact per line. */
+                     val health: String? = null,
+                     /** The workout capture running in Heartline, if any. */
+                     val workout: String? = null)
 
 /** What the user asked for, as the brain understood it; [WatchAssistant] carries it out on the watch. */
 sealed interface Ask {
@@ -43,6 +47,10 @@ sealed interface Ask {
     data class Cancel(val ids: List<Int>) : Ask
     data object Weather : Ask
     data object Help : Ask
+    /** Heartline's workout capture (sets, reps, heart rate from the watch's raw sensors). */
+    data class StartWorkout(val label: String, val minutes: Int) : Ask
+    data object StopWorkout : Ask
+    data object Sync : Ask
 }
 
 /**
@@ -64,22 +72,28 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
             .put("response_format", JSONObject().put("type", "json_object"))
         val headers = mapOf("Authorization" to "Bearer ${config.apiKey}", "Content-Type" to "application/json",
             "HTTP-Referer" to "https://github.com/AbhiramJayasankar/heartline-zepp-alternative", "X-Title" to "Heartline")
-        // Thinking is slow and can eat the token budget, so ask for none; models that must reason refuse that
-        // ("Reasoning is mandatory for this endpoint", 2026-11-06), so ask them again with reasoning left on.
+        // Thinking is slow and can eat the token budget, so ask for none. Models that must reason refuse that
+        // ("Reasoning is mandatory for this endpoint", 2026-11-06): ask them again with a little reasoning and room
+        // for it, since nemotron-3-nano reasoned through 1500 tokens without answering "ChatGPT or Claude?".
         val reply = try {
             post(URL, headers, JSONObject(body.toString()).put("reasoning", JSONObject().put("enabled", false)).toString())
         } catch (e: OpenRouterError) {
             if (!e.message.orEmpty().contains("reasoning", ignoreCase = true)) throw e
-            post(URL, headers, body.toString())
+            post(URL, headers, JSONObject(body.toString()).put("max_tokens", REASONING_MAX_TOKENS)
+                .put("reasoning", JSONObject().put("effort", "low").put("exclude", true)).toString())
         }
         val choice = runCatching { JSONObject(reply).getJSONArray("choices").getJSONObject(0) }.getOrNull()
             ?: error("no answer in OpenRouter's reply: ${reply.take(120)}")
         val message = choice.getJSONObject("message")
-        // The answer belongs in content; some models leave it empty and put the JSON at the end of their reasoning.
-        val texts = listOf("content", "reasoning").mapNotNull { k -> message.optString(k).takeIf { !message.isNull(k) && it.isNotBlank() } }
-        return texts.firstNotNullOfOrNull { toAsk(it) }
-            ?: error("${JSONObject(reply).optString("model").ifEmpty { config.model }} gave an unusable answer" +
-                " (${choice.optString("finish_reason").ifEmpty { "?" }}): ${texts.firstOrNull()?.take(100) ?: "nothing"}")
+        val model = JSONObject(reply).optString("model").ifEmpty { config.model }
+        val finish = choice.optString("finish_reason")
+        fun text(k: String) = message.optString(k).takeIf { !message.isNull(k) && it.isNotBlank() }
+        // The answer belongs in content. Some models leave it empty and end their reasoning with it, but reasoning
+        // cut off by the token limit is only thinking, never the answer.
+        return text("content")?.let { toAsk(it) }
+            ?: text("reasoning")?.takeIf { finish != "length" }?.let { toAsk(it) }
+            ?: error(if (finish == "length") "$model ran out of tokens before it answered"
+                else "$model's answer wasn't in the form Heartline asked for" + (text("content")?.let { ": ${it.take(100)}" } ?: ""))
     }
 
     /** OpenRouter answered with an error: [message] is OpenRouter's own words, with the HTTP code. */
@@ -87,27 +101,41 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
 
     companion object {
         const val URL = "https://openrouter.ai/api/v1/chat/completions"
+        const val REASONING_MAX_TOKENS = 4000
+        /**
+         * Thinking models can be slow. The watch gives up after about 40 s on "Thinking", so a slower answer is sent
+         * as a watch notification instead (see AlexaBridge); this is the limit for that.
+         */
+        const val TIMEOUT_MS = 90_000L
         private val CLOCK = DateTimeFormatter.ofPattern("EEE HH:mm", Locale.ENGLISH)
 
         fun systemPrompt(c: AiContext): String = """
             You are the voice assistant on the user's Amazfit smartwatch, answering what they say to its Alexa button.
             Now: ${c.now.format(DateTimeFormatter.ofPattern("EEEE d MMMM yyyy, HH:mm", Locale.ENGLISH))} (${c.now.zone.id}).
-            Latest heart rate: ${c.heartRate ?: "unknown"}. Steps today: ${c.stepsToday?.toString() ?: "unknown"}.
+            Latest heart rate: ${c.heartRate ?: "unknown"}. Steps today: ${c.stepsToday?.toString() ?: "unknown"}${c.dataAsOf?.let { " (watch data synced up to $it)" } ?: ""}.
             Weather: ${c.weather ?: "unknown"}.
             Alarms, timers and reminders set from the watch: ${if (c.alerts.isEmpty()) "none" else c.alerts.joinToString("; ") { "id ${it.id}: ${it.describe(c.now)}" }}.
+            Workout capture in Heartline: ${c.workout ?: "not running"}.
+            Health data from the watch, as Heartline computed it:
+            {HEALTH}
             Reply with ONLY one JSON object, no other text:
-            {"action": "answer" | "timer" | "alarm" | "reminder" | "cancel" | "weather" | "help",
+            {"action": "answer" | "timer" | "alarm" | "reminder" | "cancel" | "weather" | "help" | "start_workout" | "stop_workout" | "sync",
              "reply": string (for "answer": what the watch shows, plain text, at most 300 characters, no markdown),
              "follow_up": boolean (true when your reply asks the user something they should answer),
              "seconds": integer (timer length, or how long until a reminder),
              "time": "HH:MM" in 24-hour time (an alarm, or a reminder at a time of day),
              "label": string (what to remind them about),
-             "ids": [integers] (for "cancel": which of the listed alarms, timers and reminders)}
+             "ids": [integers] (for "cancel": which of the listed alarms, timers and reminders),
+             "minutes": integer (for "start_workout": how long to capture; 60 if they don't say)}
             Use "answer" for anything you can say in words, including the time, date, heart rate, steps, questions about the
             weather and general questions. Use "weather" only to show the weather card when they ask what the weather is like.
             Use "help" when they ask what you can do. For an alarm or reminder time without am/pm, pick the next occurrence
-            after now. If the words make no sense, use "answer" and ask them to say it again.
-        """.trimIndent()
+            after now. Answer questions about their sleep, stress, readiness, heart rate, activity and trends from the health
+            data above, briefly and in plain words, and say so when something isn't there. "start_workout" starts Heartline's
+            workout capture (it records sets, reps and heart rate; use "label" for the workout's name, such as "Gym"),
+            "stop_workout" ends it, "sync" fetches the latest data from the watch. If the words make no sense, use "answer"
+            and ask them to say it again.
+        """.trimIndent().replace("{HEALTH}", c.health?.lines()?.filter { it.isNotBlank() }?.joinToString("\n") { "- $it" } ?: "- not available")
 
         /** The first JSON object in [content] (models sometimes add fences or words around it) as an [Ask]. */
         fun toAsk(content: String): Ask? {
@@ -126,6 +154,9 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
                 "cancel" -> o.optJSONArray("ids")?.let { ids -> Ask.Cancel((0 until ids.length()).mapNotNull { ids.optInt(it, -1).takeIf { id -> id >= 0 } }) }
                 "weather" -> Ask.Weather
                 "help" -> Ask.Help
+                "start_workout" -> Ask.StartWorkout(o.optString("label").trim().ifEmpty { "Workout" }, o.optInt("minutes", 60).coerceIn(1, 720))
+                "stop_workout" -> Ask.StopWorkout
+                "sync" -> Ask.Sync
                 else -> null
             }
         }
@@ -133,7 +164,7 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
         suspend fun httpPost(url: String, headers: Map<String, String>, body: String): String = withContext(Dispatchers.IO) {
             val c = URI(url).toURL().openConnection() as HttpURLConnection
             try {
-                c.requestMethod = "POST"; c.connectTimeout = 5_000; c.readTimeout = 15_000; c.doOutput = true
+                c.requestMethod = "POST"; c.connectTimeout = 10_000; c.readTimeout = TIMEOUT_MS.toInt(); c.doOutput = true
                 headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
                 c.outputStream.use { it.write(body.toByteArray()) }
                 val code = c.responseCode

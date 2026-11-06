@@ -160,7 +160,7 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override fun recordingAudio(file: String): Uri? = null
 
     private val bengaluru = PlaceUi("Bengaluru", "Karnataka, India", 12.97, 77.59)
-    override val weather = MutableStateFlow(WeatherUi(true, bengaluru, 24, "Partly cloudy", 29, 19, now() - 1200, now() - 1180))
+    override val weather = MutableStateFlow(WeatherUi(true, bengaluru, false, 24, "Partly cloudy", 29, 19, now() - 1200, now() - 1180))
     override val phoneLink = MutableStateFlow(PhoneLinkUi(musicEnabled = true, musicAccess = true, nowPlaying = "Kesariya, Arijit Singh"))
     override suspend fun searchPlaces(query: String): List<PlaceUi> =
         if (query.isBlank()) emptyList() else listOf(bengaluru, PlaceUi("Bengaluru Rural", "Karnataka, India", 13.28, 77.53)).filter { it.name.contains(query, true) }
@@ -170,7 +170,8 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override val speech = MutableStateFlow(SpeechUi(null))
     override fun setGeminiKey(key: String) { speech.value = SpeechUi(key.trim().takeLast(4).ifEmpty { null }) }
     override suspend fun testSpeech() = "Gemini heard \"Set an alarm for 9:30 a.m.\" (3.4 s of audio, 0.6 s).\nThe watch would show: Alarm set for Sat 9:30 AM. (sets a watch alarm)"
-    override fun setWeather(enabled: Boolean, place: PlaceUi?) = weather.update { it.copy(enabled = enabled, place = place ?: it.place) }
+    override fun setWeather(enabled: Boolean, place: PlaceUi?) = weather.update { it.copy(enabled = enabled, place = place ?: it.place, useLocation = if (place != null) false else it.useLocation) }
+    override fun setWeatherLocation(use: Boolean) = weather.update { it.copy(useLocation = use) }
     override fun refreshWeather() = weather.update { it.copy(updatedAt = now(), sentToWatchAt = now()) }
     override fun setMusicControl(enabled: Boolean) = phoneLink.update { it.copy(musicEnabled = enabled) }
     override val autoCapture = MutableStateFlow(false)

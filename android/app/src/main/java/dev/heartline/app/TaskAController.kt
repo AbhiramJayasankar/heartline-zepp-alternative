@@ -13,7 +13,7 @@ class TaskAController(private val context: Context, private val scope: Coroutine
     private val client = OpenMeteo()
     val weather = service.flatMapLatest { s ->
         s?.phoneFeatures?.weather?.state ?: db.meta.observe(WeatherConfig.KEY).map { value ->
-            val c = WeatherConfig.parse(value); WeatherUi(enabled = c.enabled, place = c.place)
+            val c = WeatherConfig.parse(value); WeatherUi(enabled = c.enabled, place = c.place, useLocation = c.useLocation)
         }
     }.stateIn(scope, SharingStarted.Eagerly, WeatherUi())
     val phoneLink = service.flatMapLatest { s ->
@@ -26,8 +26,12 @@ class TaskAController(private val context: Context, private val scope: Coroutine
     fun setWeather(enabled: Boolean, place: PlaceUi?) = launch {
         require(place == null || validPlace(place)) { "Choose a valid weather location" }
         val previous = WeatherConfig.parse(db.meta.get(WeatherConfig.KEY))
-        db.meta.set(WeatherConfig.KEY, WeatherConfig(enabled, place ?: previous.place).json())
+        db.meta.set(WeatherConfig.KEY, WeatherConfig(enabled, place ?: previous.place, if (place != null) false else previous.useLocation).json())
         ensureService()
+    }
+    fun setWeatherLocation(use: Boolean) = launch {
+        db.meta.set(WeatherConfig.KEY, WeatherConfig.parse(db.meta.get(WeatherConfig.KEY)).copy(useLocation = use).json())
+        val s = ensureService(); s.command { s.phoneFeatures.weather.refresh() }
     }
     fun refreshWeather() = launch { val s = ensureService(); s.command { s.phoneFeatures.weather.refresh() } }
     fun setMusicControl(enabled: Boolean) = launch { db.meta.set("music_enabled", enabled.toString()); ensureService() }

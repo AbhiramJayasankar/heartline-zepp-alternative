@@ -41,7 +41,9 @@ class AssistantAiTest {
         }
         assertEquals(Ask.Help, ai.interpret("What all can you do?", context, emptyList(), config))
         assertEquals(2, bodies.size)
-        assertFalse(bodies[1].has("reasoning"))
+        assertEquals("low", bodies[1].getJSONObject("reasoning").getString("effort"))
+        assertTrue(bodies[1].getJSONObject("reasoning").getBoolean("exclude"))
+        assertEquals(AssistantAi.REASONING_MAX_TOKENS, bodies[1].getInt("max_tokens"))
     }
 
     @Test fun otherErrorsAreNotRetried() = runBlocking {
@@ -71,8 +73,10 @@ class AssistantAiTest {
         val r = """{"model":"m","choices":[{"finish_reason":"stop","message":{"content":null,"reasoning":"They want 9:30. {\"action\":\"alarm\",\"time\":\"09:30\"}"}}]}"""
         assertEquals(Ask.Alarm(LocalTime.of(9, 30)), AssistantAi { _, _, _ -> r }.interpret("alarm 9:30", context, emptyList(), config))
         val empty = AssistantAi { _, _, _ -> """{"model":"m","choices":[{"finish_reason":"length","message":{"content":null}}]}""" }
-        val e = runCatching { empty.interpret("hi", context, emptyList(), config) }.exceptionOrNull()
-        assertTrue(e!!.message!!.contains("unusable answer (length)"))
+        assertEquals("m ran out of tokens before it answered", runCatching { empty.interpret("hi", context, emptyList(), config) }.exceptionOrNull()?.message)
+        // Reasoning cut off by the limit is thinking, not the answer, even when it contains a draft (nemotron, 2026-11-06).
+        val cut = AssistantAi { _, _, _ -> r.replace("\"stop\"", "\"length\"") }
+        assertEquals("m ran out of tokens before it answered", runCatching { cut.interpret("hi", context, emptyList(), config) }.exceptionOrNull()?.message)
     }
 
     @Test fun errorMessagesComeFromOpenRouter() {
