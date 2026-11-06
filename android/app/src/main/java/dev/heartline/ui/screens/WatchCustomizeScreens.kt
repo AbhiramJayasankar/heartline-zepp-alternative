@@ -177,23 +177,20 @@ fun AssistantScreen(controller: HeartlineController, nav: Navigator) {
     }
 }
 
-/** Which recognizer hears the Alexa button: the built-in Vosk model, Dictate's model, or Gemini's Live transcription. */
+/** Which recognizer hears the Alexa button: the built-in Vosk model or Gemini's Live transcription. */
 @Composable
 private fun SpeechSection(controller: HeartlineController) {
     val c = HL.colors
     val speech by controller.speech.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var key by remember { mutableStateOf("") }
-    var dictate by remember { mutableStateOf<String?>(null) }
     var result by remember { mutableStateOf<String?>(null) }
     var testing by remember { mutableStateOf(false) }
-    androidx.compose.runtime.LaunchedEffect(speech.source) { if (speech.source == "dictate") dictate = controller.dictateStatus() }
     Text("Speech recognition", style = HL.type.bodyStrong, color = c.ink)
     Gap(8)
-    Segmented(listOf("vosk" to "Built-in", "dictate" to "Dictate", "gemini" to "Gemini"), speech.source, { controller.setSpeech(it, null); result = null })
+    Segmented(listOf("vosk" to "Built-in", "gemini" to "Gemini"), speech.source, { controller.setSpeech(it, null); result = null })
     Gap(8)
     when (speech.source) {
-        "dictate" -> MutedText(dictate ?: "Checking Dictate…")
         "gemini" -> {
             MutedText(speech.geminiKeyEnd?.let { "Gemini key saved, ending in $it. Uses Gemini 3.5 Transcribe Live (free tier)." }
                 ?: "Paste a Gemini API key from Google AI Studio. Uses Gemini 3.5 Transcribe Live (free tier).")

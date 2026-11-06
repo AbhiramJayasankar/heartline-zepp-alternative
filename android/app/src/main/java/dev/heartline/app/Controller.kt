@@ -72,12 +72,10 @@ interface HeartlineController {
     /** One sample question through the saved key and model: the answer or why it failed. */
     suspend fun testAssistantAi(question: String): String
 
-    /** Which recognizer turns Alexa questions into text: "vosk", "dictate" or "gemini" (the key's last 4 shown only). */
+    /** Which recognizer turns Alexa questions into text: "vosk" or "gemini" (the key's last 4 shown only). */
     val speech: StateFlow<SpeechUi>
     /** [geminiKey] null keeps the saved one, blank removes it. */
     fun setSpeech(source: String, geminiKey: String?)
-    /** Whether Dictate can be used, and with which model. */
-    suspend fun dictateStatus(): String
     /** The last Alexa recording through the chosen recognizer, with no fallback: the text or why it failed. */
     suspend fun testSpeech(): String
 

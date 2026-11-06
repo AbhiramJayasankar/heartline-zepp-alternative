@@ -323,10 +323,6 @@ class RealController(
             db.meta.set(dev.heartline.service.SpeechConfig.KEY, dev.heartline.service.SpeechConfig(source, geminiKey?.trim() ?: saved.geminiKey).json())
         }
     }
-    override suspend fun dictateStatus(): String = withContext(Dispatchers.IO) {
-        val d = dev.heartline.service.DictateSpeech(context)
-        d.problem() ?: d.modelName()?.let { "Dictate is ready with $it." } ?: "Dictate has no speech model selected."
-    }
     override suspend fun testSpeech(): String = withContext(Dispatchers.IO) {
         val wav = java.io.File(context.filesDir, "alexa").listFiles { f -> f.name.endsWith("-16k.wav") }?.maxByOrNull { it.lastModified() }
             ?: return@withContext "No Alexa recording yet: ask the watch something first."
@@ -336,7 +332,6 @@ class RealController(
         val started = System.nanoTime()
         runCatching {
             when (config.source) {
-                dev.heartline.service.SpeechConfig.DICTATE -> dev.heartline.service.DictateSpeech(context).transcribe(pcm)
                 dev.heartline.service.SpeechConfig.GEMINI -> {
                     check(config.geminiKey.isNotBlank()) { "Save a Gemini key first" }
                     dev.heartline.service.GeminiSpeech().transcribe(pcm, config.geminiKey)

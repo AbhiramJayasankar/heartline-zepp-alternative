@@ -54,7 +54,7 @@ numbers you can use, on the phone, offline.
 - **Alarms, calendar reminders, weather** (Open-Meteo, no API key), vibration counts, set clock, find watch.
 - **Alexa button**: the watch's Alexa button works again. Replies cover time, heart rate, steps, timers, alarms and
   reminders that ring on the watch. Speech is recognised **offline with Vosk**, or with **Gemini 3.5 Transcribe Live**
-  (free tier, paste your Google AI Studio key), or with the model of a companion dictation app.
+  (free tier, paste your Google AI Studio key).
   Optionally, add a free **OpenRouter** key and an AI model answers anything and fixes misheard words.
 
 **Your data stays yours**

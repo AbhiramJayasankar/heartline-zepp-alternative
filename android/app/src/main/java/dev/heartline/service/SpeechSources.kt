@@ -1,16 +1,8 @@
 package dev.heartline.service
 
-import android.content.Context
-import android.content.pm.PackageManager
-import android.net.Uri
-import android.os.Bundle
-import android.os.ParcelFileDescriptor
 import dev.heartline.data.HeartlineDatabase
-import java.io.File
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -31,21 +23,20 @@ data class SpeechConfig(val source: String = VOSK, val geminiKey: String = "") {
     fun json(): String = JSONObject().put("source", source).put("gemini_key", geminiKey).toString()
     companion object {
         const val KEY = "alexa_speech"
-        const val VOSK = "vosk"; const val DICTATE = "dictate"; const val GEMINI = "gemini"
+        const val VOSK = "vosk"; const val GEMINI = "gemini"
         fun parse(text: String?): SpeechConfig = runCatching {
             val o = JSONObject(text ?: "{}")
-            SpeechConfig(o.optString("source").takeIf { it in setOf(VOSK, DICTATE, GEMINI) } ?: VOSK, o.optString("gemini_key").trim())
+            SpeechConfig(o.optString("source").takeIf { it in setOf(VOSK, GEMINI) } ?: VOSK, o.optString("gemini_key").trim())
         }.getOrDefault(SpeechConfig())
     }
 }
 
 /** The chosen recognizer, falling back to Vosk (with a log line saying why) so the button always answers. */
-class SpeechRouter(private val db: HeartlineDatabase, private val vosk: VoskSpeech, private val dictate: DictateSpeech,
+class SpeechRouter(private val db: HeartlineDatabase, private val vosk: VoskSpeech,
                    private val gemini: GeminiSpeech = GeminiSpeech()) : SpeechToText {
     override suspend fun transcribe(pcm: ShortArray): VoskSpeech.Transcript {
         val config = SpeechConfig.parse(db.meta.get(SpeechConfig.KEY))
         val chosen: SpeechToText? = when (config.source) {
-            SpeechConfig.DICTATE -> dictate
             SpeechConfig.GEMINI -> if (config.geminiKey.isNotBlank()) SpeechToText { gemini.transcribe(it, config.geminiKey) } else null
             else -> null
         }
@@ -54,43 +45,6 @@ class SpeechRouter(private val db: HeartlineDatabase, private val vosk: VoskSpee
                 .onFailure { db.events.add("warn", "${config.source.replaceFirstChar(Char::uppercase)} speech-to-text failed (${it.message}); used Vosk") }
         }
         return vosk.transcribe(pcm)
-    }
-}
-
-/**
- * The speech model picked in Dictate (the owner's dictation app, same signing key), through its RecognizerProvider:
- * no second copy of the model on the phone. The audio goes over a file descriptor because a 30 s clip is near
- * Binder's 1 MB transaction limit.
- */
-class DictateSpeech(private val context: Context) : SpeechToText {
-    /** Whether Dictate is installed with its recognizer and this app holds the permission (null), or why not. */
-    fun problem(): String? {
-        val info = runCatching { context.packageManager.getPackageInfo(PACKAGE, 0) }.getOrNull() ?: return "Dictate isn't installed"
-        if (context.packageManager.resolveContentProvider(AUTHORITY, 0) == null) return "Dictate ${info.versionName} has no recognizer; update it to 0.5.1 or newer"
-        if (context.checkSelfPermission(PERMISSION) != PackageManager.PERMISSION_GRANTED)
-            return "Heartline can't use Dictate yet: reinstall Heartline after Dictate (both must share a signing key)"
-        return null
-    }
-
-    fun modelName(): String? = runCatching { context.contentResolver.call(Uri.parse("content://$AUTHORITY"), "model", null, null)?.getString("model") }.getOrNull()
-
-    override suspend fun transcribe(pcm: ShortArray): VoskSpeech.Transcript = withContext(Dispatchers.IO) {
-        problem()?.let { error(it) }
-        val file = File.createTempFile("dictate", ".pcm", context.cacheDir)
-        try {
-            file.writeBytes(ByteArray(pcm.size * 2).also { b -> pcm.forEachIndexed { i, v -> b[2 * i] = v.toByte(); b[2 * i + 1] = (v.toInt() shr 8).toByte() } })
-            val result = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
-                context.contentResolver.call(Uri.parse("content://$AUTHORITY"), "transcribe", null, Bundle().apply { putParcelable("pcm", fd) })
-            } ?: error("Dictate didn't answer")
-            result.getString("error")?.let { error(it) }
-            VoskSpeech.Transcript(result.getString("text").orEmpty().trim(), "Dictate ${result.getString("model") ?: ""}".trim())
-        } finally { file.delete() }
-    }
-
-    companion object {
-        const val PACKAGE = "com.chaitu.androidstt"
-        const val AUTHORITY = "com.chaitu.androidstt.recognizer"
-        const val PERMISSION = "com.chaitu.androidstt.permission.TRANSCRIBE"
     }
 }
 

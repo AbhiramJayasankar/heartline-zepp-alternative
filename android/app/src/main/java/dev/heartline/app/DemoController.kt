@@ -169,7 +169,6 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override suspend fun testAssistantAi(question: String) = "Demo mode: Say(text=Two plus two is four.)"
     override val speech = MutableStateFlow(SpeechUi("vosk", null))
     override fun setSpeech(source: String, geminiKey: String?) { speech.update { SpeechUi(source, geminiKey?.takeLast(4) ?: it.geminiKeyEnd) } }
-    override suspend fun dictateStatus() = "Demo mode: Dictate is ready with parakeet-tdt-0.6b-v3."
     override suspend fun testSpeech() = "Demo mode: \"set an alarm for 9:30 am\" (Gemini transcribe live, 640 ms, 3.4 s of audio)"
     override fun setWeather(enabled: Boolean, place: PlaceUi?) = weather.update { it.copy(enabled = enabled, place = place ?: it.place) }
     override fun refreshWeather() = weather.update { it.copy(updatedAt = now(), sentToWatchAt = now()) }
