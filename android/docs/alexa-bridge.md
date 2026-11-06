@@ -106,7 +106,10 @@ watch's mic. After a card (weather, a list) no text is sent, since
 it would replace the card. Reasoning is turned off for speed; a model that requires it (`Reasoning is mandatory for this
 endpoint`) is asked again with low-effort reasoning and 4000 tokens for the rest of the conversation. Replies are cleaned
 for the watch's font (see What the watch draws). Log lines never pass text through a format string: a "%" in an
-answer (humidity 66%) crashed the app on the weather question (2026-11-06).
+answer (humidity 66%) crashed the app on the weather question (2026-11-06). A reply that says an alarm, timer,
+reminder, workout or sync was set, cancelled, started or stopped while no action tool ran is sent back once, telling
+the model that nothing happened: Nemotron answered "Cancel my water reminder" with "Cancelled." and no tool call, and
+the reminder rang (2026-11-06).
 
 There are no built-in answers. Whatever fails is shown on the watch instead: no Gemini or OpenRouter key, Gemini or
 OpenRouter errors (OpenRouter's own message, e.g. a rate limit), no words heard, or no weather. The watch waits about

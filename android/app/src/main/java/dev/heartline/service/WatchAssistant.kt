@@ -140,8 +140,14 @@ class WatchAssistant(
                 if (!s.enabled(name)) "Error: the $name tool is turned off in Heartline" else data.run(name, args) ?: turn.act(name, args)
         }
         val reply = try {
-            withTimeoutOrNull(s.answerTimeoutS * 1000L) { ai.converse(transcript, context, history.toList(), config, runner, s, trace) }
-                ?: return turn.answer("OpenRouter isn't working: no answer within ${s.answerTimeoutS} s.", emptyList(), "no answer within ${s.answerTimeoutS} s")
+            withTimeoutOrNull(s.answerTimeoutS * 1000L) {
+                val first = ai.converse(transcript, context, history.toList(), config, runner, s, trace)
+                // A model may say "Cancelled." without calling the tool (2026-11-06: the reminder still rang). It is
+                // asked once more, told that nothing happened; for a reply that only sounded like an action it just answers again.
+                if (first.toolCalls.any { it in ACTION_NAMES } || !CLAIMED_ACTION.containsMatchIn(first.text)) first
+                else ai.converse(undone(first.text), context, history.toList() + (transcript to first.text), config, runner, s, trace)
+                    .let { AssistantAi.Reply(it.text, first.toolCalls + it.toolCalls) }
+            } ?: return turn.answer("OpenRouter isn't working: no answer within ${s.answerTimeoutS} s.", emptyList(), "no answer within ${s.answerTimeoutS} s")
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
             return turn.answer("OpenRouter isn't working: ${e.message}", emptyList(), e.message ?: e.toString())
         }
@@ -320,6 +326,16 @@ class WatchAssistant(
             }
         }
 
+        /** A reply that says an alarm, timer, reminder, workout or sync was set, cancelled, started or stopped. */
+        private val CLAIMED_ACTION = Regex("(?i)^\\W*(done|cancell?ed|deleted|removed|stopped|started)\\b" +
+            "|\\b(timers?|alarms?|reminders?|workout|capture|sync(ed)?)\\b[^.?!\\n]{0,40}\\b(set|cancell?ed|deleted|removed|started|stopped)\\b" +
+            "|\\b(set|cancell?ed|deleted|removed|started|stopped)\\b[^.?!\\n]{0,25}\\b(timers?|alarms?|reminders?|workout|capture)\\b")
+
+        /** Sent as the next message when [reply] claimed an action no tool did. */
+        private fun undone(reply: String) = "(Heartline, not the user: your reply \"$reply\" says something was done, but you called " +
+            "no tool, so nothing happened on the watch. If they asked for an action, call its tool now and then reply; if " +
+            "they didn't, just give your answer again.)"
+
         /** The actions the brain can take on the watch and in Heartline. */
         val ACTION_TOOLS = listOf(
             Tool("set_timer", "Start a countdown timer on the watch.", obj("seconds" to prop("integer", "Length in seconds"), required = listOf("seconds"))),
@@ -348,6 +364,9 @@ class WatchAssistant(
             Tool("stop_workout", "Stop the running workout capture.", obj()),
             Tool("sync_watch", "Fetch the latest data from the watch now.", obj()),
         )
+
+        /** The tools that do something (all actions but get_weather). */
+        val ACTION_NAMES: Set<String> = ACTION_TOOLS.map { it.name }.toSet() - "get_weather"
 
         fun parseAlerts(json: String?): List<AlexaAlert> = runCatching {
             val a = JSONArray(json ?: "[]")

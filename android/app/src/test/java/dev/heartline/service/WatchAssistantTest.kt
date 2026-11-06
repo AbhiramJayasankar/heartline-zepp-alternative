@@ -156,6 +156,21 @@ class WatchAssistantTest {
         assertTrue(toolResults().last().startsWith("Error: none of those ids are set"))
     }
 
+    @Test fun aClaimedActionWithoutItsToolIsAskedAgain() = runBlocking {
+        val a = assistant()
+        brain(call("set_reminder", """{"label":"Drink water","in_seconds":120}"""), say("Reminder set for 15:42."))
+        a.answer("Remind me to drink water in two minutes")
+        // The model says it cancelled without calling the tool; told nothing happened, it calls cancel_alerts.
+        brain(say("Cancelled."), call("cancel_alerts", """{"ids":[1]}"""), say("Cancelled your water reminder."))
+        val cancel = a.answer("Cancel my water reminder")
+        assertEquals("Cancelled your water reminder.", cancel.text)
+        assertTrue(WatchAssistant.parseAlerts(saved[WatchAssistant.ALERTS]).isEmpty())
+        assertEquals(3, cancel.trace!!.rounds.size)
+        // An answer that only mentions an alarm isn't asked again.
+        brain(say("Your alarm is at 7:00."), say("(asked again)"))
+        assertEquals("Your alarm is at 7:00.", a.answer("When is my alarm?").text)
+    }
+
     @Test fun alarmsInMinutesRingOnTheNextWholeMinute() = runBlocking {
         now = now.plusSeconds(20) // 15:40:20
         brain(call("set_alarm", """{"in_seconds":60}"""), say("Alarm set."))
