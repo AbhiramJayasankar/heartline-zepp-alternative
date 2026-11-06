@@ -28,6 +28,9 @@
 |---|---|
 | 🎙️ **An Alexa button that knows you** | Ask about your sleep, stress or readiness and get an analysis of *your* data. Ask for the news and it searches the web. Set timers, alarms and reminders by voice. Free AI, your own keys. |
 | 📊 **Health scores Zepp never showed** | Readiness, strain, sleep score and body battery every day, trends against your own 28-day baseline, VO2max and fitness age. |
+| 🌙 **A page for every part of you** | Sleep with a stage-by-stage hypnogram and overnight SpO2, heart rate with resting and HRV against your usual, activity against your goal, and an overview that ties them together. |
+| ✨ **AI insights** | Gemini 3.8 Flash (or any OpenRouter model) reads two weeks of your data and writes what stands out, with the numbers and one thing to try. |
+| 🎨 **Six themes** | Paper, Night, Sage, Dusk, follow-the-phone, and a true-black OLED theme. |
 | 🫀 **Heart checks from the raw pulse** | Records the optical pulse waveform and measures HRV, rhythm regularity and breathing rate beat by beat. |
 | 🏋️ **Gym capture that counts reps** | Streams motion and pulse during a session and finds your sets, reps, rest and heart-rate recovery. |
 | 🔬 **Every sensor, raw** | Live pulse, accelerometer, gyroscope, compass, GPS and microphone streams, saved to CSV. |
@@ -68,7 +71,8 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
 **Health and sleep**
 - **Readiness, strain, sleep score and body battery** each day, with a short plain-language suggestion.
 - **Heart rate** all day (per-minute history plus live readings), resting heart rate and zones.
-- **Sleep stages** (deep, light, REM, awake) and sleep regularity.
+- **Sleep page**: a hypnogram of the night, each stage against its typical range, heart rate and SpO2 while asleep,
+  two weeks of nights, sleep score and how regular your timing is.
 - **SpO2, stress, PAI and skin temperature.** Temperature is a reading every minute, synced every 5 minutes.
 - **Trends**: two weeks of readiness, resting HR, HRV, sleep, steps, strain and active time against your 28-day
   baseline, plus **VO2max, fitness age** and acute:chronic training load.
@@ -89,6 +93,11 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
 - **Watch app list**: choose and order the apps, and what goes in the More screen.
 - **Alarms, calendar reminders, weather** for where your phone is (Open-Meteo, no API key), vibration counts, set
   clock, find watch.
+
+**AI insights**
+- Gemini 3.8 Flash with your AI Studio key, or an OpenRouter model with the Alexa brain's keys (switchable on the
+  page). Two weeks of readiness, trends, sleep, heart rate, activity, stress, SpO2, temperature and gym captures go
+  in; ranked findings with the numbers and one thing to try come out. Nothing is sent until you ask.
 
 **Your data stays yours**
 - Everything is stored in a local database on the phone. Export it, back it up, or share it with other apps through

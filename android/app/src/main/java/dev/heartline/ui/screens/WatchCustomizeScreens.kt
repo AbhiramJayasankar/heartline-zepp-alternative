@@ -1,5 +1,7 @@
 package dev.heartline.ui.screens
 
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -73,6 +75,7 @@ fun WatchMenuScreen(controller: HeartlineController, nav: Navigator) {
             }
             Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Switch(a.shown, { on -> controller.setWatchMenu(apps.map { if (it.key == a.key) it.copy(shown = on) else it }) },
+                    modifier = Modifier.semantics { contentDescription = "Show ${a.label} on the watch" },
                     colors = SwitchDefaults.colors(checkedTrackColor = c.ok, checkedThumbColor = c.surface, uncheckedTrackColor = c.gridMajor, uncheckedThumbColor = c.surface, uncheckedBorderColor = c.gridMajor))
                 Text(a.label, style = HL.type.body, color = if (a.shown) c.ink else c.inkSoft, modifier = Modifier.weight(1f).padding(start = 12.dp))
                 IconButton({ move(i, -1) }, enabled = i > 0) { Icon(Icons.chevron, "Move ${a.label} up", Modifier.size(18.dp).rotate(-90f), tint = c.inkSoft) }

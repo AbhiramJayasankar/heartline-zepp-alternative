@@ -33,6 +33,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.layout.layout
+import androidx.compose.foundation.border
 import androidx.compose.ui.unit.dp
 import dev.heartline.ui.Icons
 import dev.heartline.ui.theme.HL
@@ -112,6 +116,16 @@ fun NavRow(title: String, detail: String? = null, onClick: () -> Unit) {
         Icon(Icons.chevron, contentDescription = null, tint = HL.colors.inkSoft, modifier = Modifier.size(18.dp))
     }
     HorizontalDivider(color = HL.colors.line)
+}
+
+/** Rows grouped on one rounded card; the last row's divider is tucked away under the card's edge. */
+@Composable
+fun NavGroup(content: @Composable ColumnScope.() -> Unit) {
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp)
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp).clip(shape).background(HL.colors.surface)
+        .border(1.dp, HL.colors.line, shape).padding(horizontal = 16.dp)
+        .layout { m, c -> val p = m.measure(c); layout(p.width, (p.height - 1.dp.roundToPx()).coerceAtLeast(0)) { p.place(0, 0) } }
+        .clipToBounds(), content = content)
 }
 
 @Composable

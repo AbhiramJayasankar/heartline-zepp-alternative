@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Checkbox
@@ -71,70 +73,6 @@ import dev.heartline.ui.components.paper
 import dev.heartline.ui.theme.HL
 import dev.heartline.ui.theme.ThemeMode
 import kotlin.math.roundToInt
-
-@Composable
-fun WatchScreen(controller: HeartlineController, nav: Navigator) {
-    val c = HL.colors
-    val conn by controller.connection.collectAsStateWithLifecycle()
-    val battery by controller.battery.collectAsStateWithLifecycle()
-    val device by controller.device.collectAsStateWithLifecycle()
-    val prefs by controller.prefs.collectAsStateWithLifecycle()
-    val connected = conn.state == LinkState.CONNECTED
-    val busy = conn.state in setOf(LinkState.SCANNING, LinkState.CONNECTING, LinkState.AUTHENTICATING)
-
-    Screen("Watch") {
-        KeepRunningBanner(controller) { nav.push(Route.KeepRunning) }
-        Panel {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(device?.model ?: "Amazfit GTR 2e", style = HL.type.section, color = c.ink)
-                    Gap(4)
-                    ConnectionChip(conn)
-                }
-                battery?.let { BatteryGlyph(it.level, it.charging) }
-            }
-            conn.error?.let { Gap(8); Text(it, style = HL.type.small, color = c.pulse) }
-            Gap(14)
-            PillButton(
-                when { connected -> "Disconnect"; busy -> "Connecting…"; else -> "Connect" },
-                { if (connected) controller.disconnect() else controller.connect() },
-                Modifier.fillMaxWidth(), style = if (connected) ButtonStyle.QUIET else ButtonStyle.PRIMARY, enabled = !busy,
-            )
-            Gap(14)
-            Row(Modifier.fillMaxWidth()) {
-                Stat("Firmware", device?.firmware ?: "–", Modifier.weight(1f))
-                Stat("Last charged", battery?.lastCharged ?: "–", Modifier.weight(1f))
-            }
-            Gap(10)
-            MutedText("${prefs.watchMac ?: "No watch paired"}${device?.serial?.let { ", serial $it" } ?: ""}")
-        }
-        Gap(14)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PillButton("Find watch", { controller.vibrate() }, Modifier.weight(1f), style = ButtonStyle.QUIET, enabled = connected)
-            PillButton("Sync now", { controller.syncNow() }, Modifier.weight(1f), style = ButtonStyle.QUIET, enabled = connected)
-            PillButton("Set clock", { controller.setWatchClock() }, Modifier.weight(1f), style = ButtonStyle.QUIET, enabled = connected)
-        }
-        Gap(22)
-        NotifyComposer(controller, connected)
-        Gap(18)
-        NavRow("Sensors lab", "Raw pulse, motion, compass, GPS and microphone, live") { nav.push(Route.Sensors) }
-        NavRow("Watch settings", "All-day heart rate, stress, alerts, display") { nav.push(Route.WatchSettings) }
-        NavRow("Watch apps", "Which apps the watch lists, and their order") { nav.push(Route.WatchMenu) }
-        NavRow("Vibration patterns", "How the watch buzzes for calls, messages, alarms") { nav.push(Route.Vibration) }
-        NavRow("Alexa", "Voice, AI brain, tools, instructions and every question asked") { nav.push(Route.Alexa) }
-        NavRow("Alarms", "Vibration alarms on the watch") { nav.push(Route.Alarms) }
-        NavRow("Weather", "Forecast for the watch's weather app") { nav.push(Route.Weather) }
-        NavRow("Calendar", "Upcoming events as watch reminders") { nav.push(Route.Reminders) }
-        NavRow("Music and find phone", "Control music, make a lost phone ring") { nav.push(Route.PhoneLink) }
-        NavRow("Phone notifications", if (prefs.forwarding.enabled) "Forwarding to your wrist" else "Off") { nav.push(Route.Forwarding) }
-        NavRow("Keep running", "Battery and permissions for the background connection") { nav.push(Route.KeepRunning) }
-        NavRow("Your profile", "Used for zones, VO2max and calories") { nav.push(Route.Profile) }
-        NavRow("App settings", "Theme and units") { nav.push(Route.Preferences) }
-        NavRow("Health Connect", "Share heart rate, sleep and steps with other apps") { nav.push(Route.HealthConnect) }
-        NavRow("Data", "Import from the PC dashboard, export, backup") { nav.push(Route.Data) }
-        NavRow("Activity log", "Connection steps, syncs and errors") { nav.push(Route.Events) }
-    }
-}
 
 @Composable
 internal fun NotifyComposer(controller: HeartlineController, connected: Boolean) {
@@ -321,8 +259,13 @@ fun WatchSettingsScreen(controller: HeartlineController, nav: Navigator) {
     Screen("Watch settings", onBack = { nav.pop() }, subtitle = "Changes go straight to the watch. It doesn't report settings back, so these show what Heartline last set.") {
         // Rows keep their order within a section; sections follow SETTING_SECTIONS.
         settings.groupBy { it.section }.toList().sortedBy { (s, _) -> dev.heartline.protocol.SETTING_SECTIONS.indexOf(s).let { if (it < 0) 99 else it } }.forEach { (section, rows) ->
-            Gap(18); SectionTitle(section); Gap(4)
-            rows.forEach { s -> SettingRow(s, connected) { controller.applyWatchSetting(s.key, it) } }
+            Gap(18); SectionTitle(section)
+            NavGroup {
+                rows.forEachIndexed { i, s ->
+                    if (i > 0) HorizontalDivider(color = HL.colors.line)
+                    SettingRow(s, connected) { controller.applyWatchSetting(s.key, it) }
+                }
+            }
         }
     }
 }
@@ -330,11 +273,13 @@ fun WatchSettingsScreen(controller: HeartlineController, nav: Navigator) {
 @Composable
 private fun SettingRow(s: WatchSettingUi, enabled: Boolean, onChange: (Any) -> Unit) {
     val c = HL.colors
-    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+    // A switch row toggles from anywhere on it, and reads as one switch to screen readers.
+    val toggle = if (s.type == "bool") Modifier.toggleable(s.value == true, enabled = enabled, role = androidx.compose.ui.semantics.Role.Switch) { onChange(it) } else Modifier
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(toggle).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(s.label, style = HL.type.body, color = c.ink, modifier = Modifier.weight(1f))
         when (s.type) {
             "bool" -> Switch(
-                checked = s.value == true, onCheckedChange = { onChange(it) }, enabled = enabled,
+                checked = s.value == true, onCheckedChange = null, enabled = enabled,
                 colors = SwitchDefaults.colors(checkedTrackColor = c.ok, checkedThumbColor = c.surface, uncheckedTrackColor = c.gridMajor, uncheckedThumbColor = c.surface, uncheckedBorderColor = c.gridMajor),
             )
             "enum" -> {
@@ -375,19 +320,13 @@ fun ForwardingScreen(controller: HeartlineController, nav: Navigator) {
     }
     fun set(u: ForwardingUi) = controller.setForwarding(u)
     Screen("Phone notifications", onBack = { nav.pop() }, subtitle = "Heartline shows your phone's notifications on the watch, the way Zepp did.") {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Forward notifications", style = HL.type.bodyStrong, color = c.ink, modifier = Modifier.weight(1f))
-            Switch(f.enabled, { set(f.copy(enabled = it)) }, colors = SwitchDefaults.colors(checkedTrackColor = c.ok))
-        }
+        ToggleRow("Forward notifications", null, f.enabled) { set(f.copy(enabled = it)) }
         Gap(8)
         PillButton("Allow notification access", { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }, style = ButtonStyle.QUIET)
         Gap(6)
         MutedText("Android asks you to switch Heartline on in its notification access list once.")
         Gap(16)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Incoming calls", style = HL.type.body, color = c.ink, modifier = Modifier.weight(1f))
-            Switch(f.calls, { set(f.copy(calls = it)) }, colors = SwitchDefaults.colors(checkedTrackColor = c.ok))
-        }
+        ToggleRow("Incoming calls", null, f.calls) { set(f.copy(calls = it)) }
         Gap(8)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Quiet hours", style = HL.type.body, color = c.ink, modifier = Modifier.weight(1f))

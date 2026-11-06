@@ -43,7 +43,6 @@ import dev.heartline.ui.screens.PreferencesScreen
 import dev.heartline.ui.screens.ProfileScreen
 import dev.heartline.ui.screens.SensorsScreen
 import dev.heartline.ui.screens.TrendsScreen
-import dev.heartline.ui.screens.WatchScreen
 import dev.heartline.ui.screens.WatchSettingsScreen
 import dev.heartline.ui.screens.WatchMenuScreen
 import dev.heartline.ui.screens.VibrationScreen

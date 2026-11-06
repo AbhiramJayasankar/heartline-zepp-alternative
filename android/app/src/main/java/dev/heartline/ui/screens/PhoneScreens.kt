@@ -1,5 +1,9 @@
 package dev.heartline.ui.screens
 
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Context
@@ -71,14 +75,14 @@ import java.util.Locale
 @Composable
 fun ToggleRow(title: String, detail: String?, checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
     val c = HL.colors
-    Row(Modifier.fillMaxWidth().clickable(enabled = enabled) { onChange(!checked) }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).toggleable(checked, enabled = enabled, role = androidx.compose.ui.semantics.Role.Switch, onValueChange = onChange).padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, style = HL.type.bodyStrong, color = if (enabled) c.ink else c.inkSoft)
             if (detail != null) MutedText(detail)
         }
         Spacer(Modifier.width(12.dp))
         Switch(
-            checked, onChange, enabled = enabled,
+            checked, null, enabled = enabled,
             colors = SwitchDefaults.colors(checkedTrackColor = c.ok, checkedThumbColor = c.surface, uncheckedTrackColor = c.gridMajor, uncheckedThumbColor = c.surface, uncheckedBorderColor = c.gridMajor),
         )
     }
@@ -279,6 +283,7 @@ fun AlarmsScreen(controller: HeartlineController, nav: Navigator) {
                 }
                 Switch(
                     a.enabled, { controller.saveAlarm(a.copy(enabled = it)) },
+                    modifier = Modifier.semantics { contentDescription = "Alarm at %02d:%02d".format(a.hour, a.minute) },
                     colors = SwitchDefaults.colors(checkedTrackColor = c.ok, checkedThumbColor = c.surface, uncheckedTrackColor = c.gridMajor, uncheckedThumbColor = c.surface, uncheckedBorderColor = c.gridMajor),
                 )
             }

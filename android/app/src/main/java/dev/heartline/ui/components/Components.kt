@@ -29,6 +29,8 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
@@ -137,7 +139,7 @@ fun Stat(label: String, value: String, modifier: Modifier = Modifier, unit: Stri
 @Composable
 fun SectionTitle(text: String, modifier: Modifier = Modifier, trailing: (@Composable RowScope.() -> Unit)? = null) {
     Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(text, style = HL.type.section, color = HL.colors.ink)
+        Text(text, style = HL.type.section, color = HL.colors.ink, modifier = Modifier.weight(1f, fill = false).semantics { heading() })
         if (trailing != null) Row(verticalAlignment = Alignment.CenterVertically, content = trailing)
     }
 }
@@ -148,9 +150,9 @@ fun Panel(modifier: Modifier = Modifier, wash: Boolean = false, padding: Padding
     Column(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(18.dp))
             .background(if (wash) c.wash else c.surface)
-            .border(1.dp, c.line, RoundedCornerShape(10.dp))
+            .border(1.dp, c.line, RoundedCornerShape(18.dp))
             .padding(padding),
         content = content,
     )

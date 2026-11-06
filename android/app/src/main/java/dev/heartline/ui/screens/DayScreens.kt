@@ -1,6 +1,7 @@
 package dev.heartline.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -95,15 +96,8 @@ fun dayRoute(metric: DayMetric, epochDay: Long): Route = Route.Day(metric.name, 
 
 @Composable
 private fun DaySwitcher(date: LocalDate, today: LocalDate, onPick: (LocalDate) -> Unit) {
-    val c = HL.colors
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        TextButton({ onPick(date.minusDays(1)) }) { Text("‹ Earlier", color = c.ink) }
-        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(if (date == today) "Today" else if (date == today.minusDays(1)) "Yesterday" else date.format(dayFmt), style = HL.type.bodyStrong, color = c.ink)
-            if (date == today || date == today.minusDays(1)) MutedText(date.format(dayFmt))
-        }
-        TextButton({ onPick(date.plusDays(1)) }, enabled = date < today) { Text("Later ›", color = if (date < today) c.ink else c.line) }
-    }
+    dev.heartline.ui.components.DateStepper(if (date == today) "Today" else if (date == today.minusDays(1)) "Yesterday" else date.format(DateTimeFormatter.ofPattern("EEEE")),
+        date.format(DateTimeFormatter.ofPattern("d MMMM")), onPrev = { onPick(date.minusDays(1)) }, onNext = { onPick(date.plusDays(1)) }, nextEnabled = date < today)
 }
 
 /** Three stats per row. */
@@ -120,7 +114,7 @@ private fun Stats(items: List<Triple<String, String, String?>>) {
 
 @Composable
 private fun ChartPanel(title: String, content: @Composable () -> Unit) {
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(HL.colors.surface).paper().padding(12.dp)) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(HL.colors.surface).paper().border(1.dp, HL.colors.line, RoundedCornerShape(18.dp)).padding(12.dp)) {
         Text(title, style = HL.type.label, color = HL.colors.inkSoft); Gap(6); content()
     }
 }

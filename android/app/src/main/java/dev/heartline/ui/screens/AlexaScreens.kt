@@ -1,5 +1,7 @@
 package dev.heartline.ui.screens
 
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import android.media.MediaPlayer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -84,22 +86,28 @@ fun AlexaScreen(controller: HeartlineController, nav: Navigator) {
         }
         SectionTitle("Last question")
         Gap(6)
-        turns.firstOrNull()?.let { TurnRow(it) { nav.push(Route.AlexaTurn(it.at)) } } ?: MutedText("Nothing asked yet. Questions and everything done to answer them show up here.")
+        turns.firstOrNull()?.let { NavGroup { TurnRow(it) { nav.push(Route.AlexaTurn(it.at)) } } } ?: MutedText("Nothing asked yet. Questions and everything done to answer them show up here.")
         Gap(20)
         SectionTitle("Set up")
-        NavRow("Voice", speech.geminiKeyEnd?.let { "Gemini key ending in $it, ${s.geminiModel.removePrefix("models/")}" } ?: "No Gemini key") { nav.push(Route.AlexaPage(AlexaPages.VOICE)) }
-        NavRow("Brain", listOfNotNull(ai.model, ai.keyEnd?.let { "key ending in $it" } ?: "no key", ai.key2End?.let { "second key ending in $it" }, ai.key3End?.let { "third key ending in $it" }).joinToString(", ")) { nav.push(Route.AlexaPage(AlexaPages.BRAIN)) }
-        NavRow("Web search", listOfNotNull("Tavily".takeIf { web.tavilyEnd != null }, "Exa".takeIf { web.exaEnd != null }).joinToString(" and ").ifEmpty { "Off: no key" }) { nav.push(Route.AlexaPage(AlexaPages.WEB)) }
+        NavGroup {
+            NavRow("Voice", speech.geminiKeyEnd?.let { "Gemini key ending in $it, ${s.geminiModel.removePrefix("models/")}" } ?: "No Gemini key") { nav.push(Route.AlexaPage(AlexaPages.VOICE)) }
+            NavRow("Brain", listOfNotNull(ai.model, ai.keyEnd?.let { "key ending in $it" } ?: "no key", ai.key2End?.let { "second key ending in $it" }, ai.key3End?.let { "third key ending in $it" }).joinToString(", ")) { nav.push(Route.AlexaPage(AlexaPages.BRAIN)) }
+            NavRow("Web search", listOfNotNull("Tavily".takeIf { web.tavilyEnd != null }, "Exa".takeIf { web.exaEnd != null }).joinToString(" and ").ifEmpty { "Off: no key" }) { nav.push(Route.AlexaPage(AlexaPages.WEB)) }
+        }
         Gap(20)
         SectionTitle("How it answers")
-        NavRow("Instructions", if (s.prompt.isBlank()) "Heartline's own" else "Your own, ${s.prompt.length} characters") { nav.push(Route.AlexaPage(AlexaPages.PROMPT)) }
-        val toolCount = controller.alexaTools.size
-        NavRow("Tools", "${controller.alexaTools.count { s.enabled(it.name) }} of $toolCount on") { nav.push(Route.AlexaPage(AlexaPages.TOOLS)) }
-        NavRow("On the watch", "Replies up to ${"%,d".format(s.replyBytes)} bytes, then up to ${s.maxNotifications} notifications") { nav.push(Route.AlexaPage(AlexaPages.WATCH)) }
+        NavGroup {
+            NavRow("Instructions", if (s.prompt.isBlank()) "Heartline's own" else "Your own, ${s.prompt.length} characters") { nav.push(Route.AlexaPage(AlexaPages.PROMPT)) }
+            val toolCount = controller.alexaTools.size
+            NavRow("Tools", "${controller.alexaTools.count { s.enabled(it.name) }} of $toolCount on") { nav.push(Route.AlexaPage(AlexaPages.TOOLS)) }
+            NavRow("On the watch", "Replies up to ${"%,d".format(s.replyBytes)} bytes, then up to ${s.maxNotifications} notifications") { nav.push(Route.AlexaPage(AlexaPages.WATCH)) }
+        }
         Gap(20)
         SectionTitle("What it did")
-        NavRow("Conversation log", if (turns.isEmpty()) "Empty" else "${turns.size} question" + (if (turns.size > 1) "s" else "") + ", with every step") { nav.push(Route.AlexaPage(AlexaPages.LOG)) }
-        NavRow("Set by voice", if (alerts.isEmpty()) "No alarms, timers or reminders" else "${alerts.size} still to come") { nav.push(Route.AlexaPage(AlexaPages.ALERTS)) }
+        NavGroup {
+            NavRow("Conversation log", if (turns.isEmpty()) "Empty" else "${turns.size} question" + (if (turns.size > 1) "s" else "") + ", with every step") { nav.push(Route.AlexaPage(AlexaPages.LOG)) }
+            NavRow("Set by voice", if (alerts.isEmpty()) "No alarms, timers or reminders" else "${alerts.size} still to come") { nav.push(Route.AlexaPage(AlexaPages.ALERTS)) }
+        }
         Gap(20)
         SectionTitle("Try a question")
         Gap(6)
@@ -332,6 +340,7 @@ private fun ToolsPage(controller: HeartlineController, nav: Navigator) {
                     }
                     Spacer(Modifier.width(12.dp))
                     Switch(s.enabled(t.name), { on -> controller.updateAlexaSettings { it.copy(disabledTools = if (on) it.disabledTools - t.name else it.disabledTools + t.name) } },
+                        modifier = Modifier.semantics { contentDescription = "Let Alexa use ${t.name}" },
                         colors = SwitchDefaults.colors(checkedTrackColor = c.ok, checkedThumbColor = c.surface, uncheckedTrackColor = c.gridMajor, uncheckedThumbColor = c.surface, uncheckedBorderColor = c.gridMajor))
                 }
                 HorizontalDivider(color = c.line)

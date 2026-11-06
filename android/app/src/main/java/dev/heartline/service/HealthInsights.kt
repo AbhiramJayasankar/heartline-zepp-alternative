@@ -112,7 +112,7 @@ class HealthInsights(private val health: HealthTools, private val ai: AssistantA
         val reply = try { ai.converse(ask, AiContext(t), emptyList(), cfg, runner, settings) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
             throw IllegalStateException(listOfNotNull(geminiError?.let { "Gemini: $it" }, "OpenRouter: ${e.message}").joinToString("\n"))
         }
-        val note = geminiError?.let { " (Gemini failed: ${it.take(80)})" } ?: ""
+        val note = geminiError?.let { e -> if (BUSY.any { e.contains(it) }) " (Gemini was busy)" else " (Gemini failed: ${e.take(60)})" } ?: ""
         return InsightReport.fromModel(reply.text, t.toEpochSecond(), (ai.lastModel ?: cfg.model) + note, System.currentTimeMillis() - t0)
     }
 

@@ -98,6 +98,8 @@ fun OverviewScreen(controller: HeartlineController, nav: Navigator, onTab: (Tab)
     val insights by controller.insights.collectAsStateWithLifecycle()
     val date = remember { LocalDate.now() }
     val day by remember(date) { controller.healthDay(date) }.collectAsState(initial = null)
+    // Overnight readings (SpO2, temperature) often land on the day before; fall back to it.
+    val yday by remember(date) { controller.healthDay(date.minusDays(1)) }.collectAsState(initial = null)
     val goal = stepGoal(controller)
     val t = today
 
@@ -203,13 +205,13 @@ fun OverviewScreen(controller: HeartlineController, nav: Navigator, onTab: (Tab)
             }
             Gap(10)
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                val spo2 = day?.spo2Avg?.let { it to date } ?: trends.latestOf("spo2")
+                val spo2 = day?.spo2Avg?.let { it to date } ?: yday?.spo2Avg?.let { it to date.minusDays(1) } ?: trends.latestOf("spo2")
                 Tile("Blood oxygen", c.hue(Area.BODY), Modifier.weight(1f).fillMaxHeight(), { nav.push(dayRoute(DayMetric.BODY, date.toEpochDay())) }) {
                     BigValue(spo2?.first?.let { "%.0f".format(it) } ?: "–", "%", size = 28)
                     Text(if (spo2 == null) "No readings yet" else "Average" + (spo2.second.takeIf { it != date }?.let { ", ${shortDate(it)}" } ?: ""), style = HL.type.small, color = c.inkSoft)
-                    day?.spo2Min?.let { Gap(6); MutedText("Lowest ${"%.0f".format(it)}%") }
+                    (day?.spo2Min ?: yday?.spo2Min)?.let { Gap(6); MutedText("Lowest ${"%.0f".format(it)}%") }
                 }
-                val temp = day?.tempAvg?.let { it to date } ?: trends.latestOf("temp")
+                val temp = day?.tempAvg?.let { it to date } ?: yday?.tempAvg?.let { it to date.minusDays(1) } ?: trends.latestOf("temp")
                 Tile("Temperature", c.warn, Modifier.weight(1f).fillMaxHeight(), { nav.push(dayRoute(DayMetric.BODY, date.toEpochDay())) }) {
                     BigValue(temp?.first?.let { "%.1f".format(it) } ?: "–", "°C", size = 28)
                     Text(if (temp == null) "No readings yet" else "Skin, average" + (temp.second.takeIf { it != date }?.let { ", ${shortDate(it)}" } ?: ""), style = HL.type.small, color = c.inkSoft)
@@ -265,7 +267,8 @@ fun OverviewScreen(controller: HeartlineController, nav: Navigator, onTab: (Tab)
             }
 
             // ---- Week at a glance ----
-            val weekSteps = trends.seriesOf("steps")?.points?.avgOf(7)
+            // Whole days only: today's steps are still adding up.
+            val weekSteps = trends.seriesOf("steps")?.points?.filter { it.date != date }?.avgOf(7)
             val weekSleep = trends.seriesOf("sleep")?.points?.avgOf(7)
             if (weekSteps != null || weekSleep != null) {
                 Heading("Last 7 days", action = "Trends", onAction = { nav.push(Route.Trends) })
