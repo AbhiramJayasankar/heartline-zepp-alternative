@@ -1,7 +1,11 @@
 package dev.heartline.protocol
 
 enum class NotificationKind { MESSAGE, CALL, GENERIC }
-const val NOTIFICATION_MAX = 230
+/**
+ * The most bytes one notification may take, from the first byte to the app name's terminating zero. The GTR 2e showed
+ * 1,024 bytes in full and restarted on 1,025 (tested 2026-11-06); Gadgetbridge's 230 was only a cautious limit.
+ */
+const val NOTIFICATION_MAX = 1024
 val EXTRA_HEADER: ByteArray get() = ByteArray(4)
 val CALL_END: ByteArray get() = bytes(3, 3, 0, 0, 0, 0)
 
@@ -51,15 +55,19 @@ fun watchIconFor(packageName: String): Int = when (packageName) {
 fun isSmsApp(packageName: String): Boolean = packageName in setOf(
     "com.google.android.apps.messaging", "com.samsung.android.messaging", "com.android.mms", "com.android.messaging", "com.textra")
 
-/** health.notification_payload / HuamiSupport: the GTS-family extra header prevents watch reboots. [icon] is a [WatchIcon]. */
-fun notificationPayload(title: String, body: String, kind: NotificationKind = NotificationKind.MESSAGE, app: String = "Heartline", icon: Int = WatchIcon.APP): ByteArray {
+/**
+ * health.notification_payload / HuamiSupport: the GTS-family extra header prevents watch reboots. [icon] is a [WatchIcon].
+ * The whole payload stays within [max] bytes, the message cut at a UTF-8 character boundary.
+ */
+fun notificationPayload(title: String, body: String, kind: NotificationKind = NotificationKind.MESSAGE, app: String = "Heartline",
+                        icon: Int = WatchIcon.APP, max: Int = NOTIFICATION_MAX): ByteArray {
     val heading = title.ifEmpty { " " }.codePointPrefix(32)
-    val message = body.ifEmpty { " " }.codePointPrefix(512)
+    val message = body.ifEmpty { " " }.codePointPrefix(max)
     if (kind == NotificationKind.CALL) return bytes(3, 0, 0, 0, 0, 0) + fit(heading, 64) + bytes(0, 0, 0, 2)
     val prefix = if (kind == NotificationKind.GENERIC) bytes(5) + EXTRA_HEADER + bytes(1)
         else bytes(0xFA) + EXTRA_HEADER + bytes(1, icon and 255)
     val suffix = if (kind == NotificationKind.GENERIC) bytes(0, 32, 0) else "\u0000$app\u0000".toByteArray(Charsets.UTF_8)
-    return prefix + fit("$heading\u0000$message\n\n", NOTIFICATION_MAX - prefix.size) + suffix
+    return prefix + fit("$heading\u0000$message\n\n", max - prefix.size - suffix.size) + suffix
 }
 
 /** health.chunked_writes / HuamiSupport.writeToChunkedOld; keep MTU 23 unless the watch requests more. */

@@ -156,7 +156,7 @@ private fun NotifyComposer(controller: HeartlineController, connected: Boolean) 
     Gap(10)
     OutlinedTextField(title, { title = it.take(32) }, label = { Text("From / title") }, singleLine = true, modifier = Modifier.fillMaxWidth())
     Gap(6)
-    OutlinedTextField(body, { body = it.take(240) }, label = { Text("Message") }, minLines = 2, modifier = Modifier.fillMaxWidth())
+    OutlinedTextField(body, { body = it.take(1000) }, label = { Text("Message") }, minLines = 2, modifier = Modifier.fillMaxWidth())
     Gap(10)
     Row(verticalAlignment = Alignment.CenterVertically) {
         Segmented(listOf(NotifyKind.MESSAGE to "Message", NotifyKind.CALL to "Call", NotifyKind.GENERIC to "Alert"), kind, { kind = it })

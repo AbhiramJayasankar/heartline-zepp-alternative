@@ -314,17 +314,26 @@ class WatchAssistant(
             return sb.toString().replace(Regex(" {2,}"), " ").trim()
         }
 
-        /** Bytes of answer per watch notification, leaving room for the title within the watch's 230. */
-        const val NOTIFICATION_TEXT = 190
+        /**
+         * Bytes of answer per watch notification: the watch takes 1,024 bytes per notification (NOTIFICATION_MAX), less
+         * the "Alexa 12/20" title, the app name, framing and a "(cut short)" note.
+         */
+        const val NOTIFICATION_TEXT = 960
 
         /**
-         * [text] as the part the reply screen shows (up to [limit] characters, cut at a sentence or word) and the rest,
+         * Bytes of text the Alexa reply screen shows: it showed about 2,045 bytes of a 3,000-byte reply and dropped the
+         * rest (tested 2026-11-06), so the reply is cut a little below that and the rest goes out as notifications.
+         */
+        const val REPLY_TEXT = 2000
+
+        /**
+         * [text] as the part the reply screen shows (up to [limit] UTF-8 bytes, cut at a sentence or word) and the rest,
          * in pieces for watch notifications.
          */
-        fun splitReply(text: String?, limit: Int): Pair<String?, List<String>> {
-            if (text == null || text.length <= limit) return text to emptyList()
+        fun splitReply(text: String?, limit: Int = REPLY_TEXT): Pair<String?, List<String>> {
+            if (text == null || text.toByteArray().size <= limit) return text to emptyList()
             val note = " (continued in notifications)"
-            val cut = cutAt(text, limit - note.length)
+            val cut = cutAt(text, limit - note.length, bytes = true)
             return (text.substring(0, cut).trimEnd() + note) to notificationChunks(text.substring(cut))
         }
 

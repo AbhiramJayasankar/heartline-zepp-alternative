@@ -41,8 +41,8 @@ class ControlsTest {
         assertContentEquals(bytes(0xFA, 0, 0, 0, 0, 1, 11) + "Hi\u0000there\n\n\u0000Dashboard\u0000".toByteArray(),
             notificationPayload("Hi", "there", app = "Dashboard"))
         assertContentEquals(bytes(5, 0, 0, 0, 0, 1) + "Hi\u0000there\n\n\u0000 \u0000".toByteArray(), notificationPayload("Hi", "there", NotificationKind.GENERIC))
-        val long = notificationPayload("T", "é".repeat(400), app = "Dashboard")
-        assertTrue(long.size <= NOTIFICATION_MAX + "\u0000Dashboard\u0000".toByteArray().size)
+        val long = notificationPayload("T", "é".repeat(800), app = "Dashboard")
+        assertTrue(long.size <= NOTIFICATION_MAX && long.size >= NOTIFICATION_MAX - 1)
         strictUtf8(long.copyOfRange(7, long.size - "\u0000Dashboard\u0000".toByteArray().size))
         assertContentEquals(bytes(3, 0, 0, 0, 0, 0), notificationPayload("Mum", "", NotificationKind.CALL).take(6).toByteArray())
     }
@@ -55,13 +55,15 @@ class ControlsTest {
         oracle["notifications"].arr().forEach { item ->
             val row = item.obj()
             val kind = NotificationKind.valueOf(row["kind"].str().uppercase())
-            assertEquals(row["payload"], notificationPayload(row["title"].str(), row["body"].str(), kind).hex())
+            // The Python reference keeps Gadgetbridge's 230-byte cap, which left out the app name after it.
+            val max = 230 + if (kind == NotificationKind.GENERIC) 3 else 11
+            assertEquals(row["payload"], notificationPayload(row["title"].str(), row["body"].str(), kind, max = max).hex())
         }
     }
     @Test fun utf8CutAtEachCharacterWidthAndTitleLimit() {
-        for (glyph in listOf("é", "中", "🙂")) for (n in 210..225) {
+        for (glyph in listOf("é", "中", "🙂")) for (n in 990..1010) {
             val payload = notificationPayload("T", "x".repeat(n) + glyph.repeat(5))
-            assertTrue(payload.size <= NOTIFICATION_MAX + 11)
+            assertTrue(payload.size <= NOTIFICATION_MAX)
             val message = payload.copyOfRange(7, payload.size - 11)
             strictUtf8(message)
             assertFalse(message.toString(Charsets.UTF_8).contains('\uFFFD'))

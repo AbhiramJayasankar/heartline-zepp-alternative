@@ -76,8 +76,9 @@ The model then calls tools (OpenRouter's `tools`, up to 6 rounds), and its final
   cancelled by voice; the agenda sync rewrites the reminder slots whenever that list changes.
 
 Long answers (a story, a detailed explanation) are written in full: the reply screen shows as much as the watch's
-`ttsTextLimit` allows (sent in the start JSON, logged once; ~700 characters scrolled fine), cut at a sentence, and the
-rest follows as numbered watch notifications of up to 190 bytes each (the watch takes 230 per notification). A Gemini
+`ttsTextLimit` allows (sent in the start JSON, logged once; the GTR 2e sends 0, so 2,000 bytes: the reply screen showed
+about 2,045 bytes and dropped the rest), cut at a sentence, and the rest follows as numbered watch notifications of
+up to 960 bytes of text each (a whole notification may be 1,024 bytes; 1,025 restarts the watch, tested 2026-11-06). A Gemini
 timeout is reported on the watch; before, it surfaced as a cancellation and the turn ended in silence until the watch
 said "I didn't hear you clearly". Weather icons are Alexa's: a description and the image URL whose file name names the icon (the Zepp app passes
 Alexa's values on; a name with no URL showed a question mark). Alexa's image server has eight

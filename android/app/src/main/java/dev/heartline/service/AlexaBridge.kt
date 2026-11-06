@@ -82,14 +82,14 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         }
     }
 
-    /** The longest reply the watch shows (its ttsTextLimit; ~700 characters scrolled fine in a test, 2026-11-03). */
-    private var replyLimit = 700
+    /** The longest reply in bytes the watch shows (its ttsTextLimit if it sends one; the GTR 2e sends 0). */
+    private var replyLimit = WatchAssistant.REPLY_TEXT
     private var settingsLogged = false
 
     private suspend fun begin(payload: ByteArray) {
         // The start carries the watch's Alexa settings as JSON after 4 bytes.
         runCatching { org.json.JSONObject(String(payload, 4, payload.size - 4, Charsets.UTF_8).trimEnd('\u0000')) }.getOrNull()?.let { o ->
-            o.optInt("ttsTextLimit", 0).takeIf { it > 0 }?.let { replyLimit = it.coerceIn(200, 4000) }
+            o.optInt("ttsTextLimit", 0).takeIf { it > 0 }?.let { replyLimit = it.coerceIn(200, WatchAssistant.REPLY_TEXT) }
             if (!settingsLogged) { settingsLogged = true; db.events.add("info", "Alexa settings from the watch: $o") }
         }
         val now = System.currentTimeMillis()
@@ -324,8 +324,8 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         val ORPHAN_STOPS = listOf("triggered (06)", "a card", "a simple reply", "an error (0f)", "end (02)")
         val STOPS = listOf("triggered (06)", "an error (0f)")
         const val KEEP_TURNS = 30
-        /** About 2,000 words; a longer answer ends "(cut short)". */
-        const val MAX_NOTIFICATIONS = 60
+        /** About 4,000 words, more than the longest answer kept (20,000 characters); a longer one ends "(cut short)". */
+        const val MAX_NOTIFICATIONS = 25
         /** The watch shows "I didn't hear you clearly" about 40 s after the stop; answer before that or say it's coming later. */
         const val WATCH_WAIT_MS = 34_000L
     }
