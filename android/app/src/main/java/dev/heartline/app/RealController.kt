@@ -321,6 +321,17 @@ class RealController(
             db.meta.set(dev.heartline.service.AssistantAiConfig.KEY, saved.copy(apiKey2 = key.trim()).json())
         }
     }
+    override val webSearch: StateFlow<WebSearchUi> = db.meta.observe(dev.heartline.service.WebSearchConfig.KEY)
+        .map { dev.heartline.service.WebSearchConfig.parse(it).let { c ->
+            WebSearchUi(c.tavilyKey.takeIf { k -> k.isNotBlank() }?.takeLast(4), c.exaKey.takeIf { k -> k.isNotBlank() }?.takeLast(4)) } }
+        .stateIn(scope, SharingStarted.Eagerly, WebSearchUi())
+    override fun setWebSearchKey(service: String, key: String) {
+        scope.launch {
+            val saved = dev.heartline.service.WebSearchConfig.parse(db.meta.get(dev.heartline.service.WebSearchConfig.KEY))
+            val next = if (service == "exa") saved.copy(exaKey = key.trim()) else saved.copy(tavilyKey = key.trim())
+            db.meta.set(dev.heartline.service.WebSearchConfig.KEY, next.json())
+        }
+    }
     override val speech: StateFlow<SpeechUi> = db.meta.observe(dev.heartline.service.SpeechConfig.KEY)
         .map { SpeechUi(dev.heartline.service.SpeechConfig.parse(it).geminiKey.takeIf { k -> k.isNotBlank() }?.takeLast(4)) }
         .stateIn(scope, SharingStarted.Eagerly, SpeechUi(null))

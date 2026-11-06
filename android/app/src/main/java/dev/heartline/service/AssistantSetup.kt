@@ -38,7 +38,7 @@ class PlaceWeather(private val db: HeartlineDatabase, private val settings: AppS
 
 /**
  * The assistant the Alexa button and the app's test buttons share: Heartline's data (through [controller], the same
- * numbers the app's screens show: a short glance up front and [HealthTools] for detail), weather and saved keys.
+ * numbers the app's screens show: a short glance up front and [HealthTools] for detail), weather, [WebSearch] and saved keys.
  * [actions] and [workout] come from the watch service.
  */
 fun watchAssistant(context: android.content.Context, db: HeartlineDatabase, settings: AppSettings, controller: HeartlineController,
@@ -65,11 +65,11 @@ fun watchAssistant(context: android.content.Context, db: HeartlineDatabase, sett
         override suspend fun set(key: String, value: String) = db.meta.set(key, value)
     },
     actions = actions,
-    data = HealthTools(controller).let { h ->
-        object : DataTools {
-            override val tools = h.tools
-            override suspend fun run(name: String, args: org.json.JSONObject) = h.run(name, args)
-        }
+    data = object : DataTools {
+        val health = HealthTools(controller)
+        val web = WebSearch({ WebSearchConfig.parse(db.meta.get(WebSearchConfig.KEY)) })
+        override val tools = health.tools + web.tools
+        override suspend fun run(name: String, args: org.json.JSONObject) = health.run(name, args) ?: web.run(name, args)
     },
 )
 

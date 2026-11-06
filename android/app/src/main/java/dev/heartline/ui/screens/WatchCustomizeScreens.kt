@@ -183,7 +183,9 @@ fun AssistantScreen(controller: HeartlineController, nav: Navigator) {
                 PillButton("Remove", { controller.setAssistantAiSecondKey("") }, style = ButtonStyle.QUIET)
             }
         }
-        Gap(16)
+        Gap(24)
+        WebSearchSection(controller)
+        Gap(24)
         OutlinedTextField(question, { question = it }, label = { Text("Try a question") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Gap(8)
         PillButton(if (testing) "Asking…" else "Ask", {
@@ -194,7 +196,35 @@ fun AssistantScreen(controller: HeartlineController, nav: Navigator) {
         Gap(16)
         MutedText("Ask shows what the watch would do, without sending anything to it. If the model fails, OpenRouter tries Nemotron Lightning, then Gemma; if OpenRouter refuses the first key, Heartline uses the second. " +
             "Each question sends the words heard, the time, the weather, a short summary of today and the alarms, timers and reminders set by voice to OpenRouter. " +
-            "The model can also ask Heartline for detail (heart rate, stress, sleep, blood oxygen, temperature, activity, readiness, trends, workouts), which is sent when it asks.")
+            "The model can also ask Heartline for detail (heart rate, stress, sleep, blood oxygen, temperature, activity, readiness, trends, workouts), which is sent when it asks. " +
+            "Its web searches go to Tavily or Exa.")
+    }
+}
+
+/** Tavily and Exa keys for the model's web searches; Tavily is tried first. */
+@Composable
+private fun WebSearchSection(controller: HeartlineController) {
+    val c = HL.colors
+    val web by controller.webSearch.collectAsStateWithLifecycle()
+    Text("Web search", style = HL.type.bodyStrong, color = c.ink)
+    Gap(4)
+    MutedText("For news, scores, prices and anything recent, the model searches the web. Both have free plans without a card: " +
+        "Tavily gives 1,000 searches a month, Exa about 800. With both keys, Exa is used when Tavily fails.")
+    for ((service, name, end) in listOf(Triple("tavily", "Tavily", web.tavilyEnd), Triple("exa", "Exa", web.exaEnd))) {
+        var key by remember { mutableStateOf("") }
+        Gap(12)
+        MutedText(end?.let { "$name key saved, ending in $it." } ?: "No $name key.")
+        Gap(6)
+        OutlinedTextField(key, { key = it.trim() }, label = { Text(if (end == null) "$name API key" else "Replace the $name key") }, singleLine = true,
+            visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+        Gap(8)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            PillButton("Save $name key", { controller.setWebSearchKey(service, key); key = "" }, enabled = key.isNotEmpty())
+            if (end != null) {
+                Spacer(Modifier.width(10.dp))
+                PillButton("Remove", { controller.setWebSearchKey(service, "") }, style = ButtonStyle.QUIET)
+            }
+        }
     }
 }
 

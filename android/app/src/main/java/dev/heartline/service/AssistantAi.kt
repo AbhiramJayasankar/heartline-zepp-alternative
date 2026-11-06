@@ -177,8 +177,9 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
             with a short analysis when they ask how something was. Use the action tools to set timers, alarms and
             reminders, cancel them by id, show the weather card or the list of things to ask, start or stop a workout
             capture, and sync the watch. When they ask what the weather is like, call show_weather_card (the watch shows
-            the weather), and get_weather only for a specific question such as whether it will rain tomorrow. Never say you
-            did something without calling its tool. For an alarm or reminder
+            the weather), and get_weather only for a specific question such as whether it will rain tomorrow. For news,
+            scores, prices, recent events or any fact you aren't sure of, call web_search and answer from what it finds
+            (don't read out web addresses). Never say you did something without calling its tool. For an alarm or reminder
             time without am/pm, pick the next occurrence after now; for "in N minutes" use in_seconds.
             Your reply is shown on the watch: plain sentences, no emoji or markdown. Keep it short (at most 300 characters)
             unless they ask for something long, like a story or a detailed explanation: then write it in full, never refuse
