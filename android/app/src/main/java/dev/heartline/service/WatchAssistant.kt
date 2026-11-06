@@ -228,6 +228,20 @@ class WatchAssistant(
                     frames += Alexa.list("Heartline", "Things to ask", HELP.mapIndexed { i, q -> "${i + 1}" to q }); card = true
                     done("showed the list of things to ask")
                 }
+                "show_list" -> {
+                    val given = args.optJSONArray("rows") ?: return "Error: give rows, each with left and right"
+                    val rows = (0 until given.length()).mapNotNull { given.optJSONObject(it) }
+                        .map { watchText(it.optString("left")).take(LIST_LEFT) to watchText(it.optString("right")).take(LIST_RIGHT) }
+                        .filter { (l, r) -> l.isNotEmpty() || r.isNotEmpty() }
+                    if (rows.isEmpty()) return "Error: give at least one row with left or right text"
+                    val title = watchText(args.optString("title")).take(LIST_TITLE)
+                    val subtitle = watchText(args.optString("subtitle")).take(LIST_TITLE)
+                    // Keep the card within what a reply carries; rows that don't fit are left out and the model is told.
+                    var shown = rows.take(LIST_ROWS)
+                    while (shown.size > 1 && Alexa.list(title, subtitle, shown).size > LIST_BYTES) shown = shown.dropLast(1)
+                    frames += Alexa.list(title, subtitle, shown); card = true
+                    done("showed a list of ${shown.size} rows" + if (shown.size < rows.size) " (the last ${rows.size - shown.size} didn't fit)" else "")
+                }
                 "start_workout" -> {
                     val label = args.optString("label").trim().ifEmpty { "Workout" }
                     val minutes = args.optInt("minutes", 60).coerceIn(1, 720)
@@ -284,6 +298,12 @@ class WatchAssistant(
         private val WHEN = arrayOf("time" to prop("string", "Time of day as HH:MM, 24-hour; the next one after now"),
             "in_seconds" to prop("integer", "Or: how many seconds from now"))
 
+        /**
+         * show_list limits. The watch showed all 25 rows of a test list, cut a 19-character left column to about 11 and
+         * wrapped long right columns (2026-11-06); the total is kept within the reply size.
+         */
+        const val LIST_ROWS = 30; const val LIST_LEFT = 16; const val LIST_RIGHT = 200; const val LIST_TITLE = 40; const val LIST_BYTES = 2000
+
         /** The actions the brain can take on the watch and in Heartline. */
         val ACTION_TOOLS = listOf(
             Tool("set_timer", "Start a countdown timer on the watch.", obj("seconds" to prop("integer", "Length in seconds"), required = listOf("seconds"))),
@@ -295,6 +315,16 @@ class WatchAssistant(
             Tool("get_weather", "The weather where the phone is: now, today and the next three days.", obj()),
             Tool("show_weather_card", "Show the weather card on the watch (now, today and the next three days). Use it whenever they ask about the weather in general.", obj()),
             Tool("show_help", "Show the list of things they can ask; use it when they ask what you can do.", obj()),
+            Tool("show_list", "Show a table on the watch: rows of a short left column and a wrapping right column, under an optional " +
+                "title and subtitle; it scrolls. Use it for anything in rows: a schedule, a forecast by day, rankings or scores, a " +
+                "comparison, steps of a recipe, a top-5 list. The left column fits about 10 characters (a day, time, number, rank " +
+                "or short label; longer is cut off); the right column wraps and can hold a sentence. The card replaces the text " +
+                "reply on the watch, so put everything that matters in it.",
+                obj("title" to prop("string", "Short heading at the top; optional"),
+                    "subtitle" to prop("string", "Second line under the title; optional"),
+                    "rows" to JSONObject().put("type", "array").put("description", "Up to $LIST_ROWS rows, in order").put("items",
+                        obj("left" to prop("string", "Left column, about 10 characters at most"), "right" to prop("string", "Right column"))),
+                    required = listOf("rows"))),
             Tool("start_workout", "Start Heartline's workout capture, which records sets, reps and heart rate from the watch's sensors.",
                 obj("label" to prop("string", "The workout they named, such as Gym or Run"), "minutes" to prop("integer", "How long to capture; 60 if they don't say"), required = listOf("label"))),
             Tool("stop_workout", "Stop the running workout capture.", obj()),
@@ -311,24 +341,62 @@ class WatchAssistant(
             parseAlerts(json).filter { it.kind == Alexa.ALERT_REMINDER && it.at >= nowEpoch }.map { CalendarReminder(reminderTitle(it.label), it.at, it.at) }
 
         /**
-         * [text] in characters the watch's font shows: typographic punctuation as plain ASCII, odd spaces (Java's
-         * clock format puts U+202F before AM/PM) as spaces, and emoji and other pictographs dropped.
+         * [text] as the watch draws it. Its font has every script tried (Devanagari, Malayalam, Tamil, CJK, Arabic, Thai...)
+         * and the usual symbols (° ± ½ × ÷ ≤ ² ‰ € £ ¥ © ™ arrows, ▲ ◆ ○ ■ ● ① Ⅱ, box drawing) and draws new lines and
+         * blank lines, but no markdown and only some emoji; a character it lacks shows as a box or nothing (tested
+         * 2026-11-06). So markdown becomes plain text (a heading its words, `*` bullets "-", a link its words, table
+         * rows cells between " | "); emoji outside [EMOJI], the emoji-style symbols outside [SYMBOLS] (❤ ✔ ✗ ⏰ ⚡ ❄...)
+         * and the parts of combined emoji (variation selectors, joiners, skin tones, flags, keycaps) are dropped; the
+         * bullets it lacks (• ‣ ▸ ►) become "-" and ₹ "Rs"; typographic punctuation becomes ASCII and odd spaces (Java's
+         * clock format puts U+202F before AM/PM) spaces.
          */
         fun watchText(text: String): String {
-            val plain = text.replace(Regex("[\\u00A0\\u2000-\\u200B\\u202F\\u205F]"), " ")
+            val plain = plainMarkdown(text).replace(Regex("[\\u00A0\\u2000-\\u200B\\u202F\\u205F]"), " ")
                 .replace(Regex("[\\u2018\\u2019\\u201B\\u2032]"), "'").replace(Regex("[\\u201C\\u201D\\u201F\\u2033]"), "\"")
-                .replace(Regex("[\\u2010-\\u2015\\u2212]"), "-").replace("…", "...").replace("•", "-")
-                .replace(Regex("\\*\\*|__|`"), "")
+                .replace(Regex("[\\u2010-\\u2015\\u2212]"), "-").replace("…", "...").replace(Regex("[•‣▸►]"), "-").replace(Regex("₹ ?"), "Rs ")
             val sb = StringBuilder()
             var i = 0
             while (i < plain.length) {
                 val cp = plain.codePointAt(i); i += Character.charCount(cp)
-                val type = Character.getType(cp)
-                if (cp > 0xFFFF || (type == Character.OTHER_SYMBOL.toInt() && cp >= 0x2100) || type == Character.SURROGATE.toInt() || cp in 0xFE00..0xFE0F || cp == 0x200D) continue
+                if (cp in 0xFE00..0xFE0F || cp == 0x200D || cp == 0x20E3 || cp in 0x1F3FB..0x1F3FF || cp in 0x1F1E6..0x1F1FF) continue
+                if (Character.getType(cp) == Character.SURROGATE.toInt()) continue
+                if ((cp > 0xFFFF || EMOJI_BLOCKS.any { cp in it }) && cp !in EMOJI && cp !in SYMBOLS) continue
                 sb.appendCodePoint(cp)
             }
-            return sb.toString().replace(Regex(" {2,}"), " ").trim()
+            return sb.toString().replace(Regex("[ \\t]{2,}"), " ").lines().joinToString("\n") { it.trimEnd() }
+                .replace(Regex("\n{3,}"), "\n\n").trim()
         }
+
+        private val TABLE_RULE = Regex("^\\s*\\|?\\s*:?-{3,}:?\\s*(\\|\\s*:?-{3,}:?\\s*)*\\|?\\s*$")
+        private val TABLE_ROW = Regex("^\\s*\\|.*\\|\\s*$")
+
+        /** Markdown as the plain text it stands for. */
+        fun plainMarkdown(text: String): String = text.lines().filterNot { TABLE_RULE.matches(it) }.joinToString("\n") { line ->
+            val l = line.replace(Regex("^\\s{0,3}#{1,6}\\s+"), "").replace(Regex("^(\\s*)[*+]\\s+"), "$1- ").replace(Regex("^\\s*>\\s?"), "")
+            if (TABLE_ROW.matches(l)) l.trim().removePrefix("|").removeSuffix("|").split("|").joinToString(" | ") { it.trim() } else l
+        }
+            .replace(Regex("!?\\[([^\\]\\n]+)]\\([^)\\s]+\\)"), "$1")
+            .replace(Regex("\\*\\*|__|~~|`"), "")
+            .replace(Regex("(?<![\\w*])\\*(?=\\S)([^*\\n]+?)(?<=\\S)\\*(?![\\w*])"), "$1")
+
+        /**
+         * The emoji the watch draws (2026-11-06): the whole face block U+1F600 to U+1F64F, the hands, body and people
+         * from U+1F440 to U+1F46F and the sports from U+1F3C0 to U+1F3CA were tried one by one, and about 60 others
+         * (hearts, weather, food, objects, ✅ ❌ ⭐ 🔥 🎉, flags) of which only 💪 🚶 ☀ ☁ ⚠ ⚽ showed. Not a Unicode version
+         * or a popularity list: 😊 😩 🙂 👎 👨 are missing.
+         */
+        private val EMOJI_RANGES = listOf(0x1F600..0x1F609, 0x1F60B..0x1F628, 0x1F62A..0x1F637, 0x1F646..0x1F647, 0x1F64C..0x1F64C,
+            0x1F64F..0x1F64F, 0x1F440..0x1F440, 0x1F442..0x1F445, 0x1F447..0x1F44D, 0x1F44F..0x1F450, 0x1F466..0x1F467,
+            0x1F469..0x1F46A, 0x1F46D..0x1F46F, 0x1F4AA..0x1F4AA, 0x1F3C3..0x1F3C3, 0x1F6B6..0x1F6B6)
+        val EMOJI_SHOWN: String = EMOJI_RANGES.flatMap { it.toList() }.joinToString("") { String(Character.toChars(it)) } + "☀☁⚠⚽"
+        val EMOJI: Set<Int> = EMOJI_SHOWN.codePoints().toArray().toSet()
+
+        /** Blocks below U+FFFF where most characters are emoji: Misc Technical, Misc Symbols and Dingbats, Misc Symbols and Arrows. */
+        private val EMOJI_BLOCKS = listOf(0x2300..0x23FF, 0x2600..0x27BF, 0x2B00..0x2BFF)
+
+        /** Plain symbols in [EMOJI_BLOCKS] the watch draws (✔ ✗ ✘ ☑ ❤ ⏰ ⌚ ⚡ ❄ ✈ ⌛ ➜ beside them did not). */
+        const val SYMBOLS_SHOWN = "✓★☆♪♫♥☂☎"
+        val SYMBOLS: Set<Int> = SYMBOLS_SHOWN.codePoints().toArray().toSet()
 
         /**
          * Bytes of answer per watch notification: the watch takes 1,024 bytes per notification (NOTIFICATION_MAX), less

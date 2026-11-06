@@ -37,13 +37,26 @@ reply streams voice again in the same session (no new start).
 |---|---|---|
 | 1 weather | u32 field mask `0x3fd`, then time, location, date line, description, icon (name, url), current, high, low, forecast days (time, high, low, icon) | Shown |
 | 2 alerts | `op kind token\0 details`: op 1 add, 2 delete; kind 1 alarm, 2 reminder, 3 timer; timer details `h m s`; alarm/reminder `label\0 label\0 u32 wall-clock time, u32 0, u32 repeat days` | Timer shown and rings |
-| 3 list | `title\0 count (left\0 right\0 \0)* subtitle\0` | Shown (a narrow left column) |
+| 3 list | `title\0 count (left\0 right\0 \0)* subtitle\0` | Shown and scrolls (25 rows tried); the left column shows about 11 characters and cuts the rest, the right one wraps and takes new lines; an empty title, subtitle or left column is fine; the third field of a row showed nothing |
 | 4 local actions | `action [args]` | Not tried |
 | 6 card | `title\0 subtitle\0 text\0` | Zepp sends it only to assistant version 3+; this watch reports 2 (`21 02 01`) and ignores it |
 
 Other commands: `07 flag text` shows up to 50 characters, `0a flag u32 length audio` is spoken audio, `0f code text`
 an error, `14` / `15` set and clear the notification indicator, `10`/`11` languages (current `en-US`, 14 English
 variants and others), `20`/`21` capabilities.
+
+## What the watch draws (tested 2026-11-06)
+
+Reply text (09) and notifications use the same font. New lines and blank lines are kept; markdown is shown as typed
+(no bold, headings or tables). Every script tried shows: Devanagari, Malayalam, Tamil, Telugu, Kannada, Bengali, Arabic,
+Hebrew, Cyrillic, Greek, Chinese, Japanese, Korean, Thai, Vietnamese. So do the usual symbols (° ± ½ × ÷ ≈ ≤ ² ‰ € £ ¥
+¢ © ® ™ § ¶ µ, arrows, ▲ ▼ ◆ ○ □ ■ ● ◦ ▪ ① Ⅱ, box drawing) and, of the emoji-style symbols, ✓ ★ ☆ ♪ ♫ ♥ ☂ ☎ ☀ ☁ ⚠ ⚽.
+Missing (a box or nothing): • ‣ ▸ ► ₹ ✗ ✘ ✔ ☑ ➜ ❤ ⚡ ⌚ ⏰ ❄. Emoji were tried one by one through the face block
+U+1F600 to U+1F64F, the hands, body and people U+1F440 to U+1F46F and the sports U+1F3C0 to U+1F3CA, plus about 60
+others: the watch has U+1F600 to U+1F637 except 😊 😩, then 🙆 🙇 🙌 🙏, 👀 👂 👃 👄 👅 👇 👈 👉 👊 👋 👌 👍 👏 👐 👦 👧 👩 👪 👭 👮 👯,
+💪 🏃 🚶, and none of the hearts, weather, food, objects, ✅ ❌ ⭐ 🔥 🎉 or flags. Combined emoji show their parts
+(👨‍👩‍👧 as 👩👧), skin tones and keycaps nothing. `WatchAssistant.watchText` drops what's missing (• and ▸ become "-", ₹
+"Rs") and turns markdown into plain text; the instructions tell the model what it can use and list the emoji.
 
 ## Speech-to-text: Gemini
 
@@ -72,7 +85,8 @@ The model then calls tools (OpenRouter's `tools`, up to 6 rounds), and its final
 - **Web** (`WebSearch.kt`): `web_search` through Tavily (1,000 free searches a month, its short answer plus the top
   pages' snippets), falling back to Exa ($10 of free credit a month, the pages' text); both keys are optional.
 - **Actions** (`WatchAssistant.kt`): `set_timer`, `set_alarm` (a time, or seconds from now rounded up to the minute),
-  `set_reminder`, `cancel_alerts` (by id), `get_weather`, `show_weather_card`, `show_help`, `start_workout`,
+  `set_reminder`, `cancel_alerts` (by id), `get_weather`, `show_weather_card`, `show_help`, `show_list` (a table
+  on the list card: title, subtitle and up to 30 rows of left and right text, kept within 2,000 bytes), `start_workout`,
   `stop_workout`, `sync_watch`. Timers and alarms go to the watch as Alexa alerts. Reminders go into the watch's own
   reminder slots (shared with calendar events, merged by time, 16-character titles), because the Alexa reminder alert
   rang without showing its text. The voice alerts are kept in `meta["alexa_alerts"]` until they ring, so they can be
@@ -88,10 +102,10 @@ Alexa's values on; a name with no URL showed a question mark). Alexa's image ser
 (`images-na.ssl-images-amazon.com/images/G/01/alexa/avs/gui/small/weatherForecast/<name>.png`): sunny, partly_cloudy,
 partly_cloudy_night, cloudy, rainy, snow, windy and lightning, so every condition maps to one of those. When no speech is
 heard at all, the watch is told so at once instead of waiting on Gemini. A reply that ends with a question reopens the
-watch's mic. After a card (weather, the help list) no text is sent, since
+watch's mic. After a card (weather, a list) no text is sent, since
 it would replace the card. Reasoning is turned off for speed; a model that requires it (`Reasoning is mandatory for this
 endpoint`) is asked again with low-effort reasoning and 4000 tokens for the rest of the conversation. Replies are cleaned
-for the watch's font (plain punctuation, no emoji). Log lines never pass text through a format string: a "%" in an
+for the watch's font (see What the watch draws). Log lines never pass text through a format string: a "%" in an
 answer (humidity 66%) crashed the app on the weather question (2026-11-06).
 
 There are no built-in answers. Whatever fails is shown on the watch instead: no Gemini or OpenRouter key, Gemini or

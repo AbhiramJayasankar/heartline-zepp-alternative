@@ -237,8 +237,32 @@ class WatchAssistantTest {
 
     @Test fun textIsCleanedForTheWatch() {
         assertEquals("I don't have a preference - both are good.", WatchAssistant.watchText("I don’t have a preference — both are good."))
-        assertEquals("Lettuce in!", WatchAssistant.watchText("Lettuce in! 😄"))
+        assertEquals("Lettuce in!", WatchAssistant.watchText("Lettuce in! 🤔"))
+        assertEquals("Lettuce in! 😄", WatchAssistant.watchText("Lettuce in! 😄"))
         assertEquals("74 bpm at 5:19 PM, 27°C", WatchAssistant.watchText("74 bpm at 5:19 PM, 27°C"))
         assertEquals("\"Hi\"... bold", WatchAssistant.watchText("“Hi”… **bold**"))
+        // What the watch draws stays: symbols, other scripts, new lines and the emoji it has.
+        assertEquals("✓ 31° → ★ - Rs 500 नमस्ते 你好\n\nNext 👍 ☀", WatchAssistant.watchText("✓ 31° → ★ • ₹500 नमस्ते 你好\n\n\n\nNext 👍🏽 ☀️"))
+        assertEquals("Good", WatchAssistant.watchText("Good ❤️ ✔ ⏰ 🔥"))
+        assertEquals("😷🙌 ♥ ‰ ① - x", WatchAssistant.watchText("😩😷🙌😸 ♥ ‰ ① ▸ x"))
+        assertEquals("Family 👩👧, flag , key 1", WatchAssistant.watchText("Family 👨‍👩‍👧, flag 🇮🇳, key 1️⃣").replace("  ", " "))
+    }
+
+    @Test fun markdownBecomesPlainText() {
+        val md = "## Today\n**Sleep** was *good*, see [the log](https://x.y/z).\n* one\n- two\n> quoted\n\n| Day | High |\n|---|:---:|\n| Mon | 31° |\n~~old~~ `code`"
+        assertEquals("Today\nSleep was good, see the log.\n- one\n- two\nquoted\n\nDay | High\nMon | 31°\nold code", WatchAssistant.watchText(md))
+        assertEquals("5 * 3 = 15", WatchAssistant.watchText("5 * 3 = 15"))
+    }
+
+    @Test fun showListSendsATable() = runBlocking {
+        brain(call("show_list", """{"title":"Forecast","rows":[{"left":"Mon","right":"31° / 22° **Sunny**"},{"left":"","right":""},{"left":"Tue","right":"Rain"}]}"""), say("Here it is."))
+        val a = assistant().answer("Forecast as a table")
+        assertArrayEquals(Alexa.list("Forecast", "", listOf("Mon" to "31° / 22° Sunny", "Tue" to "Rain")), a.frames.single())
+        assertEquals(null, a.text) // the card is the answer
+        assertEquals(listOf("Done: showed a list of 2 rows"), toolResults())
+        brain(call("show_list", """{"rows":[${(1..60).joinToString(",") { """{"left":"$it","right":"${"word ".repeat(30)}"}""" }}]}"""), say("Done."))
+        val big = assistant().answer("A long table")
+        assertTrue(big.frames.single().size <= WatchAssistant.LIST_BYTES + 7)
+        assertTrue(toolResults().single().contains("didn't fit"))
     }
 }
