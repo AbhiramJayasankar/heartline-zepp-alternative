@@ -5,9 +5,11 @@
 <h1 align="center">Heartline: an open-source Zepp app alternative for the Amazfit GTR 2e</h1>
 
 <p align="center">
-  Use your <b>Amazfit GTR 2e without the Zepp app</b>. Heartline is an Android app that talks to the watch directly
-  over Bluetooth LE and keeps every reading on your phone: heart rate, sleep stages, SpO2, stress, skin temperature,
-  workouts, notifications, alarms, weather and the watch's Alexa button. No account, no cloud.
+  <b>Your watch, minus the Zepp app, plus an AI assistant on its Alexa button.</b><br>
+  Heartline talks to the <b>Amazfit GTR 2e</b> directly over Bluetooth LE and keeps every reading on your phone:
+  heart rate, sleep stages, SpO2, stress, skin temperature, workouts, notifications, alarms and weather. Press the
+  watch's Alexa button and ask it anything: it reads your health data, searches the web, sets reminders and shows
+  tables on your wrist. No account, no cloud.
 </p>
 
 <p align="center">
@@ -20,14 +22,48 @@
 > **Status: alpha.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
 > Other Huami/Zepp watches of the same generation (GTR 2, GTS 2, GTS 2e) speak a similar protocol but are untested.
 
-## Why
+## Highlights
 
-The Zepp app wants an account, uploads your health data, and shows you a fraction of what the watch measures.
-The watch itself records far more: per-minute skin temperature, the raw optical pulse waveform, accelerometer,
-gyroscope, compass, GPS and microphone streams. Heartline reads all of it straight from the watch and turns it into
-numbers you can use, on the phone, offline.
+| | |
+|---|---|
+| 🎙️ **An Alexa button that knows you** | Ask about your sleep, stress or readiness and get an analysis of *your* data. Ask for the news and it searches the web. Set timers, alarms and reminders by voice. Free AI, your own keys. |
+| 📊 **Health scores Zepp never showed** | Readiness, strain, sleep score and body battery every day, trends against your own 28-day baseline, VO2max and fitness age. |
+| 🫀 **Heart checks from the raw pulse** | Records the optical pulse waveform and measures HRV, rhythm regularity and breathing rate beat by beat. |
+| 🏋️ **Gym capture that counts reps** | Streams motion and pulse during a session and finds your sets, reps, rest and heart-rate recovery. |
+| 🔬 **Every sensor, raw** | Live pulse, accelerometer, gyroscope, compass, GPS and microphone streams, saved to CSV. |
+| ⌚ **Everything Zepp did** | Notifications with app icons, calls, music, find phone, alarms, calendar reminders, weather, watch settings and the app list. |
+| 🔒 **No account, no cloud** | One local database on the phone. Export it, back it up, or share it through Health Connect. |
 
-## Features
+## The Alexa button, rebuilt
+
+On the GTR 2e, Alexa only works through the Zepp app and an Amazon account. Heartline catches the button press instead, listens through the watch's
+microphone, and answers on the watch's own Alexa screens: text, cards, tables, alarms and timers.
+
+| Say | What happens on your wrist |
+|---|---|
+| "How did I sleep last night?" | It reads your sleep stages and gives a short verdict on how you slept |
+| "Analyse my heart rate today" | It pulls the day's heart rate, resting rate and zones and tells you what stands out |
+| "What's the weather like?" | The watch's weather card for where your phone is: now, today and three days |
+| "Who won the last F1 race?" | It searches the web (Tavily or Exa) and answers from what it finds |
+| "List the ten tallest mountains" | A scrolling two-column table on the watch |
+| "Remind me to drink water in 20 minutes" | The reminder rings on the watch with its title; "cancel my water reminder" cancels it |
+| "Wake me at 6:30" / "Timer for 5 minutes" | A real watch alarm or timer, set on the watch itself |
+| "Start a gym workout" | Heartline's workout capture starts recording sets and reps |
+| "Tell me a 1,000-word story" | It fills the reply screen and continues as watch notifications |
+| "Knock knock" | It plays along: the watch listens again after each line |
+
+- **Hears you with Gemini 3.5 Transcribe Live**, tuned for Indian and US English (free tier, your own AI Studio key).
+- **Thinks with free OpenRouter models** and 20 tools: eight health-data lookups, web search, and actions for
+  timers, alarms, reminders, workouts, the weather card, tables and syncing. A second OpenRouter key takes over when
+  the first hits its daily free limit.
+- **Built around the watch's real limits**, measured on the device: 2,000-byte replies, 1,024-byte notifications, a
+  10-character left column in tables, and a map of the emoji its font actually draws, so you never see a box.
+- **Nothing hidden.** The app's Alexa page logs every question: what Gemini heard, each model request with its
+  timing and tokens, every tool call with its arguments and result, the reply, and the recording to play back. You
+  can edit the instructions, switch tools on and off, rewrite their descriptions, and pick the models, reasoning
+  and limits. "Try a question" runs the whole pipeline without touching the watch.
+
+## Everything else
 
 **Health and sleep**
 - **Readiness, strain, sleep score and body battery** each day, with a short plain-language suggestion.
@@ -51,14 +87,8 @@ numbers you can use, on the phone, offline.
 - **Watch settings**: all-day heart rate and stress monitoring, lift-to-wake (scheduled), do not disturb
   (scheduled), move reminders, high heart rate alerts, disconnect alert, language, wrist, step goal and more.
 - **Watch app list**: choose and order the apps, and what goes in the More screen.
-- **Alarms, calendar reminders, weather** for where your phone is (Open-Meteo, no API key), vibration counts, set clock, find watch.
-- **Alexa button**: the watch's Alexa button works again. **Gemini 3.5 Transcribe Live** hears you and a free
-  **OpenRouter** model answers with tool calling: it looks up your heart rate, stress, sleep stages, SpO2, readiness and
-  trends to analyse them, shows real weather where you are, starts workout capture ("start a gym workout"), and sets
-  timers, alarms and reminders that ring on the watch (and can be cancelled by voice), and searches the web through
-  Tavily or Exa. All run on free tiers with your own keys. The app's Alexa page shows every question with each request,
-  tool call and result, and lets you change the instructions, the tools and their descriptions, the models, reasoning
-  and limits.
+- **Alarms, calendar reminders, weather** for where your phone is (Open-Meteo, no API key), vibration counts, set
+  clock, find watch.
 
 **Your data stays yours**
 - Everything is stored in a local database on the phone. Export it, back it up, or share it with other apps through
@@ -80,6 +110,9 @@ and open it on your phone, or install it with `adb install -r heartline-*.apk`.
 3. Open Heartline, grant Bluetooth and notification access, and enter the watch's Bluetooth address and key.
    The key is stored encrypted with the Android keystore and never leaves the phone.
 4. Under **Watch → Keep running**, allow background use so syncing continues with the screen off.
+5. **For the Alexa button**, open **Watch → Alexa** and paste a [Gemini](https://aistudio.google.com) key (to hear you)
+   and an [OpenRouter](https://openrouter.ai) key (to answer); both have free tiers. A
+   [Tavily](https://tavily.com) or [Exa](https://exa.ai) key adds web search (1,000 free searches a month on Tavily).
 
 ## Requirements
 
@@ -103,12 +136,13 @@ cd heartline-zepp-alternative/android
 Heartline speaks the watch's Bluetooth LE protocol directly: the Huami authentication handshake, the activity and
 health history fetches (without the acknowledgement that would delete data from the watch), the 2021 chunked
 protocol used by the Alexa button, and the raw sensor stream. The protocol notes are in
-[`android/docs/`](android/docs) and the analysis methods in
-[`android/core/analytics/`](android/core/analytics) and [`server/analytics/METHODS.md`](server/analytics/METHODS.md).
+[`android/docs/`](android/docs) (the Alexa bridge in [`alexa-bridge.md`](android/docs/alexa-bridge.md)) and the
+analysis methods in [`android/core/analytics/`](android/core/analytics) and
+[`server/analytics/METHODS.md`](server/analytics/METHODS.md).
 
 | Folder | What it is |
 |---|---|
-| `android/app` | The Heartline Android app (Kotlin, Jetpack Compose) |
+| `android/app` | The Heartline Android app (Kotlin, Jetpack Compose), including the Alexa assistant |
 | `android/core/protocol` | Watch protocol: commands, history parsing, settings, Alexa, event log |
 | `android/core/ble` | Bluetooth LE connection, sync and raw streaming |
 | `android/core/analytics` | Readiness, sleep, HRV, rhythm, workout capture (sets and reps) |
@@ -124,6 +158,8 @@ protocol used by the Alexa button, and the raw sensor stream. The protocol notes
   GTR 2e; the count does.
 - **Automatic workout capture** can start up to about 30 minutes late, because the watch reports workout starts
   in batches. For a whole gym session, start the capture in the app.
+- **The Alexa button needs the internet** and your own keys; free models are sometimes slow or rate-limited. If an
+  answer takes longer than the watch waits (about 40 s), it arrives as a notification.
 - Heart rhythm screening and all health scores are estimates for personal use, not medical advice.
 
 ## FAQ
@@ -132,13 +168,18 @@ protocol used by the Alexa button, and the raw sensor stream. The protocol notes
 Yes. Heartline replaces Zepp for the Amazfit GTR 2e: syncing, settings, notifications and the Alexa button all
 work without a Zepp account or cloud connection once you have the watch's auth key.
 
+**Does the Alexa button work without Amazon?**
+Yes. Heartline answers it instead of Alexa, with Gemini for speech and an OpenRouter model of your choice for the
+answers. No Amazon account is involved.
+
 **How is this different from Gadgetbridge?**
 [Gadgetbridge](https://gadgetbridge.org) supports hundreds of watches and was a key reference for the protocol.
 Heartline does one watch in depth: it decodes the watch's skin temperature, event log and raw sensor streams, adds
-health scores, heart checks from the raw pulse, gym set and rep detection, and a working Alexa button.
+health scores, heart checks from the raw pulse, gym set and rep detection, and an AI assistant on the Alexa button.
 
 **Does it need the internet?**
-No. Only optional features go online: weather (Open-Meteo) and the Alexa button (Gemini to hear you, OpenRouter to answer).
+No. Only optional features go online: weather (Open-Meteo) and the Alexa button (Gemini to hear you, OpenRouter to
+answer, Tavily or Exa to search).
 
 **Will it work on my GTR 2, GTS 2 or GTS 2e?**
 Probably in large part, since they share the protocol, but only the GTR 2e has been tested. Reports are welcome
@@ -147,8 +188,9 @@ in the [issues](https://github.com/AbhiramJayasankar/heartline-zepp-alternative/
 ## Credits
 
 Protocol knowledge from [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge); auth keys via
-[huami-token](https://github.com/argrento/huami-token); weather from [Open-Meteo](https://open-meteo.com).
-Not affiliated with Zepp Health or Amazfit.
+[huami-token](https://github.com/argrento/huami-token); weather from [Open-Meteo](https://open-meteo.com); speech
+from [Gemini](https://ai.google.dev); answers through [OpenRouter](https://openrouter.ai); search from
+[Tavily](https://tavily.com) and [Exa](https://exa.ai). Not affiliated with Zepp Health, Amazfit or Amazon.
 
 ## License
 
