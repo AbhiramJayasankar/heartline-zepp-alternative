@@ -65,6 +65,7 @@ import dev.heartline.ui.components.MutedText
 import dev.heartline.ui.components.PillButton
 import dev.heartline.ui.components.paper
 import dev.heartline.ui.theme.HL
+import dev.heartline.ui.theme.hue
 
 private val PERMISSIONS = arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.POST_NOTIFICATIONS)
 private val ADDRESS = Regex("([0-9A-F]{2}:){5}[0-9A-F]{2}")
