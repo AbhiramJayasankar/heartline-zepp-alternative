@@ -230,9 +230,9 @@ class WatchAssistant(
                 }
                 "show_list" -> {
                     val given = args.optJSONArray("rows") ?: return "Error: give rows, each with left and right"
-                    val rows = (0 until given.length()).mapNotNull { given.optJSONObject(it) }
-                        .map { watchText(it.optString("left")).take(LIST_LEFT) to watchText(it.optString("right")).take(LIST_RIGHT) }
-                        .filter { (l, r) -> l.isNotEmpty() || r.isNotEmpty() }
+                    val rows = fitLeft((0 until given.length()).mapNotNull { given.optJSONObject(it) }
+                        .map { watchText(it.optString("left")) to watchText(it.optString("right")) }
+                        .filter { (l, r) -> l.isNotEmpty() || r.isNotEmpty() }).map { (l, r) -> l to r.take(LIST_RIGHT) }
                     if (rows.isEmpty()) return "Error: give at least one row with left or right text"
                     val title = watchText(args.optString("title")).take(LIST_TITLE)
                     val subtitle = watchText(args.optString("subtitle")).take(LIST_TITLE)
@@ -299,10 +299,26 @@ class WatchAssistant(
             "in_seconds" to prop("integer", "Or: how many seconds from now"))
 
         /**
-         * show_list limits. The watch showed all 25 rows of a test list, cut a 19-character left column to about 11 and
-         * wrapped long right columns (2026-11-06); the total is kept within the reply size.
+         * show_list limits. The watch showed all 25 rows of a test list and wrapped long right columns, but cuts the
+         * left column at its width: "Long left text here" showed as "Long left T", "3. Kangchenjunga" as "3. Kangch",
+         * while "1. Everest" fitted (2026-11-06). The total is kept within the reply size.
          */
-        const val LIST_ROWS = 30; const val LIST_LEFT = 16; const val LIST_RIGHT = 200; const val LIST_TITLE = 40; const val LIST_BYTES = 2000
+        const val LIST_ROWS = 30; const val LIST_LEFT = 10; const val LIST_RIGHT = 200; const val LIST_TITLE = 40; const val LIST_BYTES = 2000
+
+        /**
+         * Rows whose left column all fit as they are; otherwise, for the whole table alike, the left text moves into the
+         * right column ("3. Kangchenjunga", "8,586 m" becomes "3.", "Kangchenjunga - 8,586 m") keeping a short first
+         * word such as a rank or day on the left, so nothing is cut off.
+         */
+        fun fitLeft(rows: List<Pair<String, String>>): List<Pair<String, String>> {
+            if (rows.all { it.first.length <= LIST_LEFT }) return rows
+            return rows.map { (left, right) ->
+                val first = left.substringBefore(' ')
+                val label = first.length in 1..3 || (first.length <= 6 && first.any { it.isDigit() }) // "3.", "Mon", "10:30"
+                val (keep, moved) = if (label && first.length < left.length) first to left.substringAfter(' ').trim() else "" to left
+                keep to listOf(moved, right).filter { it.isNotEmpty() }.joinToString(" - ")
+            }
+        }
 
         /** The actions the brain can take on the watch and in Heartline. */
         val ACTION_TOOLS = listOf(
@@ -317,13 +333,14 @@ class WatchAssistant(
             Tool("show_help", "Show the list of things they can ask; use it when they ask what you can do.", obj()),
             Tool("show_list", "Show a table on the watch: rows of a short left column and a wrapping right column, under an optional " +
                 "title and subtitle; it scrolls. Use it for anything in rows: a schedule, a forecast by day, rankings or scores, a " +
-                "comparison, steps of a recipe, a top-5 list. The left column fits about 10 characters (a day, time, number, rank " +
-                "or short label; longer is cut off); the right column wraps and can hold a sentence. The card replaces the text " +
+                "comparison, steps of a recipe, a top-5 list. The left column fits only about 9 characters, so put a rank, day, " +
+                "time, number or very short label there and names in the right column, which wraps and can hold a sentence " +
+                "(for a ranking: left \"3.\", right \"Kangchenjunga, 8,586 m\"). The card replaces the text " +
                 "reply on the watch, so put everything that matters in it.",
                 obj("title" to prop("string", "Short heading at the top; optional"),
                     "subtitle" to prop("string", "Second line under the title; optional"),
                     "rows" to JSONObject().put("type", "array").put("description", "Up to $LIST_ROWS rows, in order").put("items",
-                        obj("left" to prop("string", "Left column, about 10 characters at most"), "right" to prop("string", "Right column"))),
+                        obj("left" to prop("string", "Left column, 9 characters at most: a rank, day, time or number"), "right" to prop("string", "Right column"))),
                     required = listOf("rows"))),
             Tool("start_workout", "Start Heartline's workout capture, which records sets, reps and heart rate from the watch's sensors.",
                 obj("label" to prop("string", "The workout they named, such as Gym or Run"), "minutes" to prop("integer", "How long to capture; 60 if they don't say"), required = listOf("label"))),

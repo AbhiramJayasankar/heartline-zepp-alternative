@@ -37,7 +37,7 @@ reply streams voice again in the same session (no new start).
 |---|---|---|
 | 1 weather | u32 field mask `0x3fd`, then time, location, date line, description, icon (name, url), current, high, low, forecast days (time, high, low, icon) | Shown |
 | 2 alerts | `op kind token\0 details`: op 1 add, 2 delete; kind 1 alarm, 2 reminder, 3 timer; timer details `h m s`; alarm/reminder `label\0 label\0 u32 wall-clock time, u32 0, u32 repeat days` | Timer shown and rings |
-| 3 list | `title\0 count (left\0 right\0 \0)* subtitle\0` | Shown and scrolls (25 rows tried); the left column shows about 11 characters and cuts the rest, the right one wraps and takes new lines; an empty title, subtitle or left column is fine; the third field of a row showed nothing |
+| 3 list | `title\0 count (left\0 right\0 \0)* subtitle\0` | Shown and scrolls (25 rows tried); the left column shows about 10 characters ("3. Kangch") and cuts the rest, so `show_list` moves long left text into the right column; the right one wraps and takes new lines; an empty title, subtitle or left column is fine; the third field of a row showed nothing |
 | 4 local actions | `action [args]` | Not tried |
 | 6 card | `title\0 subtitle\0 text\0` | Zepp sends it only to assistant version 3+; this watch reports 2 (`21 02 01`) and ignores it |
 

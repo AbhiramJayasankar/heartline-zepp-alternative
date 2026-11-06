@@ -254,6 +254,14 @@ class WatchAssistantTest {
         assertEquals("5 * 3 = 15", WatchAssistant.watchText("5 * 3 = 15"))
     }
 
+    @Test fun longLeftColumnsMoveRight() {
+        val short = listOf("1. Everest" to "8,849 m", "Mon" to "31°")
+        assertEquals(short, WatchAssistant.fitLeft(short))
+        assertEquals(listOf("1." to "Everest - 8,849 m", "3." to "Kangchenjunga - 8,586 m", "" to "Base camp - 5,364 m"),
+            WatchAssistant.fitLeft(listOf("1. Everest" to "8,849 m", "3. Kangchenjunga" to "8,586 m", "Base camp" to "5,364 m")))
+        assertEquals(listOf("" to "Kangchenjunga"), WatchAssistant.fitLeft(listOf("Kangchenjunga" to "")))
+    }
+
     @Test fun showListSendsATable() = runBlocking {
         brain(call("show_list", """{"title":"Forecast","rows":[{"left":"Mon","right":"31° / 22° **Sunny**"},{"left":"","right":""},{"left":"Tue","right":"Rain"}]}"""), say("Here it is."))
         val a = assistant().answer("Forecast as a table")
