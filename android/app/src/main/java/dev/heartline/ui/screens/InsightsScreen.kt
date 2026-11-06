@@ -183,6 +183,10 @@ private fun InsightCard(i: Insight, c: Palette) {
 @Composable
 private fun HowItWasMade(r: InsightReport) {
     val c = HL.colors
+    if (r.digest.isEmpty() && r.attempts.isEmpty()) {
+        Note("This set was written before Heartline kept a record of how insights are made. Write new insights to see the exact data the model saw, its instructions, every request and its raw reply.")
+        return
+    }
     Card(padding = 16.dp) {
         Step("1", "Your data was gathered", "${r.digest.lines().count { it.startsWith("## ") }} sections, ${"%,d".format(r.digest.length)} characters, read from the same lookups the Alexa button uses.")
         r.digest.takeIf { it.isNotEmpty() }?.let { d ->
@@ -199,8 +203,7 @@ private fun HowItWasMade(r: InsightReport) {
         r.system.takeIf { it.isNotEmpty() }?.let { Expandable("See the instructions", it) }
         Gap(12)
         Step("3", "Sent to the model", "${r.attempts.size} request" + (if (r.attempts.size == 1) "" else "s") + "; the first that answered wrote these.")
-        Gap(6)
-        Box(Modifier.padding(start = 34.dp)) { Attempts(r.attempts) }
+        if (r.attempts.isNotEmpty()) { Gap(6); Box(Modifier.padding(start = 34.dp)) { Attempts(r.attempts) } }
         Gap(12)
         Step("4", "The reply came back", listOfNotNull(
             r.promptTokens?.let { "%,d tokens in".format(it) }, r.outputTokens?.let { "%,d out".format(it) },

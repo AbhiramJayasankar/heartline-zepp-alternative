@@ -98,11 +98,19 @@ fun HeartScreen(controller: HeartlineController, nav: Navigator) {
             })
             Gap(12)
             PillButton(if (hr.streaming) "Stop live heart rate" else "Start live heart rate", { controller.setLiveHr(!hr.streaming) }, style = ButtonStyle.PULSE, pressed = hr.streaming, enabled = connected)
-            if (hr.recent.isNotEmpty()) {
+            // Live readings joined with what the watch synced, so the trace is never empty while there is data.
+            val yDay by remember { controller.healthDay(LocalDate.now().minusDays(1)) }.collectAsState(initial = null)
+            val trace = remember(hr.recent, todayDay, yDay) {
+                val synced = (yDay?.hr.orEmpty() + todayDay?.hr.orEmpty()).map { dev.heartline.app.HrPoint(it.t.toLong(), it.v.roundToInt()) }
+                // Minutes that have live readings keep those (finer); the rest come from the synced record.
+                val liveMinutes = hr.recent.mapTo(HashSet()) { it.ts / 60 }
+                (synced.filter { it.ts / 60 !in liveMinutes } + hr.recent).sortedBy { it.ts }
+            }
+            if (trace.isNotEmpty()) {
                 Gap(14)
                 Segmented(listOf(600L to "10 min", 3600L to "1 hour", 86400L to "24 hours"), window, { window = it })
                 Gap(6)
-                HrTraceChart(hr.recent, window, now)
+                HrTraceChart(trace, window, now)
             }
         }
 

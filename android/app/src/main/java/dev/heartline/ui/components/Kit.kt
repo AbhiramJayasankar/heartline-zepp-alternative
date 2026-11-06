@@ -69,6 +69,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
 import kotlin.math.max
+import kotlin.math.abs
 import kotlin.math.min
 
 /** Rounded surface for a block of content; tappable cards read as one button with [onClickLabel] to screen readers. */
@@ -292,16 +293,51 @@ fun DayBars(points: List<DayPoint>, color: Color, modifier: Modifier = Modifier,
 
 /** Sleep stages through the night as a step chart: awake on top, then REM, light and deep. */
 @Composable
-fun Hypnogram(minutes: List<MinuteUi>, start: Long, end: Long, modifier: Modifier = Modifier) {
+fun Hypnogram(minutes: List<MinuteUi>, start: Long, end: Long, modifier: Modifier = Modifier, spo2: List<dev.heartline.app.SeriesPoint> = emptyList()) {
     val c = HL.colors
     val tm = rememberTextMeasurer()
     val lanes = listOf("Awake", "REM", "Light", "Deep")
     fun lane(s: MinuteState): Int? = when (s) { MinuteState.SLEEP_REM -> 1; MinuteState.SLEEP_LIGHT -> 2; MinuteState.SLEEP_DEEP -> 3; MinuteState.ACTIVE, MinuteState.IDLE -> 0; else -> null }
     fun color(l: Int) = when (l) { 0 -> c.warn; 1 -> c.sleepRem; 2 -> c.sleepLight; else -> c.sleepDeep }
-    val inNight = remember(minutes, start, end) { minutes.filter { it.ts in start until end } }
+    val inNight = remember(minutes, start, end) { minutes.filter { it.ts in start until end }.sortedBy { it.ts } }
     val clock = DateTimeFormatter.ofPattern("HH:mm")
-    Canvas(modifier.fillMaxWidth().height(170.dp).semantics { contentDescription = "Sleep stages from ${Instant.ofEpochSecond(start).atZone(ZoneId.systemDefault()).format(clock)} to ${Instant.ofEpochSecond(end).atZone(ZoneId.systemDefault()).format(clock)}" }) {
-        val padL = 48.dp.toPx(); val padB = 20.dp.toPx()
+    var sel by remember(start, end) { mutableStateOf<Long?>(null) }
+    var widthPx by remember { mutableStateOf(1f) }
+    val padLdp = 48.dp
+    // Readout: the touched minute's stage, heart rate and blood oxygen.
+    Box(Modifier.fillMaxWidth().heightIn(min = 40.dp)) {
+        val t = sel
+        if (t == null) MutedText("Touch or drag along the night for each minute's stage, heart rate and blood oxygen.")
+        else {
+            val m = inNight.minByOrNull { abs(it.ts - t) }?.takeIf { abs(it.ts - t) <= 120 }
+            val o = spo2.minByOrNull { abs(it.t - t) }?.takeIf { abs(it.t - t) <= 600 }
+            Column {
+                Text(Instant.ofEpochSecond(t).atZone(ZoneId.systemDefault()).format(clock), style = HL.type.label, color = c.inkSoft)
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val l = m?.state?.let { lane(it) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (l != null) { Dot(color(l), 9.dp); Spacer(Modifier.width(5.dp)) }
+                        Text(m?.let { stateName(it.state) } ?: "No data", style = HL.type.bodyStrong, color = c.ink)
+                    }
+                    m?.hr?.let { Text("$it bpm", style = HL.type.bodyStrong, color = c.pulse) }
+                    o?.let { Text("SpO2 %.0f%%".format(it.v), style = HL.type.bodyStrong, color = c.oxygen) }
+                }
+            }
+        }
+    }
+    Spacer(Modifier.height(4.dp))
+    Canvas(modifier.fillMaxWidth().height(170.dp)
+        .semantics { contentDescription = "Sleep stages from ${Instant.ofEpochSecond(start).atZone(ZoneId.systemDefault()).format(clock)} to ${Instant.ofEpochSecond(end).atZone(ZoneId.systemDefault()).format(clock)}" }
+        .pointerInput(start, end) {
+            fun at(px: Float): Long { val padL = padLdp.toPx(); return start + (((px - padL) / (widthPx - padL)).coerceIn(0f, 1f) * (end - start)).toLong() }
+            detectTapGestures { o -> sel = at(o.x).takeIf { sel == null || abs(it - sel!!) > 300 } }
+        }
+        .pointerInput(start, end) {
+            fun at(px: Float): Long { val padL = padLdp.toPx(); return start + (((px - padL) / (widthPx - padL)).coerceIn(0f, 1f) * (end - start)).toLong() }
+            detectHorizontalDragGestures(onDragStart = { sel = at(it.x) }) { ch, _ -> sel = at(ch.position.x); ch.consume() }
+        }) {
+        widthPx = size.width
+        val padL = padLdp.toPx(); val padB = 20.dp.toPx()
         val w = size.width - padL; val laneH = (size.height - padB) / lanes.size
         fun x(ts: Long) = padL + ((ts - start).toFloat() / max(1L, end - start)) * w
         lanes.forEachIndexed { i, name ->
@@ -314,8 +350,12 @@ fun Hypnogram(minutes: List<MinuteUi>, start: Long, end: Long, modifier: Modifie
             drawRoundRect(color(l), Offset(x(m.ts), top), Size(mw + 0.6f, laneH * 0.64f), CornerRadius(2f))
         } }
         val hours = (start / 3600 + 1..end / 3600).map { it * 3600 }
-        val step = max(1, hours.size / 5)
-        hours.forEachIndexed { i, h -> if (i % step == 0) label(tm, Instant.ofEpochSecond(h).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH")), x(h), size.height - padB / 2, c.inkSoft, center = true) }
+        val step = max(1, hours.size / 6)
+        hours.forEachIndexed { i, h -> if (i % step == 0) {
+            drawLine(c.line.copy(alpha = 0.5f), Offset(x(h), size.height - padB), Offset(x(h), size.height - padB + 3.dp.toPx()), 1f)
+            label(tm, Instant.ofEpochSecond(h).atZone(ZoneId.systemDefault()).format(clock), x(h), size.height - padB / 2 + 2.dp.toPx(), c.inkSoft, center = true)
+        } }
+        sel?.let { t -> drawLine(c.ink.copy(alpha = 0.6f), Offset(x(t), 0f), Offset(x(t), size.height - padB), 1.2.dp.toPx()) }
     }
 }
 

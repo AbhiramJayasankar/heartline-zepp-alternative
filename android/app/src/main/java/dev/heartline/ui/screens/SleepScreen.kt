@@ -96,7 +96,7 @@ fun SleepScreen(controller: HeartlineController, nav: Navigator) {
                 }
             } else NightDetail(night, day!!.minutes + (eve?.minutes ?: emptyList()), score = scoreSeries?.points?.firstOrNull { it.date == date }?.value?.roundToInt(),
                 usualMin = sleepSeries?.points?.dropLast(1)?.mapNotNull { it.value }?.takeIf { it.isNotEmpty() }?.average()?.let { (it * 60).roundToInt() },
-                spo2 = (day!!.spo2 + (eve?.spo2 ?: emptyList())).filter { it.t >= night.start && it.t <= night.end }.map { it.v })
+                spo2Points = (day!!.spo2 + (eve?.spo2 ?: emptyList())).filter { it.t >= night.start && it.t <= night.end }.sortedBy { it.t })
 
             // ---- Two weeks ----
             sleepSeries?.let { s ->
@@ -141,8 +141,9 @@ fun SleepScreen(controller: HeartlineController, nav: Navigator) {
 }
 
 @Composable
-private fun NightDetail(n: SleepNightUi, minutes: List<dev.heartline.app.MinuteUi>, score: Int?, usualMin: Int?, spo2: List<Double>) {
+private fun NightDetail(n: SleepNightUi, minutes: List<dev.heartline.app.MinuteUi>, score: Int?, usualMin: Int?, spo2Points: List<dev.heartline.app.SeriesPoint>) {
     val c = HL.colors
+    val spo2 = spo2Points.map { it.v }
     val asleep = n.deepMin + n.lightMin + n.remMin
     val inBed = ((n.end - n.start) / 60).toInt().coerceAtLeast(asleep)
     // ---- Headline ----
@@ -174,7 +175,7 @@ private fun NightDetail(n: SleepNightUi, minutes: List<dev.heartline.app.MinuteU
     Card(padding = 14.dp) {
         AreaLabel("Stages through the night", c.hue(Area.SLEEP), dot = false)
         Gap(8)
-        Hypnogram(minutes, n.start, n.end)
+        Hypnogram(minutes, n.start, n.end, spo2 = spo2Points)
         Gap(12)
         StagesBar(n)
         Gap(12)
@@ -218,7 +219,40 @@ private fun NightDetail(n: SleepNightUi, minutes: List<dev.heartline.app.MinuteU
             Gap(10)
             MutedText("A low, steady heart rate overnight is a sign of good recovery; the lowest point usually comes in the second half of the night.")
         }
+        Gap(10)
+        NightBodyChart(n, minutes, spo2Points)
     }
 }
 
 private class Stage(val name: String, val min: Int, val color: Color, val low: Float, val high: Float, val about: String)
+
+/** Heart rate and blood oxygen through the night over the sleep stages, touchable and expandable. */
+@Composable
+private fun NightBodyChart(n: SleepNightUi, minutes: List<dev.heartline.app.MinuteUi>, spo2: List<dev.heartline.app.SeriesPoint>) {
+    val c = HL.colors
+    val inNight = remember(minutes, n) { minutes.filter { it.ts in n.start until n.end }.sortedBy { it.ts } }
+    val hr = remember(inNight) { inNight.mapNotNull { m -> m.hr?.let { dev.heartline.app.SeriesPoint(m.ts.toDouble(), it.toDouble()) } } }
+    val spans = remember(inNight, c) {
+        val out = ArrayList<dev.heartline.ui.components.ChartSpan>()
+        var runStart = 0L; var state: MinuteState? = null; var last = 0L
+        fun close() { val s = state ?: return; dev.heartline.ui.components.stateColor(s, c)?.let { col -> out += dev.heartline.ui.components.ChartSpan(runStart.toDouble(), last + 60.0, col.copy(alpha = 0.16f), dev.heartline.ui.components.stateName(s)) } }
+        inNight.forEach { m -> if (m.state != state || m.ts - last > 120) { close(); runStart = m.ts; state = m.state }; last = m.ts }
+        close(); out
+    }
+    if (hr.isEmpty() && spo2.isEmpty()) return
+    Card(padding = 14.dp) {
+        AreaLabel("Heart rate and blood oxygen overnight", c.pulse, dot = false)
+        Gap(6)
+        androidx.compose.runtime.CompositionLocalProvider(dev.heartline.ui.components.LocalChartTitle provides "Heart rate and blood oxygen overnight") {
+            dev.heartline.ui.components.InteractiveChart(
+                listOfNotNull(
+                    dev.heartline.ui.components.ChartLine(hr, c.pulse, "Heart rate", "bpm", width = 1.6.dp, gap = 600.0),
+                    spo2.takeIf { it.isNotEmpty() }?.let { dev.heartline.ui.components.ChartLine(it, c.oxygen, "SpO2", "%", width = 1.6.dp, gap = 1200.0) },
+                ),
+                n.start.toDouble(), n.end.toDouble(), height = 190.dp, spans = spans, minSpan = 900.0,
+                idleHint = "Red: heart rate. Blue: blood oxygen. Shading: the sleep stage. Touch for a minute's values.",
+            )
+        }
+        if (spo2.isEmpty()) { Gap(6); MutedText("No blood oxygen this night. Turn on \"Blood oxygen during sleep\" in Watch settings, Tracking.") }
+    }
+}

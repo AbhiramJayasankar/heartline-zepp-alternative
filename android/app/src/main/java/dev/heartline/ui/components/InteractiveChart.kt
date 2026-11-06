@@ -76,6 +76,8 @@ data class ChartLine(
 /** Bars from [SeriesPoint.t] to t + [width] (x units), e.g. steps per hour. */
 data class ChartBars(val points: List<SeriesPoint>, val width: Double, val color: Color, val label: String, val unit: String = "",
     val format: (Double) -> String = { "%.0f".format(it) })
+/** A vertical whisker at [t] from [low] to [high], e.g. an hour's lowest and highest reading. */
+data class ChartRange(val t: Double, val low: Double, val high: Double, val color: Color)
 /** A horizontal value band (heart-rate zone, stress band). */
 data class ChartBand(val low: Double, val high: Double, val color: Color)
 /** A shaded stretch of x (sleep, workout, set), optionally labelled in the readout when touched. */
@@ -103,13 +105,14 @@ fun InteractiveChart(
     /** Shown on the full-screen view (the surrounding panel's title by default); null keeps the chart inline only. */
     title: String? = LocalChartTitle.current ?: "Chart",
     fullscreen: Boolean = false,
+    ranges: List<ChartRange> = emptyList(),
 ) {
     val c = HL.colors
     val tm = rememberTextMeasurer()
     var expanded by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     if (expanded) FullscreenChart(title ?: "Chart", { expanded = false }) { h ->
         InteractiveChart(lines, xStart, xEnd, Modifier, h, yMin, yMax, bars, bands, spans, xLabel, readoutX, minSpan,
-            "Touch or drag for exact values. Pinch to zoom, double-tap to zoom out.", null, title, fullscreen = true)
+            "Touch or drag for exact values. Pinch to zoom, double-tap to zoom out.", null, title, fullscreen = true, ranges = ranges)
     }
     var view by remember(xStart, xEnd) { mutableStateOf(xStart to xEnd) }
     var selected by remember(xStart, xEnd) { mutableStateOf<Double?>(null) }
@@ -231,6 +234,13 @@ fun InteractiveChart(
                     drawRect(if (sel) s.color else s.color.copy(alpha = 0.75f), Offset(x1 + (x2 - x1 - w) / 2, min(yv, y0)), Size(w, abs(y0 - yv)))
                 }
             }
+            ranges.forEach { r ->
+                if (r.t < a || r.t > b) return@forEach
+                val rx = x(r.t); val cap = 4.dp.toPx(); val sw = 1.4.dp.toPx()
+                drawLine(r.color, Offset(rx, y(r.high)), Offset(rx, y(r.low)), sw)
+                drawLine(r.color, Offset(rx - cap, y(r.high)), Offset(rx + cap, y(r.high)), sw)
+                drawLine(r.color, Offset(rx - cap, y(r.low)), Offset(rx + cap, y(r.low)), sw)
+            }
             lines.forEach { l ->
                 if (l.width.value <= 0f) return@forEach // readout-only series
                 val pts = l.points.filter { it.t >= a - l.gap && it.t <= b + l.gap }
@@ -332,7 +342,7 @@ private fun niceTicks(lo: Double, hi: Double, count: Int): List<Double> {
     return out
 }
 
-private fun formatTick(v: Double): String = if (abs(v) >= 100 || v == floor(v)) "%.0f".format(v) else "%.1f".format(v)
+private fun formatTick(v0: Double): String = (v0 + 0.0).let { v -> if (abs(v) >= 100 || v == floor(v)) "%.0f".format(v) else "%.1f".format(v) }.let { if (it == "-0") "0" else it }
 
 
 /** A chart on its own, full screen and turned to landscape, with a close button. [content] gets the height to fill. */

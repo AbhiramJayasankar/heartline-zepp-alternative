@@ -50,7 +50,7 @@ class GeminiText(private val post: suspend (url: String, headers: Map<String, St
         const val BASE = "https://generativelanguage.googleapis.com/v1beta/models"
         /** The smartest free text model on the owner's AI Studio plan (2026-11: 5 requests a minute, 20 a day). */
         const val DEFAULT_MODEL = "gemini-3.8-flash"
-        const val TIMEOUT_MS = 120_000
+        const val TIMEOUT_MS = 180_000
 
         suspend fun httpGet(url: String, headers: Map<String, String>): String = withContext(Dispatchers.IO) {
             val c = URI(url).toURL().openConnection() as HttpURLConnection

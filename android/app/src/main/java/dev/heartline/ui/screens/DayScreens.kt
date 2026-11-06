@@ -46,6 +46,7 @@ import dev.heartline.ui.components.ChartBand
 import dev.heartline.ui.components.ChartBars
 import dev.heartline.ui.components.ChartLine
 import dev.heartline.ui.components.ChartSpan
+import dev.heartline.ui.components.ChartRange
 import dev.heartline.ui.components.InteractiveChart
 import dev.heartline.ui.components.LegendDot
 import dev.heartline.ui.components.MutedText
@@ -140,12 +141,13 @@ private fun HourChart(hours: List<HourStatUi>, dayStart: Long, color: Color, lab
     val c = HL.colors
     val bars = hours.mapNotNull { h -> (if (sum) h.total?.takeIf { it > 0 } else h.avg)?.let { SeriesPoint(dayStart + h.hour * 3600.0, it) } }
     val lines = if (sum) emptyList() else listOf(
-        ChartLine(hours.mapNotNull { h -> h.max?.let { SeriesPoint(dayStart + h.hour * 3600.0 + 1800, it) } }, c.ink.copy(alpha = 0.5f), "Highest", unit, width = 1.dp, dashed = true, gap = 3700.0),
-        ChartLine(hours.mapNotNull { h -> h.min?.let { SeriesPoint(dayStart + h.hour * 3600.0 + 1800, it) } }, c.inkSoft.copy(alpha = 0.5f), "Lowest", unit, width = 1.dp, dashed = true, gap = 3700.0),
+        ChartLine(hours.mapNotNull { h -> h.max?.let { SeriesPoint(dayStart + h.hour * 3600.0 + 1800, it) } }, c.ink.copy(alpha = 0.5f), "Highest", unit, width = 0.dp, gap = 1900.0),
+        ChartLine(hours.mapNotNull { h -> h.min?.let { SeriesPoint(dayStart + h.hour * 3600.0 + 1800, it) } }, c.inkSoft.copy(alpha = 0.5f), "Lowest", unit, width = 0.dp, gap = 1900.0),
     )
     // Averages start near the day's lowest reading, not zero, so differences between hours stay visible.
     val floor = if (sum) null else hours.mapNotNull { it.min }.minOrNull()?.let { (it - 5).coerceAtLeast(0.0) }
-    InteractiveChart(lines, dayStart.toDouble(), dayStart + 86_400.0, height = 150.dp, yMin = floor, bars = listOf(ChartBars(bars, 3600.0, color, label, unit)),
+    val ranges = if (sum) emptyList() else hours.mapNotNull { h -> if (h.min != null && h.max != null && h.max!! > h.min!!) ChartRange(dayStart + h.hour * 3600.0 + 1800, h.min!!, h.max!!, c.ink.copy(alpha = 0.55f)) else null }
+    InteractiveChart(lines, dayStart.toDouble(), dayStart + 86_400.0, height = 170.dp, yMin = floor, bars = listOf(ChartBars(bars, 3600.0, color.copy(alpha = 0.8f), label, unit)), ranges = ranges,
         readoutX = { t -> "%s–%s".format(dev.heartline.ui.components.epochClock(t - (t - dayStart) % 3600), dev.heartline.ui.components.epochClock(t - (t - dayStart) % 3600 + 3600)) },
         minSpan = 3 * 3600.0, idleHint = "Touch an hour for its range.")
 }
@@ -196,7 +198,7 @@ internal fun HeartDay(d: HealthDayUi, nav: Navigator) {
     MutedText("Zones are 50–90% of your maximum heart rate (set in your profile, or 220 minus your age).")
     Gap(12); ZoneBars(d.hrZones)
     Gap(24); SectionTitle("Hour by hour"); Gap(4)
-    MutedText("Bars are each hour's average; dashed lines its highest and lowest reading.")
+    MutedText("Bars are each hour's average; the thin line through each bar runs from its lowest to its highest reading.")
     Gap(8)
     ChartPanel("Average heart rate per hour") { HourChart(d.hrByHour, d.dayStart, c.pulse, "Average", "bpm") }
     if (d.workouts.isNotEmpty()) {
