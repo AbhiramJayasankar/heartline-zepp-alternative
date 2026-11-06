@@ -56,8 +56,9 @@ formatting (numbers and times as digits) and automatic activity detection off, t
 
 ## Answers: OpenRouter
 
-`AssistantAi.kt` sends what Gemini heard to the owner's OpenRouter model (default `google/gemma-4-31b-it:free`, then
-`openrouter/free`) with the time, the latest heart rate (live or synced per-minute, whichever is newer), today's steps,
+`AssistantAi.kt` sends what Gemini heard to the owner's OpenRouter model (default `nvidia/nemotron-3.5-super-vl:free`,
+falling back to `nvidia/nemotron-3.5-lightning:free` and `google/gemma-4-31b-it:free`; never the `openrouter/free`
+router, which picked a coding model that ignored the format) with the time, the latest heart rate (live or synced per-minute, whichever is newer), today's steps,
 the Open-Meteo forecast for the phone's location (or the place picked in Heartline's weather settings), the alarms,
 timers and reminders set by voice (with ids), the workout capture running, a health summary (`healthSummary` in
 `AssistantSetup.kt`: readiness and its factors, sleep score and last night's stages, strain, body battery, heart rate,
@@ -67,7 +68,10 @@ summary in one call, which keeps within the watch's wait. It asks for one JSON a
 asking back, which reopens the mic), `timer`, `alarm`, `reminder`, `cancel` (by id), `weather` (the card), `help` (the
 list), `start_workout` / `stop_workout` (Heartline's workout capture) or `sync`. Reasoning is turned off for speed; a
 model that requires it (`Reasoning is mandatory for this endpoint`) is asked again with low-effort reasoning and 4000
-tokens. Reasoning cut off by the token limit is never taken as the answer. `WatchAssistant.kt` carries the action out on the watch and keeps the alerts it set in
+tokens. Reasoning cut off by the token limit is never taken as the answer; a plain-text answer, or a reply without an
+action, is shown as it is. The conversation history carries the model's JSON for each turn, so the next reply keeps
+the format. Replies are cleaned for the watch's font (plain punctuation, no emoji). Log lines never pass text through a
+format string: a "%" in an answer (humidity 66%) crashed the app on the weather question (2026-11-06). `WatchAssistant.kt` carries the action out on the watch and keeps the alerts it set in
 `meta["alexa_alerts"]` until they ring, so they can be cancelled by voice.
 
 There are no built-in answers. Whatever fails is shown on the watch instead: no Gemini or OpenRouter key, Gemini or

@@ -23,7 +23,8 @@ class AssistantAiTest {
         assertEquals("Bearer sk-test", headers["Authorization"])
         val json = JSONObject(body)
         assertEquals(AssistantAiConfig.DEFAULT_MODEL, json.getString("model"))
-        assertEquals(listOf(AssistantAiConfig.DEFAULT_MODEL, AssistantAiConfig.FALLBACK_MODEL), (0 until 2).map { json.getJSONArray("models").getString(it) })
+        assertEquals(listOf("nvidia/nemotron-3.5-super-vl:free", "nvidia/nemotron-3.5-lightning:free", "google/gemma-4-31b-it:free"),
+            (0 until json.getJSONArray("models").length()).map { json.getJSONArray("models").getString(it) })
         assertEquals("json_object", json.getJSONObject("response_format").getString("type"))
         assertFalse(json.getJSONObject("reasoning").getBoolean("enabled"))
         val messages = json.getJSONArray("messages")
@@ -86,7 +87,27 @@ class AssistantAiTest {
         assertEquals("<html>", AssistantAi.errorMessage("<html>"))
     }
 
+    @Test fun nearMissesFromTheWatchTestStillWork() = runBlocking {
+        // Seen 2026-11-06: an alarm "one minute from now" with seconds and a null time, a plain-text answer, a reply without an action.
+        assertEquals(Ask.Alarm(inSeconds = 60), AssistantAi.toAsk("""{"action":"alarm","reply":"Alarm set for 1 minute from now.","follow_up":false,"seconds":60,"time":null}"""))
+        assertEquals(Ask.Say("Hi there."), AssistantAi.toAsk("""{"reply":"Hi there."}"""))
+        val plain = AssistantAi { _, _, _ -> reply("Your current heart rate is 74 bpm.") }
+        assertEquals(Ask.Say("Your current heart rate is 74 bpm."), plain.interpret("What's my heart rate?", context, emptyList(), config))
+        assertEquals("m", AssistantAi { _, _, _ -> """{"model":"m","choices":[{"finish_reason":"stop","message":{"content":"{\"action\":\"help\"}"}}]}""" }
+            .also { it.interpret("help", context, emptyList(), config) }.lastModel)
+    }
+
+    @Test fun historyIsTheJsonTheModelShouldReply() {
+        listOf(Ask.Say("Hi.", true), Ask.Timer(60), Ask.Alarm(LocalTime.of(7, 0)), Ask.Alarm(inSeconds = 120), Ask.Reminder("drink water", inSeconds = 120),
+            Ask.Reminder("call home", at = LocalTime.of(18, 0)), Ask.Cancel(listOf(1, 2)), Ask.Weather, Ask.Help, Ask.StartWorkout("Gym", 45), Ask.StopWorkout, Ask.Sync)
+            .forEach { assertEquals(it, AssistantAi.toAsk(AssistantAi.json(it))) }
+    }
+
     @Test fun configRoundTripsAndDefaults() {
+        // Earlier versions saved Gemma or the random free router as the model: move them to Nemotron.
+        assertEquals(AssistantAiConfig.DEFAULT_MODEL, AssistantAiConfig.parse("""{"key":"k","model":"google/gemma-4-31b-it:free"}""").model)
+        assertEquals(AssistantAiConfig.DEFAULT_MODEL, AssistantAiConfig.parse("""{"key":"k","model":"openrouter/free"}""").model)
+        assertEquals("x/y:free", AssistantAiConfig.parse("""{"key":"k","model":"x/y:free"}""").model)
         assertEquals(config, AssistantAiConfig.parse(config.json()))
         assertEquals(AssistantAiConfig(), AssistantAiConfig.parse("garbage"))
         assertFalse(AssistantAiConfig.parse(null).enabled)

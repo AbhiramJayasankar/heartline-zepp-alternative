@@ -40,7 +40,7 @@ class WatchService : Service() {
         scope.launch(kotlinx.coroutines.Dispatchers.IO) { backfillWatchWorkouts() }
         val alexaActions = object : AssistantActions {
             override fun startWorkout(label: String, minutes: Int) = captureRunner.start(label, minutes)
-            override fun stopWorkout(): String? = captureRunner.run.value?.let { r -> captureRunner.stop(); "${r.label} after ${r.seconds / 60} min" }
+            override fun stopWorkout(): String? = captureRunner.run.value?.let { r -> captureRunner.stop(); "${r.label} after ${WatchAssistant.spoken(r.seconds)}" }
             override fun sync() = app.realController.syncNow()
         }
         val workoutNow = { captureRunner.run.value?.let { r -> "${r.label}, ${r.seconds / 60} of ${r.plannedS / 60} minutes" + (r.hr?.let { ", heart rate $it" } ?: "") } }

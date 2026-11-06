@@ -83,6 +83,9 @@ class WatchAssistant(
      */
     class Answer(val text: String?, val frames: List<ByteArray> = emptyList(), val listenAgain: Boolean = false, val summary: String = text.orEmpty())
 
+    /** The model that gave the last answer. */
+    val lastModel: String? get() = ai.lastModel
+
     /** This conversation's (question, reply) turns for the brain; a pause of over two minutes starts a new one. */
     private val history = ArrayList<Pair<String, String>>()
     private var lastTurn = 0L
@@ -107,7 +110,9 @@ class WatchAssistant(
         }
         val answer = carryOut(ask, t, alerts, dryRun)
         if (!dryRun) {
-            history += transcript to answer.summary; lastTurn = t.toEpochSecond()
+            // The model's own JSON, so the next turn's history shows it the format to reply in (a plain-text summary
+            // here led a model to answer in that style, 2026-11-06).
+            history += transcript to AssistantAi.json(ask); lastTurn = t.toEpochSecond()
             while (history.size > 6) history.removeAt(0)
         }
         return answer
@@ -127,7 +132,9 @@ class WatchAssistant(
                 Answer("Timer set for ${spoken(s)}.", listOf(Alexa.timer(token, s / 3600, s / 60 % 60, s % 60)), summary = "Timer set for ${spoken(s)} (sets a watch timer).")
             }
             is Ask.Alarm -> {
-                val at = next(t, ask.at)
+                // Watch alarms ring on the minute: "in N minutes" rounds up to the next whole minute.
+                val at = ask.inSeconds?.let { t.toLocalDateTime().plusSeconds(it + 59L).truncatedTo(java.time.temporal.ChronoUnit.MINUTES) }
+                    ?: next(t, ask.at ?: LocalTime.of(7, 0))
                 val token = add(Alexa.ALERT_ALARM, at.atZone(t.zone).toEpochSecond())
                 val text = "Alarm set for ${at.format(DateTimeFormatter.ofPattern("EEE h:mm a", Locale.ENGLISH))}."
                 Answer(text, listOf(Alexa.alarm(token, wallClock(at))), summary = "$text (sets a watch alarm)")
@@ -202,6 +209,25 @@ class WatchAssistant(
 
     companion object {
         const val ALERTS = "alexa_alerts"
+
+        /**
+         * [text] in characters the watch's font shows: typographic punctuation as plain ASCII, odd spaces (Java's
+         * clock format puts U+202F before AM/PM) as spaces, and emoji and other pictographs dropped.
+         */
+        fun watchText(text: String): String {
+            val plain = text.replace(Regex("[\u00A0\u2000-\u200B\u202F\u205F]"), " ")
+                .replace(Regex("[\u2018\u2019\u201B\u2032]"), "'").replace(Regex("[\u201C\u201D\u201F\u2033]"), "\"")
+                .replace(Regex("[\u2010-\u2015\u2212]"), "-").replace("\u2026", "...").replace("\u2022", "-")
+            val sb = StringBuilder()
+            var i = 0
+            while (i < plain.length) {
+                val cp = plain.codePointAt(i); i += Character.charCount(cp)
+                val type = Character.getType(cp)
+                if (cp > 0xFFFF || (type == Character.OTHER_SYMBOL.toInt() && cp >= 0x2100) || type == Character.SURROGATE.toInt() || cp in 0xFE00..0xFE0F || cp == 0x200D) continue
+                sb.appendCodePoint(cp)
+            }
+            return sb.toString().replace(Regex(" {2,}"), " ").trim()
+        }
 
         /** Alexa's weather icon names for Open-Meteo's WMO codes. */
         fun icon(wmo: Int): Alexa.Icon = Alexa.Icon(when (wmo) {

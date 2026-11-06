@@ -131,6 +131,32 @@ class WatchAssistantTest {
         assertEquals(listOf("start Gym 45", "stop", "sync"), did)
     }
 
+    @Test fun alarmsInMinutesRingOnTheNextWholeMinute() = runBlocking {
+        brain = { """{"action":"alarm","seconds":60}""" }
+        now = now.plusSeconds(20) // 15:40:20
+        val a = assistant().answer("Set an alarm for one minute from now")
+        assertEquals("Alarm set for Fri 3:42 PM.", WatchAssistant.watchText(a.text!!))
+    }
+
+    @Test fun textIsCleanedForTheWatch() {
+        assertEquals("I don't have a preference - both are good.", WatchAssistant.watchText("I don\u2019t have a preference \u2014 both are good."))
+        assertEquals("Lettuce in!", WatchAssistant.watchText("Lettuce in! \uD83D\uDE04"))
+        assertEquals("74 bpm at 5:19 PM, 27\u00B0C", WatchAssistant.watchText("74\u202Fbpm at 5:19\u202FPM, 27\u00B0C"))
+        assertEquals("\"Hi\"...", WatchAssistant.watchText("\u201CHi\u201D\u2026"))
+    }
+
+    @Test fun historyShowsTheModelJson() = runBlocking {
+        val a = assistant()
+        brain = { """{"action":"timer","seconds":60}""" }
+        a.answer("Timer for a minute")
+        var sent = ""
+        val b = WatchAssistant(AssistantAi { _, _, body -> sent = body; JSONObject().put("choices", JSONArray().put(JSONObject().put("message", JSONObject().put("content", "{\"action\":\"help\"}")))).toString() },
+            { AssistantAiConfig(key) }, { WatchAssistant.Facts() }, weather, store, actions, { now })
+        b.answer("one"); b.answer("two")
+        val messages = JSONObject(sent).getJSONArray("messages")
+        assertEquals("{\"action\":\"help\"}", messages.getJSONObject(2).getString("content"))
+    }
+
     @Test fun weatherIsARealCard() = runBlocking {
         brain = { """{"action":"weather"}""" }
         val a = assistant().answer("What's the weather like?")

@@ -242,9 +242,9 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
                 return
             }
             answer.frames.forEach { watch.send2021(Endpoint2021.ALEXA, it) }
-            answer.text?.let { watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple(it)) }
+            answer.text?.let { watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple(WatchAssistant.watchText(it))) }
             repliedAt = System.currentTimeMillis()
-            db.events.add("info", "Alexa replied %.1f s after the stop: ${answer.text ?: "(card)"}".format((repliedAt - stoppedAt) / 1000.0) + if (answer.listenAgain) "; listening again" else "")
+            db.events.add("info", "Alexa replied ${secs(repliedAt - stoppedAt)} s after the stop: ${answer.text ?: "(card)"}" + if (answer.listenAgain) "; listening again" else "")
             if (answer.listenAgain) { delay(600); watch.send2021(Endpoint2021.ALEXA, Alexa.listenAgain) }
         } catch (e: CancellationException) { if (!handedOff) work.cancel(); throw e }
     }
@@ -255,22 +255,22 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         if (key.isBlank()) return WatchAssistant.Answer("Add a Gemini key in Heartline (Watch, Alexa answers) so I can hear you.")
         val t0 = System.currentTimeMillis()
         val heard = try { gemini.transcribe(audio, key) } catch (e: CancellationException) { throw e } catch (e: Exception) {
-            db.events.add("warn", "Alexa: Gemini failed after %d ms: ${e.message}".format(System.currentTimeMillis() - t0))
+            db.events.add("warn", "Alexa: Gemini failed after ${System.currentTimeMillis() - t0} ms: ${e.message}")
             return WatchAssistant.Answer("Gemini isn't working: ${e.message}")
         }
-        db.events.add("info", "Alexa heard (%.1f s audio, %d ms): \"${heard.text}\"".format(audio.size / 16_000.0, System.currentTimeMillis() - t0))
+        db.events.add("info", "Alexa heard (${secs(audio.size / 16L)} s audio, ${System.currentTimeMillis() - t0} ms): \"${heard.text}\"")
         val t1 = System.currentTimeMillis()
         return try { assistant.answer(heard.text) } catch (e: CancellationException) { throw e } catch (e: Exception) {
             WatchAssistant.Answer("Heartline hit an error: ${e.message}")
-        }.also { db.events.add("info", "Alexa answer (%d ms): ${it.summary}".format(System.currentTimeMillis() - t1)) }
+        }.also { db.events.add("info", "Alexa answer (${System.currentTimeMillis() - t1} ms, ${assistant.lastModel ?: "no model"}): ${it.summary}") }
     }
 
     /** An answer that came after the watch stopped waiting: alerts are still sent, and the words come as a notification. */
     private suspend fun deliverLate(answer: WatchAssistant.Answer, stoppedAt: Long) {
         answer.frames.forEach { runCatching { watch.send2021(Endpoint2021.ALEXA, it) } }
-        runCatching { watch.notify("Alexa", answer.text ?: answer.summary) }
+        runCatching { watch.notify("Alexa", WatchAssistant.watchText(answer.text ?: answer.summary)) }
             .onFailure { db.events.add("warn", "Alexa: couldn't send the late answer: ${it.message}") }
-        db.events.add("info", "Alexa answered by notification %.1f s after the stop: ${answer.summary}".format((System.currentTimeMillis() - stoppedAt) / 1000.0))
+        db.events.add("info", "Alexa answered by notification ${secs(System.currentTimeMillis() - stoppedAt)} s after the stop: ${answer.summary}")
     }
 
     private suspend fun closeDecoder() {
@@ -278,6 +278,9 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         decoder = null; stopRequested = false
         withContext(Dispatchers.IO) { runCatching { d.close() } }
     }
+
+    /** Milliseconds as seconds with one decimal, for log lines (kept out of format strings that hold text). */
+    private fun secs(ms: Long) = "%.1f".format(java.util.Locale.ROOT, ms / 1000.0)
 
     private companion object {
         const val FRAME = 960

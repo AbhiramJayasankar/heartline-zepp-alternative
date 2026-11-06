@@ -331,14 +331,14 @@ class RealController(
         if (key.isBlank()) return@withContext "Save a Gemini key first."
         val started = System.nanoTime()
         val heard = try { dev.heartline.service.GeminiSpeech().transcribe(pcm, key) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
-            return@withContext "Gemini failed after %.1f s: ${e.message}".format((System.nanoTime() - started) / 1e9)
+            return@withContext "Gemini failed after ${"%.1f".format((System.nanoTime() - started) / 1e9)} s: ${e.message}"
         }
-        "Gemini heard \"${heard.text}\" (%.1f s of audio, %.1f s).\n".format(pcm.size / 16_000.0, (System.nanoTime() - started) / 1e9) + testAssistantAi(heard.text)
+        "Gemini heard \"${heard.text}\" (${"%.1f".format(pcm.size / 16_000.0)} s of audio, ${"%.1f".format((System.nanoTime() - started) / 1e9)} s).\n" + testAssistantAi(heard.text)
     }
     override suspend fun testAssistantAi(question: String): String {
         val started = System.nanoTime()
         val answer = testAssistant.answer(question, dryRun = true)
-        return "The watch would show: ${answer.summary}\nOpenRouter took %.1f s.".format((System.nanoTime() - started) / 1e9)
+        return "The watch would show: ${answer.summary}\n${testAssistant.lastModel ?: "OpenRouter"} took ${"%.1f".format((System.nanoTime() - started) / 1e9)} s."
     }
     override val phoneLink = taskA.phoneLink
     override suspend fun searchPlaces(query: String): List<PlaceUi> = taskA.searchPlaces(query)
@@ -413,7 +413,7 @@ class RealController(
             0x07 to 0x19, 0x16 to 0x19, 0x53 to 0x19, 0xd3 to 0x19)
         val results = runs.mapIndexed { i, (mask, rate) ->
             probe.value = listOf("Probing ${i + 1} of ${runs.size}…")
-            runCatching { w.probeRawMask(mask, 12, rate) }.getOrElse { e -> "mask 0x%02x rate 0x%02x: failed, ${e.message}".format(mask, rate) }
+            runCatching { w.probeRawMask(mask, 12, rate) }.getOrElse { e -> "mask 0x%02x rate 0x%02x: failed, ".format(mask, rate) + e.message }
         }
         probe.value = results
     }

@@ -26,10 +26,14 @@ class PhoneLocation(private val context: Context, private val db: HeartlineDatab
     fun permitted(): Boolean = context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
     fun inBackground(): Boolean = context.checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
 
-    /** Where the phone is now, or the last place saved, or null if it has never been found. */
-    suspend fun place(): PlaceUi? {
+    /**
+     * Where the phone is now, or the last place saved, or null if it has never been found. A place found in the last
+     * [maxAgeS] seconds is reused: a fresh fix took up to 30 s and held up the Alexa weather answer (2026-11-06).
+     */
+    suspend fun place(maxAgeS: Long = 15 * 60): PlaceUi? {
         val saved = saved()
-        val fix = if (permitted()) runCatching { fix() }.getOrNull() else null
+        if (saved != null && System.currentTimeMillis() / 1000 - saved.second < maxAgeS) return saved.first
+        val fix = if (permitted()) runCatching { withTimeoutOrNull(FIX_TIMEOUT_MS) { fix() } }.getOrNull() else null
         if (fix == null) return saved?.first
         // Keep the saved name while the phone is within about 3 km of it; the geocoder is a network call.
         val near = saved?.first?.takeIf { distanceKm(it.lat, it.lon, fix.latitude, fix.longitude) < 3 }
@@ -49,8 +53,12 @@ class PhoneLocation(private val context: Context, private val db: HeartlineDatab
         val lm = context.getSystemService(LocationManager::class.java) ?: return null
         val providers = listOf(LocationManager.FUSED_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)
             .filter { runCatching { lm.isProviderEnabled(it) }.getOrDefault(false) }
+        // A fix Android already has from the last 10 minutes is good enough for weather.
+        @Suppress("MissingPermission")
+        val last = providers.mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }.maxByOrNull { it.time }
+        if (last != null && System.currentTimeMillis() - last.time < 10 * 60_000) return last
         for (p in providers) {
-            val l = withTimeoutOrNull(10_000) {
+            val l = withTimeoutOrNull(FIX_TIMEOUT_MS / 2) {
                 suspendCancellableCoroutine { cont: CancellableContinuation<Location?> ->
                     val cancel = CancellationSignal()
                     cont.invokeOnCancellation { cancel.cancel() }
@@ -59,8 +67,7 @@ class PhoneLocation(private val context: Context, private val db: HeartlineDatab
             }
             if (l != null) return l
         }
-        @Suppress("MissingPermission")
-        return providers.mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }.maxByOrNull { it.time }
+        return last
     }
 
     private suspend fun name(lat: Double, lon: Double): PlaceUi = withContext(Dispatchers.IO) {
@@ -80,6 +87,7 @@ class PhoneLocation(private val context: Context, private val db: HeartlineDatab
 
     companion object {
         const val KEY = "phone_location"
+        const val FIX_TIMEOUT_MS = 6_000L
         fun distanceKm(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
             val r = FloatArray(1); Location.distanceBetween(lat1, lon1, lat2, lon2, r); return r[0] / 1000.0
         }

@@ -17,12 +17,18 @@ data class AssistantAiConfig(val apiKey: String = "", val model: String = DEFAUL
     fun json(): String = JSONObject().put("key", apiKey).put("model", model).toString()
     companion object {
         const val KEY = "assistant_ai"
-        const val DEFAULT_MODEL = "google/gemma-4-31b-it:free"
-        /** OpenRouter's router over whichever free models are up, tried when the chosen one fails. */
-        const val FALLBACK_MODEL = "openrouter/free"
+        /** NVIDIA's newest free model on OpenRouter (2026-10-15), with JSON output. */
+        const val DEFAULT_MODEL = "nvidia/nemotron-3.5-super-vl:free"
+        /**
+         * Tried in order when the chosen model fails (rate limits are common on free models). Picked by hand: the
+         * openrouter/free router chose any free model, including a coding model that ignored the format (2026-11-06).
+         */
+        val FALLBACK_MODELS = listOf("nvidia/nemotron-3.5-lightning:free", "google/gemma-4-31b-it:free")
+        /** Defaults saved by earlier versions, moved to [DEFAULT_MODEL]. */
+        private val OLD_DEFAULTS = setOf("google/gemma-4-31b-it:free", "openrouter/free")
         fun parse(text: String?): AssistantAiConfig = runCatching {
             val o = JSONObject(text ?: "{}")
-            AssistantAiConfig(o.optString("key").trim(), o.optString("model").trim().ifEmpty { DEFAULT_MODEL })
+            AssistantAiConfig(o.optString("key").trim(), o.optString("model").trim().takeUnless { it.isEmpty() || it in OLD_DEFAULTS } ?: DEFAULT_MODEL)
         }.getOrDefault(AssistantAiConfig())
     }
 }
@@ -40,7 +46,8 @@ sealed interface Ask {
     /** Words to show; [listenAgain] when they ask the user something back. */
     data class Say(val text: String, val listenAgain: Boolean = false) : Ask
     data class Timer(val seconds: Int) : Ask
-    data class Alarm(val at: LocalTime) : Ask
+    /** At the next [at], or in [inSeconds]. */
+    data class Alarm(val at: LocalTime? = null, val inSeconds: Int? = null) : Ask
     /** In [inSeconds], or at the next [at]. */
     data class Reminder(val label: String, val inSeconds: Int? = null, val at: LocalTime? = null) : Ask
     /** Ids from the alerts listed in [AiContext.alerts]. */
@@ -67,7 +74,7 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
         }
         messages.put(JSONObject().put("role", "user").put("content", transcript))
         val body = JSONObject().put("model", config.model)
-            .put("models", JSONArray(listOf(config.model, AssistantAiConfig.FALLBACK_MODEL).distinct()))
+            .put("models", JSONArray((listOf(config.model) + AssistantAiConfig.FALLBACK_MODELS).distinct().take(3)))
             .put("messages", messages).put("temperature", 0.2).put("max_tokens", 1500)
             .put("response_format", JSONObject().put("type", "json_object"))
         val headers = mapOf("Authorization" to "Bearer ${config.apiKey}", "Content-Type" to "application/json",
@@ -86,15 +93,22 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
             ?: error("no answer in OpenRouter's reply: ${reply.take(120)}")
         val message = choice.getJSONObject("message")
         val model = JSONObject(reply).optString("model").ifEmpty { config.model }
+        lastModel = model
         val finish = choice.optString("finish_reason")
         fun text(k: String) = message.optString(k).takeIf { !message.isNull(k) && it.isNotBlank() }
+        val content = text("content")
         // The answer belongs in content. Some models leave it empty and end their reasoning with it, but reasoning
-        // cut off by the token limit is only thinking, never the answer.
-        return text("content")?.let { toAsk(it) }
+        // cut off by the token limit is only thinking, never the answer. A plain-text answer (no JSON) is shown as it is.
+        return content?.let { toAsk(it) }
             ?: text("reasoning")?.takeIf { finish != "length" }?.let { toAsk(it) }
+            ?: content?.takeIf { finish != "length" && '{' !in it }?.let { Ask.Say(it.trim().take(300)) }
             ?: error(if (finish == "length") "$model ran out of tokens before it answered"
-                else "$model's answer wasn't in the form Heartline asked for" + (text("content")?.let { ": ${it.take(100)}" } ?: ""))
+                else "$model's answer wasn't in the form Heartline asked for" + (content?.let { ": ${it.take(100)}" } ?: ""))
     }
+
+    /** The model that gave the last answer (OpenRouter may have used a fallback). */
+    var lastModel: String? = null
+        private set
 
     /** OpenRouter answered with an error: [message] is OpenRouter's own words, with the HTTP code. */
     class OpenRouterError(message: String) : Exception(message)
@@ -127,15 +141,33 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
              "label": string (what to remind them about),
              "ids": [integers] (for "cancel": which of the listed alarms, timers and reminders),
              "minutes": integer (for "start_workout": how long to capture; 60 if they don't say)}
+            Examples: {"action":"answer","reply":"Your resting heart rate is 61 bpm."} {"action":"timer","seconds":300}
+            {"action":"alarm","time":"07:00"} {"action":"reminder","seconds":120,"label":"drink water"}
             Use "answer" for anything you can say in words, including the time, date, heart rate, steps, questions about the
             weather and general questions. Use "weather" only to show the weather card when they ask what the weather is like.
             Use "help" when they ask what you can do. For an alarm or reminder time without am/pm, pick the next occurrence
-            after now. Answer questions about their sleep, stress, readiness, heart rate, activity and trends from the health
+            after now; for one "in N minutes", give "seconds" instead of "time". Write replies for a small watch screen:
+            short plain sentences, no emoji. For a game or joke where they answer back (like a knock-knock joke), say only
+            your next line and set "follow_up" to true. Answer questions about their sleep, stress, readiness, heart rate, activity and trends from the health
             data above, briefly and in plain words, and say so when something isn't there. "start_workout" starts Heartline's
-            workout capture (it records sets, reps and heart rate; use "label" for the workout's name, such as "Gym"),
+            workout capture (it records sets, reps and heart rate; always set "label" to the workout they named, such as "Gym" or "Run"),
             "stop_workout" ends it, "sync" fetches the latest data from the watch. If the words make no sense, use "answer"
             and ask them to say it again.
         """.trimIndent().replace("{HEALTH}", c.health?.lines()?.filter { it.isNotBlank() }?.joinToString("\n") { "- $it" } ?: "- not available")
+
+        /** [ask] as the JSON the model should have replied with: the conversation history the next question sees. */
+        fun json(ask: Ask): String = when (ask) {
+            is Ask.Say -> JSONObject().put("action", "answer").put("reply", ask.text).put("follow_up", ask.listenAgain)
+            is Ask.Timer -> JSONObject().put("action", "timer").put("seconds", ask.seconds)
+            is Ask.Alarm -> JSONObject().put("action", "alarm").apply { ask.at?.let { put("time", it.toString()) }; ask.inSeconds?.let { put("seconds", it) } }
+            is Ask.Reminder -> JSONObject().put("action", "reminder").put("label", ask.label).apply { ask.at?.let { put("time", it.toString()) }; ask.inSeconds?.let { put("seconds", it) } }
+            is Ask.Cancel -> JSONObject().put("action", "cancel").put("ids", JSONArray(ask.ids))
+            is Ask.StartWorkout -> JSONObject().put("action", "start_workout").put("label", ask.label).put("minutes", ask.minutes)
+            Ask.Weather -> JSONObject().put("action", "weather")
+            Ask.Help -> JSONObject().put("action", "help")
+            Ask.StopWorkout -> JSONObject().put("action", "stop_workout")
+            Ask.Sync -> JSONObject().put("action", "sync")
+        }.toString()
 
         /** The first JSON object in [content] (models sometimes add fences or words around it) as an [Ask]. */
         fun toAsk(content: String): Ask? {
@@ -149,7 +181,7 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
             return when (o.optString("action").lowercase(Locale.ENGLISH)) {
                 "answer", "chat" -> reply.takeIf { it.isNotEmpty() }?.let { Ask.Say(it.take(300), o.optBoolean("follow_up")) }
                 "timer" -> seconds?.let { Ask.Timer(it) }
-                "alarm" -> time?.let { Ask.Alarm(it) }
+                "alarm" -> time?.let { Ask.Alarm(it) } ?: seconds?.let { Ask.Alarm(inSeconds = it) }
                 "reminder" -> if (seconds == null && time == null) null else Ask.Reminder(o.optString("label").trim().ifEmpty { "check in" }, seconds, if (seconds == null) time else null)
                 "cancel" -> o.optJSONArray("ids")?.let { ids -> Ask.Cancel((0 until ids.length()).mapNotNull { ids.optInt(it, -1).takeIf { id -> id >= 0 } }) }
                 "weather" -> Ask.Weather
@@ -157,7 +189,8 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
                 "start_workout" -> Ask.StartWorkout(o.optString("label").trim().ifEmpty { "Workout" }, o.optInt("minutes", 60).coerceIn(1, 720))
                 "stop_workout" -> Ask.StopWorkout
                 "sync" -> Ask.Sync
-                else -> null
+                // A reply with no action, or one Heartline doesn't know, is still an answer.
+                else -> reply.takeIf { it.isNotEmpty() }?.let { Ask.Say(it.take(300), o.optBoolean("follow_up")) }
             }
         }
 
