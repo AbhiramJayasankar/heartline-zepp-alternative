@@ -104,6 +104,31 @@ class AssistantAiTest {
         assertEquals("no OpenRouter key saved", runCatching { limited.converse("hi", context, emptyList(), AssistantAiConfig(), Runner()) }.exceptionOrNull()?.message)
     }
 
+    @Test fun theSecondAccountsKeyTakesOverWhenTheFirstIsRefused() = runBlocking {
+        val two = AssistantAiConfig("sk-one", apiKey2 = "sk-two")
+        val used = ArrayList<String>()
+        var oneLimited = true
+        val ai = AssistantAi { _, headers, _ ->
+            val key = headers.getValue("Authorization").removePrefix("Bearer ")
+            used += key
+            if (key == "sk-one" && oneLimited) throw AssistantAi.OpenRouterError("OpenRouter 429: Rate limit exceeded: free-models-per-day")
+            content("Hi.")
+        }
+        assertEquals("Hi.", ai.converse("hi", context, emptyList(), two, Runner()).text)
+        assertEquals(listOf("sk-one", "sk-two"), used)
+        assertEquals(2, ai.lastKey)
+        // The key that worked is tried first next time.
+        used.clear(); ai.converse("hi", context, emptyList(), two, Runner())
+        assertEquals(listOf("sk-two"), used)
+        // Both refused: both reasons are given.
+        val none = AssistantAi { _, headers, _ -> throw AssistantAi.OpenRouterError("OpenRouter 429: limit for ${headers.getValue("Authorization").takeLast(3)}") }
+        assertEquals("key 1: OpenRouter 429: limit for one; key 2: OpenRouter 429: limit for two",
+            runCatching { none.converse("hi", context, emptyList(), two, Runner()) }.exceptionOrNull()?.message)
+        assertEquals(two, AssistantAiConfig.parse(two.json()))
+        assertEquals(listOf("sk-one"), AssistantAiConfig("sk-one", apiKey2 = "sk-one").keys)
+        assertTrue(AssistantAiConfig(apiKey2 = "sk-two").enabled)
+    }
+
     @Test fun theAnsweringModelIsRemembered() = runBlocking {
         val ai = AssistantAi { _, _, _ -> content("Hi.", model = "nvidia/nemotron-3.5-lightning:free") }
         ai.converse("hi", context, emptyList(), config, Runner())

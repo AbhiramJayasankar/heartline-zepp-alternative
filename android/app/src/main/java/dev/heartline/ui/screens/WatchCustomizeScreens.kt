@@ -142,6 +142,7 @@ fun AssistantScreen(controller: HeartlineController, nav: Navigator) {
     val ai by controller.assistantAi.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var key by remember { mutableStateOf("") }
+    var key2 by remember { mutableStateOf("") }
     var model by remember(ai.model) { mutableStateOf(ai.model) }
     var question by remember { mutableStateOf("Set an alarm for 9:30 am") }
     var result by remember { mutableStateOf<String?>(null) }
@@ -167,6 +168,22 @@ fun AssistantScreen(controller: HeartlineController, nav: Navigator) {
             }
         }
         Gap(16)
+        Text("Second account", style = HL.type.bodyStrong, color = c.ink)
+        Gap(4)
+        MutedText(ai.key2End?.let { "Second key saved, ending in $it. Used when OpenRouter refuses the first, such as at its daily free limit." }
+            ?: "Optional: a key from another OpenRouter account, used when OpenRouter refuses the first (such as at its daily free limit).")
+        Gap(8)
+        OutlinedTextField(key2, { key2 = it.trim() }, label = { Text(if (ai.key2End == null) "Second OpenRouter API key" else "Replace the second key") }, singleLine = true,
+            visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+        Gap(8)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            PillButton("Save second key", { controller.setAssistantAiSecondKey(key2); key2 = "" }, enabled = key2.isNotEmpty())
+            if (ai.key2End != null) {
+                Spacer(Modifier.width(10.dp))
+                PillButton("Remove", { controller.setAssistantAiSecondKey("") }, style = ButtonStyle.QUIET)
+            }
+        }
+        Gap(16)
         OutlinedTextField(question, { question = it }, label = { Text("Try a question") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Gap(8)
         PillButton(if (testing) "Asking…" else "Ask", {
@@ -175,7 +192,7 @@ fun AssistantScreen(controller: HeartlineController, nav: Navigator) {
         }, style = ButtonStyle.QUIET, enabled = !testing && question.isNotBlank())
         result?.let { Gap(10); Text(it, style = HL.type.small, color = c.ink) }
         Gap(16)
-        MutedText("Ask shows what the watch would do, without sending anything to it. If the model fails, OpenRouter tries its free router. " +
+        MutedText("Ask shows what the watch would do, without sending anything to it. If the model fails, OpenRouter tries Nemotron Lightning, then Gemma; if OpenRouter refuses the first key, Heartline uses the second. " +
             "Each question sends the words heard, the time, the weather, a short summary of today and the alarms, timers and reminders set by voice to OpenRouter. " +
             "The model can also ask Heartline for detail (heart rate, stress, sleep, blood oxygen, temperature, activity, readiness, trends, workouts), which is sent when it asks.")
     }

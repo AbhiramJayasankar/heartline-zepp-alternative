@@ -72,6 +72,8 @@ interface HeartlineController {
     val assistantAi: StateFlow<AssistantAiUi>
     /** [key] null keeps the saved one, blank removes it. */
     fun setAssistantAi(key: String?, model: String)
+    /** The second account's key, used when OpenRouter refuses the first; blank removes it. */
+    fun setAssistantAiSecondKey(key: String)
     /** [question] through the saved key and model, without sending anything to the watch: what the watch would do. */
     suspend fun testAssistantAi(question: String): String
 
@@ -220,7 +222,7 @@ data class CaptureAnalysisUi(
 )
 
 data class PlaceUi(val name: String, val region: String?, val lat: Double, val lon: Double)
-data class AssistantAiUi(val keyEnd: String?, val model: String)
+data class AssistantAiUi(val keyEnd: String?, val model: String, val key2End: String? = null)
 data class SpeechUi(val geminiKeyEnd: String?)
 
 data class WeatherUi(

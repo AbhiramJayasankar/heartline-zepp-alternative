@@ -10,10 +10,14 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** The owner's OpenRouter key (typed into the app, stored in meta) and model; empty key = no answers. */
-data class AssistantAiConfig(val apiKey: String = "", val model: String = DEFAULT_MODEL) {
-    val enabled get() = apiKey.isNotBlank()
-    fun json(): String = JSONObject().put("key", apiKey).put("model", model).toString()
+/**
+ * The owner's OpenRouter keys (typed into the app, stored in meta) and model; no key = no answers. [apiKey2] is a key
+ * from a second account, used when OpenRouter refuses the first (such as its daily free-model limit).
+ */
+data class AssistantAiConfig(val apiKey: String = "", val model: String = DEFAULT_MODEL, val apiKey2: String = "") {
+    val keys get() = listOf(apiKey, apiKey2).filter { it.isNotBlank() }.distinct()
+    val enabled get() = keys.isNotEmpty()
+    fun json(): String = JSONObject().put("key", apiKey).put("model", model).put("key2", apiKey2).toString()
     companion object {
         const val KEY = "assistant_ai"
         /** NVIDIA's newest free model on OpenRouter (2026-10-15), with tool calling. */
@@ -27,7 +31,8 @@ data class AssistantAiConfig(val apiKey: String = "", val model: String = DEFAUL
         private val OLD_DEFAULTS = setOf("google/gemma-4-31b-it:free", "openrouter/free")
         fun parse(text: String?): AssistantAiConfig = runCatching {
             val o = JSONObject(text ?: "{}")
-            AssistantAiConfig(o.optString("key").trim(), o.optString("model").trim().takeUnless { it.isEmpty() || it in OLD_DEFAULTS } ?: DEFAULT_MODEL)
+            AssistantAiConfig(o.optString("key").trim(), o.optString("model").trim().takeUnless { it.isEmpty() || it in OLD_DEFAULTS } ?: DEFAULT_MODEL,
+                o.optString("key2").trim())
         }.getOrDefault(AssistantAiConfig())
     }
 }
@@ -67,8 +72,6 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
         val tools = JSONArray(runner.tools.map { t ->
             JSONObject().put("type", "function").put("function", JSONObject().put("name", t.name).put("description", t.description).put("parameters", t.parameters))
         })
-        val headers = mapOf("Authorization" to "Bearer ${config.apiKey}", "Content-Type" to "application/json",
-            "HTTP-Referer" to "https://github.com/AbhiramJayasankar/heartline-zepp-alternative", "X-Title" to "Heartline")
         val called = ArrayList<String>()
         var mustReason = false
         for (round in 1..MAX_ROUNDS) {
@@ -79,12 +82,12 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
             // endpoint", 2026-11-06): from then on ask with a little reasoning and room for it.
             fun withReasoning() = JSONObject(body.toString()).put("max_tokens", REASONING_MAX_TOKENS)
                 .put("reasoning", JSONObject().put("effort", "low").put("exclude", true)).toString()
-            val reply = if (mustReason) post(URL, headers, withReasoning()) else try {
-                post(URL, headers, JSONObject(body.toString()).put("max_tokens", 1500).put("reasoning", JSONObject().put("enabled", false)).toString())
+            val reply = if (mustReason) send(config, withReasoning()) else try {
+                send(config, JSONObject(body.toString()).put("max_tokens", 1500).put("reasoning", JSONObject().put("enabled", false)).toString())
             } catch (e: OpenRouterError) {
-                if (!e.message.orEmpty().contains("reasoning", ignoreCase = true)) throw e
+                if (!e.reasoning) throw e
                 mustReason = true
-                post(URL, headers, withReasoning())
+                send(config, withReasoning())
             }
             val choice = runCatching { JSONObject(reply).getJSONArray("choices").getJSONObject(0) }.getOrNull()
                 ?: error("no answer in OpenRouter's reply: ${reply.take(120)}")
@@ -119,8 +122,33 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
     var lastModel: String? = null
         private set
 
+    /** Which key (1 or 2) answered last; it is tried first next time, so a key at its daily limit isn't retried every turn. */
+    var lastKey = 1
+        private set
+
+    /** [body] to OpenRouter with the key that worked last, then the other one if OpenRouter refuses it. */
+    private suspend fun send(config: AssistantAiConfig, body: String): String {
+        val keys = config.keys
+        val order = keys.indices.sortedBy { if (it == lastKey - 1) 0 else 1 }
+        val errors = ArrayList<String>()
+        for (i in order) {
+            try { return post(URL, headers(keys[i]), body).also { lastKey = i + 1 } }
+            catch (e: OpenRouterError) {
+                // Asking a model that must reason not to is about the request, not the key.
+                if (e.reasoning) throw e
+                errors += if (keys.size > 1) "key ${i + 1}: ${e.message}" else e.message.orEmpty()
+            }
+        }
+        throw OpenRouterError(errors.joinToString("; "))
+    }
+
+    private fun headers(key: String) = mapOf("Authorization" to "Bearer $key", "Content-Type" to "application/json",
+        "HTTP-Referer" to "https://github.com/AbhiramJayasankar/heartline-zepp-alternative", "X-Title" to "Heartline")
+
     /** OpenRouter answered with an error: [message] is OpenRouter's own words, with the HTTP code. */
-    class OpenRouterError(message: String) : Exception(message)
+    class OpenRouterError(message: String) : Exception(message) {
+        val reasoning get() = message.orEmpty().contains("Reasoning is mandatory", ignoreCase = true)
+    }
 
     companion object {
         const val URL = "https://openrouter.ai/api/v1/chat/completions"

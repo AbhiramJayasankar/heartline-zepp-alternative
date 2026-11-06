@@ -165,7 +165,8 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override suspend fun searchPlaces(query: String): List<PlaceUi> =
         if (query.isBlank()) emptyList() else listOf(bengaluru, PlaceUi("Bengaluru Rural", "Karnataka, India", 13.28, 77.53)).filter { it.name.contains(query, true) }
     override val assistantAi = MutableStateFlow(AssistantAiUi(null, dev.heartline.service.AssistantAiConfig.DEFAULT_MODEL))
-    override fun setAssistantAi(key: String?, model: String) { assistantAi.update { AssistantAiUi(key?.takeLast(4) ?: it.keyEnd, model) } }
+    override fun setAssistantAi(key: String?, model: String) { assistantAi.update { it.copy(keyEnd = key?.takeLast(4) ?: it.keyEnd, model = model) } }
+    override fun setAssistantAiSecondKey(key: String) { assistantAi.update { it.copy(key2End = key.trim().takeLast(4).ifEmpty { null }) } }
     override suspend fun testAssistantAi(question: String) = "The watch would show: Alarm set for Sat 9:30 AM. (sets a watch alarm)\nOpenRouter took 0.9 s."
     override val speech = MutableStateFlow(SpeechUi(null))
     override fun setGeminiKey(key: String) { speech.value = SpeechUi(key.trim().takeLast(4).ifEmpty { null }) }

@@ -305,13 +305,20 @@ class RealController(
     private val taskA = TaskAController(context, scope, db, service) { ensureService() }
     override val weather = taskA.weather
     override val assistantAi: StateFlow<AssistantAiUi> = db.meta.observe(dev.heartline.service.AssistantAiConfig.KEY)
-        .map { dev.heartline.service.AssistantAiConfig.parse(it).let { c -> AssistantAiUi(c.apiKey.takeIf { k -> k.isNotBlank() }?.takeLast(4), c.model) } }
+        .map { dev.heartline.service.AssistantAiConfig.parse(it).let { c -> AssistantAiUi(c.apiKey.takeIf { k -> k.isNotBlank() }?.takeLast(4), c.model,
+            c.apiKey2.takeIf { k -> k.isNotBlank() }?.takeLast(4)) } }
         .stateIn(scope, SharingStarted.Eagerly, AssistantAiUi(null, dev.heartline.service.AssistantAiConfig.DEFAULT_MODEL))
     override fun setAssistantAi(key: String?, model: String) {
         scope.launch {
             val saved = dev.heartline.service.AssistantAiConfig.parse(db.meta.get(dev.heartline.service.AssistantAiConfig.KEY))
-            db.meta.set(dev.heartline.service.AssistantAiConfig.KEY, dev.heartline.service.AssistantAiConfig(key?.trim() ?: saved.apiKey,
-                model.trim().ifEmpty { dev.heartline.service.AssistantAiConfig.DEFAULT_MODEL }).json())
+            db.meta.set(dev.heartline.service.AssistantAiConfig.KEY, saved.copy(apiKey = key?.trim() ?: saved.apiKey,
+                model = model.trim().ifEmpty { dev.heartline.service.AssistantAiConfig.DEFAULT_MODEL }).json())
+        }
+    }
+    override fun setAssistantAiSecondKey(key: String) {
+        scope.launch {
+            val saved = dev.heartline.service.AssistantAiConfig.parse(db.meta.get(dev.heartline.service.AssistantAiConfig.KEY))
+            db.meta.set(dev.heartline.service.AssistantAiConfig.KEY, saved.copy(apiKey2 = key.trim()).json())
         }
     }
     override val speech: StateFlow<SpeechUi> = db.meta.observe(dev.heartline.service.SpeechConfig.KEY)
