@@ -74,6 +74,21 @@ interface HeartlineController {
     fun setAssistantAi(key: String?, model: String)
     /** The second account's key, used when OpenRouter refuses the first; blank removes it. */
     fun setAssistantAiSecondKey(key: String)
+    /** Everything the Alexa button does that the owner can change: instructions, tools, models, speech, limits. */
+    val alexaSettings: StateFlow<dev.heartline.service.AlexaSettings>
+    fun updateAlexaSettings(change: (dev.heartline.service.AlexaSettings) -> dev.heartline.service.AlexaSettings)
+    /** The conversation log, newest first: every question with its full trace. */
+    val alexaTurns: StateFlow<List<dev.heartline.service.TurnRecord>>
+    fun clearAlexaTurns()
+    /** Every tool the brain can be given, as defined (before the owner's choices). */
+    val alexaTools: List<AlexaToolUi>
+    /** [template] filled in as the brain would get it now. */
+    suspend fun alexaPromptPreview(template: String): String
+    /** Alarms, timers and reminders set by voice that are still to come. */
+    val alexaAlerts: StateFlow<List<AlexaAlertUi>>
+    fun cancelAlexaAlert(id: Int)
+    /** A question's recording (the name in its log entry) to play, if it's still kept. */
+    fun alexaRecording(name: String): Uri?
     /** Web search keys for the brain's web_search tool (last 4 characters only). */
     val webSearch: StateFlow<WebSearchUi>
     /** Saves [key] for [service] ("tavily" or "exa"); blank removes it. */
@@ -226,6 +241,8 @@ data class CaptureAnalysisUi(
 )
 
 data class PlaceUi(val name: String, val region: String?, val lat: Double, val lon: Double)
+data class AlexaToolUi(val name: String, val group: String, val description: String, val parameters: String)
+data class AlexaAlertUi(val id: Int, val kind: String, val text: String, val at: Long)
 data class WebSearchUi(val tavilyEnd: String? = null, val exaEnd: String? = null)
 data class AssistantAiUi(val keyEnd: String?, val model: String, val key2End: String? = null)
 data class SpeechUi(val geminiKeyEnd: String?)

@@ -87,6 +87,7 @@ class WatchAssistant(
     private val actions: AssistantActions = AssistantActions.None,
     private val data: DataTools = DataTools.None,
     private val now: () -> ZonedDateTime = { ZonedDateTime.now() },
+    private val settings: suspend () -> AlexaSettings = { AlexaSettings() },
 ) {
     /**
      * [dataAsOf]: the time of the newest activity minute synced from the watch; [health]: a short glance at today,
@@ -98,7 +99,19 @@ class WatchAssistant(
      * What to send: [frames] in order (alerts, cards), then [text] as the visible reply, then 0b if [listenAgain].
      * [summary] says what it did, for the app's test buttons and the activity log.
      */
-    class Answer(val text: String?, val frames: List<ByteArray> = emptyList(), val listenAgain: Boolean = false, val summary: String = text.orEmpty())
+    class Answer(val text: String?, val frames: List<ByteArray> = emptyList(), val listenAgain: Boolean = false, val summary: String = text.orEmpty(),
+                 /** What the brain did, for the conversation log; [error] says why there is no real answer. */
+                 val trace: TurnTrace? = null, val error: String? = null)
+
+    /** Every tool the brain can be given, before the owner's choices (Alexa settings) are applied. */
+    val allTools: List<Tool> get() = data.tools + ACTION_TOOLS
+
+    /** The instructions [template] filled in as the brain would get them now. */
+    suspend fun promptPreview(template: String): String {
+        val t = now()
+        val f = facts(t)
+        return AssistantAi.renderPrompt(template, AiContext(t, f.heartRate, f.stepsToday, null, alerts(t), f.dataAsOf, f.health, f.workout))
+    }
 
     /** The model that gave the last answer. */
     val lastModel: String? get() = ai.lastModel
@@ -110,44 +123,47 @@ class WatchAssistant(
     /** [dryRun] works out the answer without acting, remembering the turn or changing the saved alerts (the app's test buttons). */
     suspend fun answer(transcript: String, dryRun: Boolean = false): Answer {
         val t = now()
-        if (transcript.isBlank()) return Answer("I didn't hear any words. Try again.")
+        if (transcript.isBlank()) return Answer("I didn't hear any words. Try again.", error = "no words heard")
         val config = aiConfig()
-        if (!config.enabled) return Answer("Add an OpenRouter key in Heartline (Watch, Alexa answers) so I can answer. I heard: \"$transcript\"")
-        if (t.toEpochSecond() - lastTurn > 120) history.clear()
-        val turn = Turn(t, alerts(t), dryRun)
+        if (!config.enabled) return Answer("Add an OpenRouter key in Heartline (Watch, Alexa) so I can answer. I heard: \"$transcript\"", error = "no OpenRouter key")
+        val s = settings()
+        if (t.toEpochSecond() - lastTurn > s.memoryMinutes * 60L) history.clear()
+        val trace = TurnTrace()
+        val turn = Turn(t, alerts(t), dryRun, trace)
         val f = facts(t)
         // The forecast is usually cached; don't hold the watch up for long if it has to be fetched.
         turn.forecast = withTimeoutOrNull(4_000) { runCatching { weather.latest() }.getOrNull() }
         val context = AiContext(t, f.heartRate, f.stepsToday, turn.forecast?.let { describe(it) }, turn.alerts, f.dataAsOf, f.health, f.workout)
         val runner = object : ToolRunner {
-            override val tools = data.tools + ACTION_TOOLS
-            override suspend fun run(name: String, args: JSONObject): String = data.run(name, args) ?: turn.act(name, args)
+            override val tools = allTools.filter { s.enabled(it.name) }.map { s.describe(it) }
+            override suspend fun run(name: String, args: JSONObject): String =
+                if (!s.enabled(name)) "Error: the $name tool is turned off in Heartline" else data.run(name, args) ?: turn.act(name, args)
         }
         val reply = try {
-            withTimeoutOrNull(AssistantAi.TIMEOUT_MS) { ai.converse(transcript, context, history.toList(), config, runner) }
-                ?: return turn.answer("OpenRouter isn't working: no answer within ${AssistantAi.TIMEOUT_MS / 1000} s.", emptyList())
+            withTimeoutOrNull(s.answerTimeoutS * 1000L) { ai.converse(transcript, context, history.toList(), config, runner, s, trace) }
+                ?: return turn.answer("OpenRouter isn't working: no answer within ${s.answerTimeoutS} s.", emptyList(), "no answer within ${s.answerTimeoutS} s")
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
-            return turn.answer("OpenRouter isn't working: ${e.message}", emptyList())
+            return turn.answer("OpenRouter isn't working: ${e.message}", emptyList(), e.message ?: e.toString())
         }
         if (!dryRun) {
             history += transcript to reply.text; lastTurn = t.toEpochSecond()
-            while (history.size > 6) history.removeAt(0)
+            while (history.size > 20) history.removeAt(0)
         }
-        return turn.answer(reply.text.take(20_000), reply.toolCalls)
+        return turn.answer(reply.text.take(s.maxAnswerChars), reply.toolCalls)
     }
 
     /** One question's actions: what was sent to the watch and what to tell the user about it. */
-    private inner class Turn(val t: ZonedDateTime, var alerts: List<AlexaAlert>, val dryRun: Boolean) {
+    private inner class Turn(val t: ZonedDateTime, var alerts: List<AlexaAlert>, val dryRun: Boolean, val trace: TurnTrace) {
         var forecast: FetchedWeather? = null
         val frames = ArrayList<ByteArray>()
         val did = ArrayList<String>()
         var card = false
 
-        fun answer(text: String, tools: List<String>): Answer {
+        fun answer(text: String, tools: List<String>, error: String? = null): Answer {
             val parts = listOfNotNull(text.takeIf { !card }, did.takeIf { it.isNotEmpty() }?.joinToString("; ", "[", "]"),
                 tools.filter { it.startsWith("get_") }.distinct().takeIf { it.isNotEmpty() }?.joinToString(", ", "(looked up ", ")"))
             // A card is the answer; a text reply after it would replace it on the screen.
-            return Answer(if (card) null else text, frames.toList(), !card && text.trimEnd().endsWith("?"), parts.joinToString(" "))
+            return Answer(if (card) null else text, frames.toList(), !card && text.trimEnd().endsWith("?"), parts.joinToString(" "), trace, error)
         }
 
         private suspend fun addAlert(kind: Int, at: Long, label: String = ""): String {

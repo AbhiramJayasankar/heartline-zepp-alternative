@@ -1,2 +1,2 @@
 <?xml version="1.0" encoding="utf-8"?>
-<paths><files-path name="raw" path="raw/" /></paths>
+<paths><files-path name="raw" path="raw/" /><files-path name="alexa" path="alexa/" /></paths>

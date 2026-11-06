@@ -30,6 +30,8 @@ data class WebSearchConfig(val tavilyKey: String = "", val exaKey: String = "") 
  */
 class WebSearch(
     private val config: suspend () -> WebSearchConfig,
+    /** Pages per search (Alexa settings). */
+    private val results: suspend () -> Int = { RESULTS },
     private val post: suspend (url: String, headers: Map<String, String>, body: String) -> String = ::httpPost,
 ) {
     val tools = listOf(Tool("web_search",
@@ -44,23 +46,24 @@ class WebSearch(
         if (name != "web_search") return null
         val query = args.optString("query").trim().ifEmpty { error("no query") }
         val c = config()
-        if (!c.enabled) error("web search isn't set up: add a Tavily or Exa key in Heartline (Watch, Alexa answers)")
+        if (!c.enabled) error("web search isn't set up: add a Tavily or Exa key in Heartline (Watch, Alexa, Web search)")
         val failures = ArrayList<String>()
-        if (c.tavilyKey.isNotBlank()) try { return tavily(query, c.tavilyKey) } catch (e: CancellationException) { throw e } catch (e: Exception) { failures += "Tavily: ${e.message}" }
-        if (c.exaKey.isNotBlank()) try { return exa(query, c.exaKey) } catch (e: CancellationException) { throw e } catch (e: Exception) { failures += "Exa: ${e.message}" }
+        val n = results()
+        if (c.tavilyKey.isNotBlank()) try { return tavily(query, c.tavilyKey, n) } catch (e: CancellationException) { throw e } catch (e: Exception) { failures += "Tavily: ${e.message}" }
+        if (c.exaKey.isNotBlank()) try { return exa(query, c.exaKey, n) } catch (e: CancellationException) { throw e } catch (e: Exception) { failures += "Exa: ${e.message}" }
         error(failures.joinToString("; "))
     }
 
-    private suspend fun tavily(query: String, key: String): String {
-        val body = JSONObject().put("query", query).put("search_depth", "basic").put("max_results", RESULTS).put("include_answer", true)
+    private suspend fun tavily(query: String, key: String, n: Int): String {
+        val body = JSONObject().put("query", query).put("search_depth", "basic").put("max_results", n).put("include_answer", true)
         val o = JSONObject(post("https://api.tavily.com/search", mapOf("Authorization" to "Bearer $key"), body.toString()))
         val results = o.optJSONArray("results") ?: JSONArray()
         return format(o.optString("answer").takeIf { it.isNotBlank() && it != "null" },
             (0 until results.length()).map { results.getJSONObject(it).let { r -> Page(r.optString("title"), r.optString("url"), r.optString("content"), null) } })
     }
 
-    private suspend fun exa(query: String, key: String): String {
-        val body = JSONObject().put("query", query).put("type", "auto").put("numResults", RESULTS)
+    private suspend fun exa(query: String, key: String, n: Int): String {
+        val body = JSONObject().put("query", query).put("type", "auto").put("numResults", n)
             .put("contents", JSONObject().put("text", JSONObject().put("maxCharacters", PAGE_TEXT)))
         val o = JSONObject(post("https://api.exa.ai/search", mapOf("x-api-key" to key), body.toString()))
         val results = o.optJSONArray("results") ?: JSONArray()

@@ -55,8 +55,10 @@ numbers you can use, on the phone, offline.
 - **Alexa button**: the watch's Alexa button works again. **Gemini 3.5 Transcribe Live** hears you and a free
   **OpenRouter** model answers with tool calling: it looks up your heart rate, stress, sleep stages, SpO2, readiness and
   trends to analyse them, shows real weather where you are, starts workout capture ("start a gym workout"), and sets
-  timers, alarms and reminders that ring on the watch (and can be cancelled by voice). Both run on free tiers with your
-  own keys.
+  timers, alarms and reminders that ring on the watch (and can be cancelled by voice), and searches the web through
+  Tavily or Exa. All run on free tiers with your own keys. The app's Alexa page shows every question with each request,
+  tool call and result, and lets you change the instructions, the tools and their descriptions, the models, reasoning
+  and limits.
 
 **Your data stays yours**
 - Everything is stored in a local database on the phone. Export it, back it up, or share it with other apps through

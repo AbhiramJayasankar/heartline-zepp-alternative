@@ -134,80 +134,55 @@ fun VibrationScreen(controller: HeartlineController, nav: Navigator) {
     }
 }
 
-// ---------------- Alexa answers ----------------
+// ---------------- Alexa keys (shown on the Alexa pages) ----------------
 
+/** The OpenRouter keys (two accounts) and the model that answers. */
 @Composable
-fun AssistantScreen(controller: HeartlineController, nav: Navigator) {
+internal fun OpenRouterKeys(controller: HeartlineController) {
     val c = HL.colors
     val ai by controller.assistantAi.collectAsStateWithLifecycle()
-    val scope = rememberCoroutineScope()
     var key by remember { mutableStateOf("") }
     var key2 by remember { mutableStateOf("") }
     var model by remember(ai.model) { mutableStateOf(ai.model) }
-    var question by remember { mutableStateOf("Set an alarm for 9:30 am") }
-    var result by remember { mutableStateOf<String?>(null) }
-    var testing by remember { mutableStateOf(false) }
-    Screen("Alexa answers", onBack = { nav.pop() },
-        subtitle = "The watch's Alexa button: Gemini turns what you say into text, and an OpenRouter model answers. If either isn't working, the watch says so.") {
-        SpeechSection(controller)
-        Gap(24)
-        Text("Answers (OpenRouter)", style = HL.type.bodyStrong, color = c.ink)
-        Gap(4)
-        MutedText(ai.keyEnd?.let { "OpenRouter key saved, ending in $it." } ?: "Paste an OpenRouter API key. Free models work.")
-        Gap(8)
-        OutlinedTextField(key, { key = it.trim() }, label = { Text(if (ai.keyEnd == null) "OpenRouter API key" else "Replace the key") }, singleLine = true,
-            visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-        Gap(8)
-        OutlinedTextField(model, { model = it.trim() }, label = { Text("Model") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        Gap(10)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            PillButton("Save", { controller.setAssistantAi(key.ifEmpty { null }, model); key = "" })
-            if (ai.keyEnd != null) {
-                Spacer(Modifier.width(10.dp))
-                PillButton("Remove key", { controller.setAssistantAi("", model) }, style = ButtonStyle.QUIET)
-            }
+    Text("OpenRouter key and model", style = HL.type.bodyStrong, color = c.ink)
+    Gap(4)
+    MutedText(ai.keyEnd?.let { "OpenRouter key saved, ending in $it." } ?: "Paste an OpenRouter API key. Free models work.")
+    Gap(8)
+    OutlinedTextField(key, { key = it.trim() }, label = { Text(if (ai.keyEnd == null) "OpenRouter API key" else "Replace the key") }, singleLine = true,
+        visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+    Gap(8)
+    OutlinedTextField(model, { model = it.trim() }, label = { Text("Model") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    Gap(10)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        PillButton("Save", { controller.setAssistantAi(key.ifEmpty { null }, model); key = "" })
+        if (ai.keyEnd != null) {
+            Spacer(Modifier.width(10.dp))
+            PillButton("Remove key", { controller.setAssistantAi("", model) }, style = ButtonStyle.QUIET)
         }
-        Gap(16)
-        Text("Second account", style = HL.type.bodyStrong, color = c.ink)
-        Gap(4)
-        MutedText(ai.key2End?.let { "Second key saved, ending in $it. Used when OpenRouter refuses the first, such as at its daily free limit." }
-            ?: "Optional: a key from another OpenRouter account, used when OpenRouter refuses the first (such as at its daily free limit).")
-        Gap(8)
-        OutlinedTextField(key2, { key2 = it.trim() }, label = { Text(if (ai.key2End == null) "Second OpenRouter API key" else "Replace the second key") }, singleLine = true,
-            visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-        Gap(8)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            PillButton("Save second key", { controller.setAssistantAiSecondKey(key2); key2 = "" }, enabled = key2.isNotEmpty())
-            if (ai.key2End != null) {
-                Spacer(Modifier.width(10.dp))
-                PillButton("Remove", { controller.setAssistantAiSecondKey("") }, style = ButtonStyle.QUIET)
-            }
+    }
+    Gap(16)
+    Text("Second account", style = HL.type.bodyStrong, color = c.ink)
+    Gap(4)
+    MutedText(ai.key2End?.let { "Second key saved, ending in $it. Used when OpenRouter refuses the first, such as at its daily free limit." }
+        ?: "Optional: a key from another OpenRouter account, used when OpenRouter refuses the first (such as at its daily free limit).")
+    Gap(8)
+    OutlinedTextField(key2, { key2 = it.trim() }, label = { Text(if (ai.key2End == null) "Second OpenRouter API key" else "Replace the second key") }, singleLine = true,
+        visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+    Gap(8)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        PillButton("Save second key", { controller.setAssistantAiSecondKey(key2); key2 = "" }, enabled = key2.isNotEmpty())
+        if (ai.key2End != null) {
+            Spacer(Modifier.width(10.dp))
+            PillButton("Remove", { controller.setAssistantAiSecondKey("") }, style = ButtonStyle.QUIET)
         }
-        Gap(24)
-        WebSearchSection(controller)
-        Gap(24)
-        OutlinedTextField(question, { question = it }, label = { Text("Try a question") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        Gap(8)
-        PillButton(if (testing) "Asking…" else "Ask", {
-            testing = true; result = null
-            scope.launch { result = controller.testAssistantAi(question.trim()); testing = false }
-        }, style = ButtonStyle.QUIET, enabled = !testing && question.isNotBlank())
-        result?.let { Gap(10); Text(it, style = HL.type.small, color = c.ink) }
-        Gap(16)
-        MutedText("Ask shows what the watch would do, without sending anything to it. If the model fails, OpenRouter tries Nemotron Lightning, then Gemma; if OpenRouter refuses the first key, Heartline uses the second. " +
-            "Each question sends the words heard, the time, the weather, a short summary of today and the alarms, timers and reminders set by voice to OpenRouter. " +
-            "The model can also ask Heartline for detail (heart rate, stress, sleep, blood oxygen, temperature, activity, readiness, trends, workouts), which is sent when it asks. " +
-            "Its web searches go to Tavily or Exa.")
     }
 }
 
 /** Tavily and Exa keys for the model's web searches; Tavily is tried first. */
 @Composable
-private fun WebSearchSection(controller: HeartlineController) {
+internal fun WebSearchSection(controller: HeartlineController) {
     val c = HL.colors
     val web by controller.webSearch.collectAsStateWithLifecycle()
-    Text("Web search", style = HL.type.bodyStrong, color = c.ink)
-    Gap(4)
     MutedText("For news, scores, prices and anything recent, the model searches the web. Both have free plans without a card: " +
         "Tavily gives 1,000 searches a month, Exa about 800. With both keys, Exa is used when Tavily fails.")
     for ((service, name, end) in listOf(Triple("tavily", "Tavily", web.tavilyEnd), Triple("exa", "Exa", web.exaEnd))) {
@@ -230,17 +205,16 @@ private fun WebSearchSection(controller: HeartlineController) {
 
 /** The Gemini key that turns what's said to the Alexa button into text, and a test with the last recording. */
 @Composable
-private fun SpeechSection(controller: HeartlineController) {
+internal fun SpeechSection(controller: HeartlineController) {
     val c = HL.colors
     val speech by controller.speech.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var key by remember { mutableStateOf("") }
     var result by remember { mutableStateOf<String?>(null) }
     var testing by remember { mutableStateOf(false) }
-    Text("Speech recognition (Gemini)", style = HL.type.bodyStrong, color = c.ink)
+    Text("Gemini key", style = HL.type.bodyStrong, color = c.ink)
     Gap(4)
-    MutedText(speech.geminiKeyEnd?.let { "Gemini key saved, ending in $it. Uses Gemini 3.5 Transcribe Live (free tier)." }
-        ?: "Paste a Gemini API key from Google AI Studio. Uses Gemini 3.5 Transcribe Live (free tier).")
+    MutedText(speech.geminiKeyEnd?.let { "Gemini key saved, ending in $it." } ?: "Paste a Gemini API key from Google AI Studio. The free tier works.")
     Gap(8)
     OutlinedTextField(key, { key = it.trim() }, label = { Text(if (speech.geminiKeyEnd == null) "Gemini API key" else "Replace the Gemini key") }, singleLine = true,
         visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())

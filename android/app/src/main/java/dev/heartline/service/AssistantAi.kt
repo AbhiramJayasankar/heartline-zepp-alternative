@@ -62,10 +62,19 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
     /** The final words, and the tools called on the way (in order). */
     class Reply(val text: String, val toolCalls: List<String>)
 
-    suspend fun converse(transcript: String, context: AiContext, history: List<Pair<String, String>>, config: AssistantAiConfig, runner: ToolRunner): Reply {
+    /**
+     * Answers [transcript] with [settings] (the owner's prompt, models, reasoning and limits), filling [trace] as it
+     * goes so the app can show every request and tool call, even when it fails.
+     */
+    suspend fun converse(transcript: String, context: AiContext, history: List<Pair<String, String>>, config: AssistantAiConfig, runner: ToolRunner,
+                         settings: AlexaSettings = AlexaSettings(), trace: TurnTrace = TurnTrace()): Reply {
         check(config.enabled) { "no OpenRouter key saved" }
-        val messages = JSONArray().put(JSONObject().put("role", "system").put("content", systemPrompt(context)))
-        history.takeLast(6).forEach { (asked, said) ->
+        val prompt = renderPrompt(settings.promptTemplate, context)
+        trace.prompt = prompt
+        val messages = JSONArray().put(JSONObject().put("role", "system").put("content", prompt))
+        val memory = if (settings.memoryTurns == 0) emptyList() else history.takeLast(settings.memoryTurns)
+        trace.memory = memory.size
+        memory.forEach { (asked, said) ->
             messages.put(JSONObject().put("role", "user").put("content", asked)).put(JSONObject().put("role", "assistant").put("content", said))
         }
         messages.put(JSONObject().put("role", "user").put("content", transcript))
@@ -73,49 +82,62 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
             JSONObject().put("type", "function").put("function", JSONObject().put("name", t.name).put("description", t.description).put("parameters", t.parameters))
         })
         val called = ArrayList<String>()
-        var mustReason = false
-        for (round in 1..MAX_ROUNDS) {
+        // auto: thinking is slow, so ask for none; models that must reason refuse that ("Reasoning is mandatory for
+        // this endpoint", 2026-11-06), and from then on get a little reasoning and room for it.
+        var effort: String? = settings.reasoning.takeIf { it in listOf("low", "medium", "high") }
+        for (round in 1..settings.maxRounds) {
             val body = JSONObject().put("model", config.model)
-                .put("models", JSONArray((listOf(config.model) + AssistantAiConfig.FALLBACK_MODELS).distinct().take(3)))
-                .put("messages", messages).put("tools", tools).put("temperature", 0.3)
-            // Thinking is slow, so ask for none. Models that must reason refuse that ("Reasoning is mandatory for this
-            // endpoint", 2026-11-06): from then on ask with a little reasoning and room for it.
-            fun withReasoning() = JSONObject(body.toString()).put("max_tokens", REASONING_MAX_TOKENS)
-                .put("reasoning", JSONObject().put("effort", "low").put("exclude", true)).toString()
-            val reply = if (mustReason) send(config, withReasoning()) else try {
-                send(config, JSONObject(body.toString()).put("max_tokens", MAX_TOKENS).put("reasoning", JSONObject().put("enabled", false)).toString())
-            } catch (e: OpenRouterError) {
-                if (!e.reasoning) throw e
-                mustReason = true
-                send(config, withReasoning())
+                .put("models", JSONArray((listOf(config.model) + settings.fallbackModels).distinct().take(3)))
+                .put("messages", messages).put("temperature", settings.temperature)
+            if (tools.length() > 0) body.put("tools", tools)
+            fun request(e: String?) = JSONObject(body.toString()).apply {
+                if (e == null) put("max_tokens", settings.maxTokens).put("reasoning", JSONObject().put("enabled", false))
+                else put("max_tokens", settings.reasoningMaxTokens).put("reasoning", JSONObject().put("effort", e).put("exclude", true))
+            }.toString()
+            val t0 = System.currentTimeMillis()
+            val reply = try { send(config, request(effort)) } catch (e: OpenRouterError) {
+                if (!e.reasoning || effort != null) throw e
+                if (settings.reasoning == "off") throw OpenRouterError("${e.message} (Reasoning is set to off; set it to auto or low for this model)")
+                effort = "low"
+                send(config, request(effort))
             }
-            val choice = runCatching { JSONObject(reply).getJSONArray("choices").getJSONObject(0) }.getOrNull()
+            val ms = System.currentTimeMillis() - t0
+            val o = JSONObject(reply)
+            val choice = runCatching { o.getJSONArray("choices").getJSONObject(0) }.getOrNull()
                 ?: error("no answer in OpenRouter's reply: ${reply.take(120)}")
             val message = choice.getJSONObject("message")
-            val model = JSONObject(reply).optString("model").ifEmpty { config.model }
+            val model = o.optString("model").ifEmpty { config.model }
             lastModel = model
+            val usage = o.optJSONObject("usage")
+            fun round(calls: List<ToolCallLog>, text: String?) = RoundLog(model, lastKey, effort ?: "off", ms,
+                usage?.optInt("prompt_tokens", -1)?.takeIf { it >= 0 }, usage?.optInt("completion_tokens", -1)?.takeIf { it >= 0 }, calls, text)
             val calls = message.optJSONArray("tool_calls")
             if (calls != null && calls.length() > 0) {
                 // The model's turn goes back as it came (some providers need their reasoning details to continue).
                 messages.put(JSONObject().put("role", "assistant").put("content", message.opt("content") ?: "").put("tool_calls", calls).apply {
                     message.optJSONArray("reasoning_details")?.let { put("reasoning_details", it) }
                 })
+                val logs = ArrayList<ToolCallLog>()
                 for (i in 0 until calls.length()) {
                     val call = calls.getJSONObject(i)
                     val fn = call.optJSONObject("function") ?: JSONObject()
                     val name = fn.optString("name")
                     val args = runCatching { JSONObject(fn.optString("arguments").ifBlank { "{}" }) }.getOrDefault(JSONObject())
                     called += name
+                    val c0 = System.currentTimeMillis()
                     val result = try { runner.run(name, args) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "Error: ${e.message}" }
+                    logs += ToolCallLog(name, args.toString(), result, System.currentTimeMillis() - c0)
                     messages.put(JSONObject().put("role", "tool").put("tool_call_id", call.optString("id")).put("name", name).put("content", result))
                 }
+                trace.rounds += round(logs, message.optString("content").takeIf { !message.isNull("content") && it.isNotBlank() })
                 continue
             }
             val content = message.optString("content").takeIf { !message.isNull("content") && it.isNotBlank() }
+            trace.rounds += round(emptyList(), content)
             if (content != null) return Reply(content.trim(), called)
             error(if (choice.optString("finish_reason") == "length") "$model ran out of tokens before it answered" else "$model gave no answer")
         }
-        error("${lastModel ?: config.model} kept calling tools without answering")
+        error("${lastModel ?: config.model} kept calling tools without answering (${settings.maxRounds} rounds)")
     }
 
     /** The model that gave the last answer (OpenRouter may have used a fallback). */
@@ -152,24 +174,30 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
 
     companion object {
         const val URL = "https://openrouter.ai/api/v1/chat/completions"
-        /** Room for a long answer when asked for one (a 1,000-word story is about 1,400 tokens). */
-        const val MAX_TOKENS = 4000
-        const val REASONING_MAX_TOKENS = 6000
-        /** Tool calls and answers: each round is one OpenRouter request. */
-        const val MAX_ROUNDS = 6
         /**
-         * Thinking models and several tool rounds can be slow. The watch gives up after about 40 s on "Thinking", so a
-         * slower answer is sent as a watch notification instead (see AlexaBridge); this is the limit for that.
+         * The longest a single OpenRouter request may take; the whole answer has its own limit (Alexa settings). The
+         * watch gives up after about 40 s on "Thinking", so a slower answer is sent as a watch notification (AlexaBridge).
          */
-        const val TIMEOUT_MS = 90_000L
+        const val TIMEOUT_MS = 180_000L
 
-        fun systemPrompt(c: AiContext): String = """
+        /** What each placeholder in the instructions becomes. */
+        val PLACEHOLDERS = linkedMapOf(
+            "{NOW}" to "the date, time and time zone",
+            "{HEART_RATE}" to "the latest heart rate and when it was measured",
+            "{STEPS}" to "steps today",
+            "{SYNCED_UP_TO}" to "the time of the newest data synced from the watch",
+            "{ALERTS}" to "alarms, timers and reminders set by voice, with their ids",
+            "{WORKOUT}" to "the workout capture running in Heartline",
+            "{HEALTH}" to "a short glance at today: readiness, last night, heart rate, stress, activity (one line each)",
+        )
+
+        val DEFAULT_PROMPT = """
             You are the voice assistant on the user's Amazfit smartwatch, answering what they say to its Alexa button. You
             run inside Heartline, the phone app that reads the watch's health data.
-            Now: ${c.now.format(DateTimeFormatter.ofPattern("EEEE d MMMM yyyy, HH:mm", Locale.ENGLISH))} (${c.now.zone.id}).
-            Latest heart rate: ${c.heartRate ?: "unknown"}. Steps today: ${c.stepsToday?.toString() ?: "unknown"}${c.dataAsOf?.let { " (watch data synced up to $it)" } ?: ""}.
-            Alarms, timers and reminders set by voice: ${if (c.alerts.isEmpty()) "none" else c.alerts.joinToString("; ") { "id ${it.id}: ${it.describe(c.now)}" }}.
-            Workout capture in Heartline: ${c.workout ?: "not running"}.
+            Now: {NOW}.
+            Latest heart rate: {HEART_RATE}. Steps today: {STEPS} (watch data synced up to {SYNCED_UP_TO}).
+            Alarms, timers and reminders set by voice: {ALERTS}.
+            Workout capture in Heartline: {WORKOUT}.
             Today at a glance:
             {HEALTH}
             Use the tools. For questions about heart rate, stress, sleep, blood oxygen, temperature, activity, readiness,
@@ -183,10 +211,23 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
             time without am/pm, pick the next occurrence after now; for "in N minutes" use in_seconds.
             Your reply is shown on the watch: plain sentences, no emoji or markdown. Keep it short (at most 300 characters)
             unless they ask for something long, like a story or a detailed explanation: then write it in full, never refuse
-            because of the screen; a long reply continues as watch notifications. After showing a card, a few words are enough. A question at the end makes the watch listen again, so
-            ask one only when you need their answer (never offers like "Want me to check anything else?"); for a game or
-            joke where they answer back, like a knock-knock joke, say only your next line.
-        """.trimIndent().replace("{HEALTH}", c.health?.lines()?.filter { it.isNotBlank() }?.joinToString("\n") { "- $it" } ?: "- not available")
+            because of the screen; a long reply continues as watch notifications. After showing a card, a few words are enough.
+            A question at the end makes the watch listen again, so ask one only when you need their answer (never offers like
+            "Want me to check anything else?"); for a game or joke where they answer back, like a knock-knock joke, say only
+            your next line.
+        """.trimIndent()
+
+        /** [template] with its placeholders filled from [c]. */
+        fun renderPrompt(template: String, c: AiContext): String = template
+            .replace("{NOW}", "${c.now.format(DateTimeFormatter.ofPattern("EEEE d MMMM yyyy, HH:mm", Locale.ENGLISH))} (${c.now.zone.id})")
+            .replace("{HEART_RATE}", c.heartRate ?: "unknown")
+            .replace("{STEPS}", c.stepsToday?.toString() ?: "unknown")
+            .replace("{SYNCED_UP_TO}", c.dataAsOf ?: "unknown")
+            .replace("{ALERTS}", if (c.alerts.isEmpty()) "none" else c.alerts.joinToString("; ") { "id ${it.id}: ${it.describe(c.now)}" })
+            .replace("{WORKOUT}", c.workout ?: "not running")
+            .replace("{HEALTH}", c.health?.lines()?.filter { it.isNotBlank() }?.joinToString("\n") { "- $it" } ?: "- not available")
+
+        fun systemPrompt(c: AiContext): String = renderPrompt(DEFAULT_PROMPT, c)
 
         suspend fun httpPost(url: String, headers: Map<String, String>, body: String): String = withContext(Dispatchers.IO) {
             val c = URI(url).toURL().openConnection() as HttpURLConnection

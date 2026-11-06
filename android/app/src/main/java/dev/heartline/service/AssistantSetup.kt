@@ -67,10 +67,11 @@ fun watchAssistant(context: android.content.Context, db: HeartlineDatabase, sett
     actions = actions,
     data = object : DataTools {
         val health = HealthTools(controller)
-        val web = WebSearch({ WebSearchConfig.parse(db.meta.get(WebSearchConfig.KEY)) })
+        val web = WebSearch({ WebSearchConfig.parse(db.meta.get(WebSearchConfig.KEY)) }, { AlexaSettings.parse(db.meta.get(AlexaSettings.KEY)).webResults })
         override val tools = health.tools + web.tools
         override suspend fun run(name: String, args: org.json.JSONObject) = health.run(name, args) ?: web.run(name, args)
     },
+    settings = { AlexaSettings.parse(db.meta.get(AlexaSettings.KEY)) },
 )
 
 /** A short glance at today for the brain's instructions (the detail is in [HealthTools]), from the app's Today and Health data. */

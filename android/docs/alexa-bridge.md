@@ -52,7 +52,8 @@ S24 Ultra. Vosk's small offline model worked but misheard too much and added 60 
 (2026-11-06). Speech-to-text is **Gemini 3.5 Transcribe Live** over the Live API WebSocket with the owner's AI Studio
 key (free tier, no request limit in 2026-11), `GeminiSpeech.kt`. One session per question: setup with SMART
 formatting (numbers and times as digits) and automatic activity detection off, then `activityStart`, 100 ms base64
-16 kHz PCM chunks, `activityEnd`; the text arrives as `serverContent.inputTranscription`. 12 s timeout.
+16 kHz PCM chunks, `activityEnd`; the text arrives as `serverContent.inputTranscription`. 12 s timeout. The model,
+languages (en-IN, en-US), expected words and timeout are Alexa settings.
 
 ## Answers: OpenRouter with tool calling
 
@@ -68,6 +69,8 @@ The model then calls tools (OpenRouter's `tools`, up to 6 rounds), and its final
 - **Health data** (`HealthTools.kt`, read-only, from the same data the app's screens show): `get_heart_rate`,
   `get_stress`, `get_sleep` (with a stage timeline), `get_activity`, `get_spo2_and_temperature`, `get_readiness`,
   `get_trends`, `get_workout_captures`; each takes a date where it makes sense and returns compact text.
+- **Web** (`WebSearch.kt`): `web_search` through Tavily (1,000 free searches a month, its short answer plus the top
+  pages' snippets), falling back to Exa ($10 of free credit a month, the pages' text); both keys are optional.
 - **Actions** (`WatchAssistant.kt`): `set_timer`, `set_alarm` (a time, or seconds from now rounded up to the minute),
   `set_reminder`, `cancel_alerts` (by id), `get_weather`, `show_weather_card`, `show_help`, `start_workout`,
   `stop_workout`, `sync_watch`. Timers and alarms go to the watch as Alexa alerts. Reminders go into the watch's own
@@ -97,5 +100,21 @@ OpenRouter errors (OpenRouter's own message, e.g. a rate limit), no words heard,
 is told "Still thinking" and the answer arrives later as a watch notification (OpenRouter may take up to 90 s).
 
 Each turn is saved under `files/alexa/` (the voice messages `.bin`, 48 kHz `.wav` and the 16 kHz `-16k.wav` sent to
-Gemini); the newest 30 turns are kept. The Alexa answers screen can run the last recording or a typed question through
-the same pipeline without sending anything to the watch.
+Gemini); the newest 30 turns are kept.
+
+## Settings and the conversation log
+
+Everything above that is a choice is an Alexa setting (`AlexaSettings.kt`, `meta["alexa_settings"]`, read fresh for
+each question), shown on the app's Alexa page (Watch, Alexa): the instructions (a template whose placeholders `{NOW}`,
+`{HEART_RATE}`, `{STEPS}`, `{SYNCED_UP_TO}`, `{ALERTS}`, `{WORKOUT}` and `{HEALTH}` are filled each time; blank means
+Heartline's own), each tool on or off and its description, the fallback models, reasoning (auto, off, low, medium,
+high), temperature, token limits, requests per question, the answer's time limit, how many earlier turns are sent and
+after how long a new conversation starts, the reply and notification sizes, the wait before "Still thinking",
+listening again, Gemini's model, languages, words and timeout, web results per search, and how many turns are kept.
+Values are clamped to what works (a reply of at most 2,000 bytes, a wait of at most 38 s).
+
+Every question goes into the conversation log (`meta["alexa_turns"]`, newest first, as many as are kept): what Gemini
+heard and how long it took, each OpenRouter request (model, key, reasoning, time, tokens), each tool call with its
+arguments and result, the reply, how it reached the watch, any error, and the instructions as sent. The app shows it
+with the recording to play. Questions typed into the app's "Try a question" run the same pipeline without sending
+anything to the watch and are logged too.

@@ -65,7 +65,12 @@ sealed interface Route {
     data object WatchSettings : Route
     data object WatchMenu : Route
     data object Vibration : Route
-    data object Assistant : Route
+    data object Alexa : Route
+    /** A page of the Alexa settings (AlexaPages). */
+    data class AlexaPage(val page: String) : Route
+    /** A question in the conversation log, by its time in epoch milliseconds. */
+    data class AlexaTurn(val at: Long) : Route
+    data class AlexaTool(val name: String) : Route
     data object Forwarding : Route
     data object Data : Route
     data object Profile : Route
@@ -156,7 +161,10 @@ fun AppRoot(controller: HeartlineController) {
                         Route.WatchSettings -> WatchSettingsScreen(controller, nav)
                         Route.WatchMenu -> WatchMenuScreen(controller, nav)
                         Route.Vibration -> VibrationScreen(controller, nav)
-                        Route.Assistant -> dev.heartline.ui.screens.AssistantScreen(controller, nav)
+                        Route.Alexa -> dev.heartline.ui.screens.AlexaScreen(controller, nav)
+                        is Route.AlexaPage -> dev.heartline.ui.screens.AlexaPageScreen(controller, target.page, nav)
+                        is Route.AlexaTurn -> dev.heartline.ui.screens.AlexaTurnScreen(controller, target.at, nav)
+                        is Route.AlexaTool -> dev.heartline.ui.screens.AlexaToolScreen(controller, target.name, nav)
                         Route.Forwarding -> ForwardingScreen(controller, nav)
                         Route.Data -> DataScreen(controller, nav)
                         Route.Profile -> ProfileScreen(controller, nav)

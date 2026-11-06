@@ -62,8 +62,12 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
     private var stop = 0
     private var name = ""
 
+    /** The owner's Alexa settings, read fresh for each question so changes in the app apply at once. */
+    private suspend fun settings() = AlexaSettings.parse(db.meta.get(AlexaSettings.KEY))
+
     fun start() = scope.launch {
-        launch(Dispatchers.IO) { pruneRecordings() }
+        val keep = settings().keepTurns
+        launch(Dispatchers.IO) { pruneRecordings(keep) }
         watch.chunked2021.collect { m ->
             if (m.endpoint != Endpoint2021.ALEXA || m.payload.isEmpty()) return@collect
             try {
@@ -82,14 +86,14 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         }
     }
 
-    /** The longest reply in bytes the watch shows (its ttsTextLimit if it sends one; the GTR 2e sends 0). */
-    private var replyLimit = WatchAssistant.REPLY_TEXT
+    /** The watch's own reply limit (its ttsTextLimit), 0 when it sends none (the GTR 2e sends 0). */
+    private var watchReplyLimit = 0
     private var settingsLogged = false
 
     private suspend fun begin(payload: ByteArray) {
         // The start carries the watch's Alexa settings as JSON after 4 bytes.
         runCatching { org.json.JSONObject(String(payload, 4, payload.size - 4, Charsets.UTF_8).trimEnd('\u0000')) }.getOrNull()?.let { o ->
-            o.optInt("ttsTextLimit", 0).takeIf { it > 0 }?.let { replyLimit = it.coerceIn(200, WatchAssistant.REPLY_TEXT) }
+            watchReplyLimit = o.optInt("ttsTextLimit", 0).coerceAtLeast(0)
             if (!settingsLogged) { settingsLogged = true; db.events.add("info", "Alexa settings from the watch: $o") }
         }
         val now = System.currentTimeMillis()
@@ -203,13 +207,14 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         File(folder, "$name.bin").writeBytes(voice.toByteArray())
         val after = if (stopSent > 0) ", stopped with ${STOPS[stop - 1]}" else ", no stop sent"
         db.events.add("info", "Alexa voice, turn $turn: $packets packets = %.1f s (speech %.1f s)$after, saved $name.wav".format(packets * 0.02, endpointer.speechFrames * 0.02))
-        withContext(Dispatchers.IO) { pruneRecordings() }
+        val keep = settings().keepTurns
+        withContext(Dispatchers.IO) { pruneRecordings(keep) }
     }
 
-    /** Keeps the newest [KEEP_TURNS] turns' recordings (.bin, .wav, -16k.wav). */
-    private fun pruneRecordings() {
+    /** Keeps the newest [keep] turns' recordings (.bin, .wav, -16k.wav). */
+    private fun pruneRecordings(keep: Int) {
         val turns = folder.listFiles { f -> f.name.startsWith("alexa-") }?.groupBy { it.name.substringBefore('.').removeSuffix("-16k") } ?: return
-        turns.keys.sortedDescending().drop(KEEP_TURNS).forEach { k -> turns.getValue(k).forEach { it.delete() } }
+        turns.keys.sortedDescending().drop(keep).forEach { k -> turns.getValue(k).forEach { it.delete() } }
     }
 
     private var repliedAt = 0L
@@ -236,70 +241,102 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
 
     /**
      * Gemini on the turn's audio, then the OpenRouter brain; the watch is on "Thinking". A thinking model can take
-     * longer than the ~40 s the watch waits, so at [WATCH_WAIT_MS] the watch is told the answer will come as a
+     * longer than the ~40 s the watch waits, so after the wait set in the Alexa settings the watch is told the answer will come as a
      * notification, and it does once the model finishes.
      */
     private suspend fun respond() {
         val stoppedAt = stopSent
+        val s = settings()
+        val recording = name
         val audio = synchronized(pcm16) { pcm16.snapshot() }
         runCatching { File(folder, "$name-16k.wav").writeBytes(wav16k(audio)) }
         // Nothing was said (the endpointer heard no speech): Gemini would wait for words that never come.
         val silent = endpointer.state == SpeechEndpointer.State.NOTHING_SAID
-        val work = scope.async { if (silent) WatchAssistant.Answer("I didn't hear anything.") else understand(audio) }
+        val work = scope.async {
+            if (silent) Understood(WatchAssistant.Answer("I didn't hear anything.", error = "no speech in the recording"), null, audio.size / 16_000.0, null)
+            else understand(audio, s)
+        }
         var handedOff = false
         try {
-            val answer = withTimeoutOrNull((WATCH_WAIT_MS - (System.currentTimeMillis() - stoppedAt)).coerceAtLeast(1)) { work.await() }
-            if (answer == null) {
+            val u = withTimeoutOrNull((s.watchWaitS * 1000L - (System.currentTimeMillis() - stoppedAt)).coerceAtLeast(1)) { work.await() }
+            if (u == null) {
                 handedOff = true
                 watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple("Still thinking. I'll send the answer as a notification."))
                 repliedAt = System.currentTimeMillis(); answered = true
-                db.events.add("info", "Alexa: no answer %.1f s after the stop; it will come as a notification".format((repliedAt - stoppedAt) / 1000.0))
-                scope.launch { deliverLate(work.await(), stoppedAt) }
+                db.events.add("info", "Alexa: no answer ${secs(repliedAt - stoppedAt)} s after the stop; it will come as a notification")
+                scope.launch { deliverLate(work.await(), stoppedAt, s, recording) }
                 return
             }
+            val answer = u.answer
             answer.frames.forEach { watch.send2021(Endpoint2021.ALEXA, it) }
-            val (shown, rest) = WatchAssistant.splitReply(answer.text?.let { WatchAssistant.watchText(it) }, replyLimit)
+            val limit = if (watchReplyLimit > 0) minOf(watchReplyLimit, s.replyBytes) else s.replyBytes
+            val (shown, rest) = WatchAssistant.splitReply(answer.text?.let { WatchAssistant.watchText(it) }, limit)
             shown?.let { watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple(it)) }
-            if (rest.isNotEmpty()) scope.launch { notifyAll(rest) }
+            if (rest.isNotEmpty()) scope.launch { notifyAll(rest, s.maxNotifications) }
             repliedAt = System.currentTimeMillis(); answered = true
-            db.events.add("info", "Alexa replied ${secs(repliedAt - stoppedAt)} s after the stop: ${answer.text ?: "(card)"}" + if (answer.listenAgain) "; listening again" else "")
-            if (answer.listenAgain) { delay(600); watch.send2021(Endpoint2021.ALEXA, Alexa.listenAgain) }
+            val listen = answer.listenAgain && s.listenAgain
+            db.events.add("info", "Alexa replied ${secs(repliedAt - stoppedAt)} s after the stop: ${answer.text ?: "(card)"}" + if (listen) "; listening again" else "")
+            val delivery = listOfNotNull(
+                when { answer.text != null -> "Reply on the watch"; answer.frames.isNotEmpty() -> "Card on the watch"; else -> "Nothing shown" },
+                rest.size.takeIf { it > 0 }?.let { "then ${minOf(it, s.maxNotifications)} notification" + if (it > 1) "s" else "" },
+                "listening again".takeIf { listen },
+            ).joinToString(", ")
+            log(u, stoppedAt, delivery, recording, s)
+            if (listen) { delay(600); watch.send2021(Endpoint2021.ALEXA, Alexa.listenAgain) }
         } catch (e: CancellationException) { if (!handedOff) work.cancel(); throw e }
     }
 
+    /** One question's result: the answer, what Gemini heard and how long that took. */
+    private class Understood(val answer: WatchAssistant.Answer, val heard: String?, val audioS: Double, val speechMs: Long?)
+
     /** What was said, and the answer to it; failures become an answer saying what went wrong. */
-    private suspend fun understand(audio: ShortArray): WatchAssistant.Answer {
+    private suspend fun understand(audio: ShortArray, s: AlexaSettings): Understood {
+        val audioS = audio.size / 16_000.0
         val key = SpeechConfig.parse(db.meta.get(SpeechConfig.KEY)).geminiKey
-        if (key.isBlank()) return WatchAssistant.Answer("Add a Gemini key in Heartline (Watch, Alexa answers) so I can hear you.")
+        if (key.isBlank()) return Understood(WatchAssistant.Answer("Add a Gemini key in Heartline (Watch, Alexa) so I can hear you.", error = "no Gemini key"), null, audioS, null)
         val t0 = System.currentTimeMillis()
         // A timeout is a CancellationException too, but it's a failure to report, not this job being cancelled
         // (rethrowing it ended the turn in silence, and the watch said "I didn't hear you clearly", 2026-11-06).
-        val heard = try { gemini.transcribe(audio, key) } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+        val heard = try { gemini.transcribe(audio, key, s) } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
             db.events.add("warn", "Alexa: Gemini sent nothing back in ${System.currentTimeMillis() - t0} ms")
-            return WatchAssistant.Answer("Gemini didn't send back any words in time. Try again.")
+            return Understood(WatchAssistant.Answer("Gemini didn't send back any words in time. Try again.", error = "Gemini sent nothing back"), null, audioS, System.currentTimeMillis() - t0)
         } catch (e: CancellationException) { throw e } catch (e: Exception) {
             db.events.add("warn", "Alexa: Gemini failed after ${System.currentTimeMillis() - t0} ms: ${e.message}")
-            return WatchAssistant.Answer("Gemini isn't working: ${e.message}")
+            return Understood(WatchAssistant.Answer("Gemini isn't working: ${e.message}", error = "Gemini: ${e.message}"), null, audioS, System.currentTimeMillis() - t0)
         }
-        db.events.add("info", "Alexa heard (${secs(audio.size / 16L)} s audio, ${System.currentTimeMillis() - t0} ms): \"${heard.text}\"")
+        val speechMs = System.currentTimeMillis() - t0
+        db.events.add("info", "Alexa heard (${secs(audio.size / 16L)} s audio, $speechMs ms): \"${heard.text}\"")
         val t1 = System.currentTimeMillis()
-        return try { assistant.answer(heard.text) } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-            WatchAssistant.Answer("Heartline took too long to answer.")
+        val answer = try { assistant.answer(heard.text) } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            WatchAssistant.Answer("Heartline took too long to answer.", error = "timed out")
         } catch (e: CancellationException) { throw e } catch (e: Exception) {
-            WatchAssistant.Answer("Heartline hit an error: ${e.message}")
-        }.also { db.events.add("info", "Alexa answer (${System.currentTimeMillis() - t1} ms, ${assistant.lastModel ?: "no model"}): ${it.summary}") }
+            WatchAssistant.Answer("Heartline hit an error: ${e.message}", error = e.message ?: e.toString())
+        }
+        db.events.add("info", "Alexa answer (${System.currentTimeMillis() - t1} ms, ${assistant.lastModel ?: "no model"}): ${answer.summary}")
+        return Understood(answer, heard.text, audioS, speechMs)
     }
 
     /** An answer that came after the watch stopped waiting: alerts are still sent, and the words come as a notification. */
-    private suspend fun deliverLate(answer: WatchAssistant.Answer, stoppedAt: Long) {
+    private suspend fun deliverLate(u: Understood, stoppedAt: Long, s: AlexaSettings, recording: String) {
+        val answer = u.answer
         answer.frames.forEach { runCatching { watch.send2021(Endpoint2021.ALEXA, it) } }
-        notifyAll(WatchAssistant.notificationChunks(WatchAssistant.watchText(answer.text ?: answer.summary)))
+        val parts = WatchAssistant.notificationChunks(WatchAssistant.watchText(answer.text ?: answer.summary))
         db.events.add("info", "Alexa answered by notification ${secs(System.currentTimeMillis() - stoppedAt)} s after the stop: ${answer.summary}")
+        log(u, stoppedAt, "\"Still thinking\" on the watch, then ${minOf(parts.size, s.maxNotifications)} notification" + if (parts.size > 1) "s" else "", recording, s)
+        notifyAll(parts, s.maxNotifications)
     }
 
+    /** Adds the turn to the conversation log the app shows. */
+    private suspend fun log(u: Understood, stoppedAt: Long, delivery: String, recording: String, s: AlexaSettings) = runCatching {
+        val a = u.answer
+        val record = TurnRecord(System.currentTimeMillis(), "Watch", u.heard, u.audioS, u.speechMs, a.trace?.prompt.orEmpty(), a.trace?.memory ?: 0,
+            a.trace?.rounds?.toList().orEmpty(), a.text ?: a.summary, delivery, a.error, System.currentTimeMillis() - stoppedAt, recording)
+        db.meta.set(AlexaLog.KEY, AlexaLog.added(db.meta.get(AlexaLog.KEY), record, s.keepTurns))
+    }.onFailure { db.events.add("warn", "Alexa: couldn't save the turn to the log: ${it.message}") }
+
     /** Sends [parts] as numbered watch notifications, a moment apart so they arrive in order. */
-    private suspend fun notifyAll(parts: List<String>) {
-        val sent = parts.take(MAX_NOTIFICATIONS)
+    private suspend fun notifyAll(parts: List<String>, max: Int) {
+        val sent = parts.take(max)
         sent.forEachIndexed { i, p ->
             val more = if (i == sent.lastIndex && parts.size > sent.size) " (cut short)" else ""
             runCatching { watch.notify(if (sent.size > 1) "Alexa ${i + 1}/${sent.size}" else "Alexa", p + more) }
@@ -323,10 +360,5 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         const val ESCALATE_MS = 1500L
         val ORPHAN_STOPS = listOf("triggered (06)", "a card", "a simple reply", "an error (0f)", "end (02)")
         val STOPS = listOf("triggered (06)", "an error (0f)")
-        const val KEEP_TURNS = 30
-        /** About 4,000 words, more than the longest answer kept (20,000 characters); a longer one ends "(cut short)". */
-        const val MAX_NOTIFICATIONS = 25
-        /** The watch shows "I didn't hear you clearly" about 40 s after the stop; answer before that or say it's coming later. */
-        const val WATCH_WAIT_MS = 34_000L
     }
 }

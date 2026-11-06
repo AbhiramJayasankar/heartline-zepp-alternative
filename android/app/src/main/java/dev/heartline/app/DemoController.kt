@@ -167,6 +167,21 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override val assistantAi = MutableStateFlow(AssistantAiUi(null, dev.heartline.service.AssistantAiConfig.DEFAULT_MODEL))
     override fun setAssistantAi(key: String?, model: String) { assistantAi.update { it.copy(keyEnd = key?.takeLast(4) ?: it.keyEnd, model = model) } }
     override fun setAssistantAiSecondKey(key: String) { assistantAi.update { it.copy(key2End = key.trim().takeLast(4).ifEmpty { null }) } }
+    override val alexaSettings = MutableStateFlow(dev.heartline.service.AlexaSettings())
+    override fun updateAlexaSettings(change: (dev.heartline.service.AlexaSettings) -> dev.heartline.service.AlexaSettings) { alexaSettings.update { change(it).clamped() } }
+    override val alexaTurns = MutableStateFlow(listOf(dev.heartline.service.TurnRecord(System.currentTimeMillis() - 600_000, "Watch", "How did I sleep?", 2.1, 900,
+        "You are the voice assistant...", 0, listOf(dev.heartline.service.RoundLog("nvidia/nemotron-3.5-super-vl:free", 1, "off", 2100, 2900, 40,
+            listOf(dev.heartline.service.ToolCallLog("get_sleep", "{\"date\":\"today\"}", "Sleep 23:40 to 06:55: 6 h 50 min asleep", 12)), null),
+            dev.heartline.service.RoundLog("nvidia/nemotron-3.5-super-vl:free", 1, "off", 1800, 3100, 60, emptyList(), "You slept 6 h 50 min with 1 h 20 min deep.")),
+        "You slept 6 h 50 min with 1 h 20 min deep.", "Reply on the watch", null, 5200, null)))
+    override fun clearAlexaTurns() { alexaTurns.value = emptyList() }
+    override val alexaTools = listOf(AlexaToolUi("get_sleep", "Health data", "The night's sleep that ended on the morning of a date.", "{}"),
+        AlexaToolUi("web_search", "Web", "Search the web.", "{}"), AlexaToolUi("set_timer", "Watch and Heartline actions", "Start a countdown timer on the watch.", "{}"))
+    override suspend fun alexaPromptPreview(template: String) = dev.heartline.service.AssistantAi.renderPrompt(template,
+        dev.heartline.service.AiContext(java.time.ZonedDateTime.now(), "62 bpm at 10:02", 4210, null, emptyList(), "10:05", "Readiness: 78 out of 100"))
+    override val alexaAlerts = MutableStateFlow(listOf(AlexaAlertUi(1, "Reminder", "reminder at 18:00 to call home", now() + 3600)))
+    override fun cancelAlexaAlert(id: Int) { alexaAlerts.update { l -> l.filter { it.id != id } } }
+    override fun alexaRecording(name: String): Uri? = null
     override val webSearch = MutableStateFlow(WebSearchUi())
     override fun setWebSearchKey(service: String, key: String) {
         val end = key.trim().takeLast(4).ifEmpty { null }

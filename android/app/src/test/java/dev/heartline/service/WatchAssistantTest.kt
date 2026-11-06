@@ -58,7 +58,48 @@ class WatchAssistantTest {
 
     private fun assistant() = WatchAssistant(
         AssistantAi { _, _, body -> bodies += JSONObject(body); replies.removeFirstOrNull() ?: say("(no more replies)") },
-        { AssistantAiConfig(key) }, { WatchAssistant.Facts("72 bpm at 3:39 PM", 4200, health = "Readiness: 62 out of 100") }, weather, store, actions, data, { now })
+        { AssistantAiConfig(key) }, { WatchAssistant.Facts("72 bpm at 3:39 PM", 4200, health = "Readiness: 62 out of 100") }, weather, store, actions, data, { now }, { alexa })
+
+    private var alexa = AlexaSettings()
+
+    @Test fun theOwnersSettingsShapeTheRequest() = runBlocking {
+        alexa = AlexaSettings(prompt = "Be brief. Now {NOW}. Steps {STEPS}.", disabledTools = setOf("set_timer"),
+            toolDescriptions = mapOf("get_sleep" to "Sleep data."), fallbackModels = listOf("x/y"), temperature = 0.7, maxTokens = 900, memoryTurns = 0)
+        brain(call("set_timer", """{"seconds":60}"""), say("Done."))
+        val a = assistant().answer("Timer for a minute")
+        assertEquals("Be brief. Now Friday 6 November 2026, 15:40 (Asia/Kolkata). Steps 4200.", system())
+        val body = bodies.first()
+        val tools = body.getJSONArray("tools").let { t -> (0 until t.length()).map { t.getJSONObject(it).getJSONObject("function") } }
+        assertFalse(tools.any { it.getString("name") == "set_timer" })
+        assertEquals("Sleep data.", tools.first { it.getString("name") == "get_sleep" }.getString("description"))
+        assertEquals(listOf(AssistantAiConfig.DEFAULT_MODEL, "x/y"), body.getJSONArray("models").let { m -> (0 until m.length()).map { m.getString(it) } })
+        assertEquals(0.7, body.getDouble("temperature"), 0.0)
+        assertEquals(900, body.getInt("max_tokens"))
+        // A tool that's off isn't run even if the model calls it.
+        assertEquals(listOf("Error: the set_timer tool is turned off in Heartline"), toolResults())
+        assertTrue(a.frames.isEmpty())
+    }
+
+    @Test fun theTraceRecordsEveryRequestAndToolCall() = runBlocking {
+        brain(call("get_sleep", """{"date":"2026-11-06"}"""), say("You slept 4 h 49 min."))
+        val trace = assistant().answer("How did I sleep?").trace!!
+        assertTrue(trace.prompt.contains("Steps today: 4200"))
+        assertEquals(2, trace.rounds.size)
+        val call = trace.rounds[0].calls.single()
+        assertEquals("get_sleep", call.name)
+        assertEquals("2026-11-06", JSONObject(call.args).getString("date"))
+        assertEquals("Asleep 4 h 49 min, deep 32 min", call.result)
+        assertEquals("You slept 4 h 49 min.", trace.rounds[1].text)
+        assertEquals("off", trace.rounds[1].reasoning)
+    }
+
+    @Test fun reasoningCanBeAskedFor() = runBlocking {
+        alexa = AlexaSettings(reasoning = "medium", reasoningMaxTokens = 9000)
+        brain(say("Hi."))
+        assistant().answer("Hello")
+        assertEquals("medium", bodies.last().getJSONObject("reasoning").getString("effort"))
+        assertEquals(9000, bodies.last().getInt("max_tokens"))
+    }
 
     @Test fun answersAreShownAsText() = runBlocking {
         brain(say("Your heart rate was 72 bpm."))

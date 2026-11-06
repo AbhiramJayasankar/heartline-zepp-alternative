@@ -20,6 +20,7 @@ import dev.heartline.service.WatchService
 import dev.heartline.ui.theme.ThemeMode
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -321,6 +322,53 @@ class RealController(
             db.meta.set(dev.heartline.service.AssistantAiConfig.KEY, saved.copy(apiKey2 = key.trim()).json())
         }
     }
+    private val alexaLock = kotlinx.coroutines.sync.Mutex()
+    override val alexaSettings: StateFlow<dev.heartline.service.AlexaSettings> = db.meta.observe(dev.heartline.service.AlexaSettings.KEY)
+        .map { dev.heartline.service.AlexaSettings.parse(it) }.stateIn(scope, SharingStarted.Eagerly, dev.heartline.service.AlexaSettings())
+    override fun updateAlexaSettings(change: (dev.heartline.service.AlexaSettings) -> dev.heartline.service.AlexaSettings) {
+        scope.launch {
+            alexaLock.withLock {
+                val saved = dev.heartline.service.AlexaSettings.parse(db.meta.get(dev.heartline.service.AlexaSettings.KEY))
+                db.meta.set(dev.heartline.service.AlexaSettings.KEY, change(saved).clamped().json())
+            }
+        }
+    }
+    override val alexaTurns: StateFlow<List<dev.heartline.service.TurnRecord>> = db.meta.observe(dev.heartline.service.AlexaLog.KEY)
+        .map { dev.heartline.service.AlexaLog.parse(it) }.flowOn(Dispatchers.Default).stateIn(scope, SharingStarted.Eagerly, emptyList())
+    override fun clearAlexaTurns() { scope.launch { db.meta.set(dev.heartline.service.AlexaLog.KEY, "[]") } }
+    override val alexaTools: List<AlexaToolUi> by lazy {
+        testAssistant.allTools.map { t ->
+            val group = when {
+                t.name == "web_search" -> "Web"
+                t.name.startsWith("get_") && t.name != "get_weather" -> "Health data"
+                else -> "Watch and Heartline actions"
+            }
+            AlexaToolUi(t.name, group, t.description, t.parameters.toString(2))
+        }
+    }
+    override suspend fun alexaPromptPreview(template: String): String = testAssistant.promptPreview(template)
+    override val alexaAlerts: StateFlow<List<AlexaAlertUi>> = db.meta.observe(dev.heartline.service.WatchAssistant.ALERTS)
+        .map { json ->
+            val now = java.time.ZonedDateTime.now()
+            dev.heartline.service.WatchAssistant.parseAlerts(json).filter { it.at > now.toEpochSecond() }.sortedBy { it.at }.map { a ->
+                AlexaAlertUi(a.id, when (a.kind) { dev.heartline.protocol.Alexa.ALERT_TIMER -> "Timer"; dev.heartline.protocol.Alexa.ALERT_ALARM -> "Alarm"; else -> "Reminder" },
+                    a.describe(now), a.at)
+            }
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    override fun cancelAlexaAlert(id: Int) {
+        scope.launch {
+            val all = dev.heartline.service.WatchAssistant.parseAlerts(db.meta.get(dev.heartline.service.WatchAssistant.ALERTS))
+            val a = all.firstOrNull { it.id == id } ?: return@launch
+            db.meta.set(dev.heartline.service.WatchAssistant.ALERTS, org.json.JSONArray().apply { (all - a).forEach { put(it.json()) } }.toString())
+            // Reminders live in the watch's reminder slots, which the agenda sync rewrites; alarms and timers are deleted on the watch.
+            if (a.kind != dev.heartline.protocol.Alexa.ALERT_REMINDER)
+                action { it.send2021(dev.heartline.protocol.Endpoint2021.ALEXA, dev.heartline.protocol.Alexa.deleteAlert(a.kind, a.token)) }
+        }
+    }
+    override fun alexaRecording(name: String): Uri? {
+        val wav = File(File(context.filesDir, "alexa"), "$name.wav")
+        return if (wav.isFile) FileProvider.getUriForFile(context, "${context.packageName}.recordings", wav) else null
+    }
     override val webSearch: StateFlow<WebSearchUi> = db.meta.observe(dev.heartline.service.WebSearchConfig.KEY)
         .map { dev.heartline.service.WebSearchConfig.parse(it).let { c ->
             WebSearchUi(c.tavilyKey.takeIf { k -> k.isNotBlank() }?.takeLast(4), c.exaKey.takeIf { k -> k.isNotBlank() }?.takeLast(4)) } }
@@ -356,7 +404,15 @@ class RealController(
     override suspend fun testAssistantAi(question: String): String {
         val started = System.nanoTime()
         val answer = testAssistant.answer(question, dryRun = true)
-        return "The watch would show: ${answer.summary}\n${testAssistant.lastModel ?: "OpenRouter"} took ${"%.1f".format((System.nanoTime() - started) / 1e9)} s."
+        val ms = (System.nanoTime() - started) / 1_000_000
+        runCatching {
+            val a = answer.trace
+            val record = dev.heartline.service.TurnRecord(System.currentTimeMillis(), "Tried in the app (nothing sent to the watch)", question, null, null,
+                a?.prompt.orEmpty(), a?.memory ?: 0, a?.rounds?.toList().orEmpty(), answer.text ?: answer.summary,
+                if (answer.text != null) "Would show a reply" else "Would show a card", answer.error, ms, null)
+            db.meta.set(dev.heartline.service.AlexaLog.KEY, dev.heartline.service.AlexaLog.added(db.meta.get(dev.heartline.service.AlexaLog.KEY), record, alexaSettings.value.keepTurns))
+        }
+        return "The watch would show: ${answer.summary}\n${testAssistant.lastModel ?: "OpenRouter"} took ${"%.1f".format(ms / 1000.0)} s."
     }
     override val phoneLink = taskA.phoneLink
     override suspend fun searchPlaces(query: String): List<PlaceUi> = taskA.searchPlaces(query)

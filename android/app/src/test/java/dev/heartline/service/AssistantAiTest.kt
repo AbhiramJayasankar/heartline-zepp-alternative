@@ -88,7 +88,7 @@ class AssistantAiTest {
         assertEquals(3, bodies.size)
         bodies.drop(1).forEach {
             assertEquals("low", it.getJSONObject("reasoning").getString("effort"))
-            assertEquals(AssistantAi.REASONING_MAX_TOKENS, it.getInt("max_tokens"))
+            assertEquals(AlexaSettings().reasoningMaxTokens, it.getInt("max_tokens"))
         }
     }
 
@@ -100,7 +100,7 @@ class AssistantAiTest {
         val cut = AssistantAi { _, _, _ -> """{"model":"m","choices":[{"finish_reason":"length","message":{"content":null}}]}""" }
         assertEquals("m ran out of tokens before it answered", runCatching { cut.converse("hi", context, emptyList(), config, Runner()) }.exceptionOrNull()?.message)
         val loop = AssistantAi { _, _, _ -> calls("get_sleep" to "{}") }
-        assertEquals("m kept calling tools without answering", runCatching { loop.converse("hi", context, emptyList(), config, Runner()) }.exceptionOrNull()?.message)
+        assertEquals("m kept calling tools without answering (6 rounds)", runCatching { loop.converse("hi", context, emptyList(), config, Runner()) }.exceptionOrNull()?.message)
         assertEquals("no OpenRouter key saved", runCatching { limited.converse("hi", context, emptyList(), AssistantAiConfig(), Runner()) }.exceptionOrNull()?.message)
     }
 
