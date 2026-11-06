@@ -53,9 +53,10 @@ numbers you can use, on the phone, offline.
 - **Watch app list**: choose and order the apps, and what goes in the More screen.
 - **Alarms, calendar reminders, weather** for where your phone is (Open-Meteo, no API key), vibration counts, set clock, find watch.
 - **Alexa button**: the watch's Alexa button works again. **Gemini 3.5 Transcribe Live** hears you and a free
-  **OpenRouter** model answers: questions of any kind, your sleep, readiness, stress and heart rate, real weather where
-  you are, workout capture ("start a gym workout"), and timers, alarms and reminders that ring on the watch (and can be
-  cancelled by voice). Both run on free tiers with your own keys.
+  **OpenRouter** model answers with tool calling: it looks up your heart rate, stress, sleep stages, SpO2, readiness and
+  trends to analyse them, shows real weather where you are, starts workout capture ("start a gym workout"), and sets
+  timers, alarms and reminders that ring on the watch (and can be cancelled by voice). Both run on free tiers with your
+  own keys.
 
 **Your data stays yours**
 - Everything is stored in a local database on the phone. Export it, back it up, or share it with other apps through

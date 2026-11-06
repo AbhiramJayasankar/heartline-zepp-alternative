@@ -2,6 +2,8 @@ package dev.heartline.service
 
 import dev.heartline.app.FetchedWeather
 import dev.heartline.protocol.Alexa
+import dev.heartline.protocol.CalendarReminder
+import dev.heartline.protocol.reminderTitle
 import dev.heartline.protocol.wmoCondition
 import java.time.Instant
 import java.time.LocalDateTime
@@ -9,6 +11,7 @@ import java.time.LocalTime
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import java.util.Locale
 import kotlin.math.roundToInt
 import kotlinx.coroutines.withTimeoutOrNull
@@ -29,7 +32,7 @@ data class AlexaAlert(val id: Int, val kind: Int, val token: String, val at: Lon
     fun json(): JSONObject = JSONObject().put("id", id).put("kind", kind).put("token", token).put("at", at).put("label", label)
 }
 
-/** Weather for the Alexa button: Open-Meteo for the place chosen in Heartline's weather settings. */
+/** Weather for the Alexa button: Open-Meteo for the phone's location or the place picked in Heartline. */
 interface AssistantWeather {
     /** Throws with a message the watch can show (no place chosen, no internet). */
     suspend fun latest(): FetchedWeather
@@ -42,7 +45,19 @@ interface AssistantStore {
     suspend fun set(key: String, value: String)
 }
 
-/** What the Alexa button can make Heartline do. Each throws with a message the watch can show when it can't. */
+/** Read-only lookups the brain can call (Heartline's health data, see HealthTools). */
+interface DataTools {
+    val tools: List<Tool>
+    /** Null when [name] isn't one of [tools]. */
+    suspend fun run(name: String, args: JSONObject): String?
+
+    object None : DataTools {
+        override val tools = emptyList<Tool>()
+        override suspend fun run(name: String, args: JSONObject): String? = null
+    }
+}
+
+/** What the Alexa button can make Heartline do. Each throws with a message when it can't. */
 interface AssistantActions {
     fun startWorkout(label: String, minutes: Int)
     /** The capture that was stopped, as words, or null if none was running. */
@@ -59,8 +74,9 @@ interface AssistantActions {
 
 /**
  * The Alexa button's answers: the words Gemini heard go to the OpenRouter brain ([AssistantAi]) with the clock,
- * Heartline's latest numbers, the weather and the alerts it set, and the [Ask] it returns is carried out on the
- * watch. Anything that can't be done becomes a plain message saying why; there are no built-in answers.
+ * Heartline's latest numbers, the weather and the alerts it set; the brain calls [data] tools for detail and this
+ * class's action tools to act on the watch, and its final words are shown. Anything that fails becomes a plain
+ * message saying why; there are no built-in answers.
  */
 class WatchAssistant(
     private val ai: AssistantAi,
@@ -69,17 +85,18 @@ class WatchAssistant(
     private val weather: AssistantWeather,
     private val store: AssistantStore,
     private val actions: AssistantActions = AssistantActions.None,
+    private val data: DataTools = DataTools.None,
     private val now: () -> ZonedDateTime = { ZonedDateTime.now() },
 ) {
     /**
-     * [dataAsOf]: the time of the newest activity minute synced from the watch; [health]: Heartline's health summary,
+     * [dataAsOf]: the time of the newest activity minute synced from the watch; [health]: a short glance at today,
      * one fact per line; [workout]: the capture running now.
      */
     data class Facts(val heartRate: String? = null, val stepsToday: Int? = null, val dataAsOf: String? = null, val health: String? = null, val workout: String? = null)
 
     /**
      * What to send: [frames] in order (alerts, cards), then [text] as the visible reply, then 0b if [listenAgain].
-     * [summary] says what it does, for the app's test buttons and the activity log.
+     * [summary] says what it did, for the app's test buttons and the activity log.
      */
     class Answer(val text: String?, val frames: List<ByteArray> = emptyList(), val listenAgain: Boolean = false, val summary: String = text.orEmpty())
 
@@ -90,101 +107,132 @@ class WatchAssistant(
     private val history = ArrayList<Pair<String, String>>()
     private var lastTurn = 0L
 
-    /** [dryRun] works out the answer without remembering the turn or changing the saved alerts (the app's test buttons). */
+    /** [dryRun] works out the answer without acting, remembering the turn or changing the saved alerts (the app's test buttons). */
     suspend fun answer(transcript: String, dryRun: Boolean = false): Answer {
         val t = now()
         if (transcript.isBlank()) return Answer("I didn't hear any words. Try again.")
         val config = aiConfig()
         if (!config.enabled) return Answer("Add an OpenRouter key in Heartline (Watch, Alexa answers) so I can answer. I heard: \"$transcript\"")
         if (t.toEpochSecond() - lastTurn > 120) history.clear()
-        val alerts = alerts(t)
+        val turn = Turn(t, alerts(t), dryRun)
         val f = facts(t)
         // The forecast is usually cached; don't hold the watch up for long if it has to be fetched.
-        val forecast = withTimeoutOrNull(4_000) { runCatching { weather.latest() }.getOrNull() }
-        val ask = try {
-            withTimeoutOrNull(AssistantAi.TIMEOUT_MS) {
-                ai.interpret(transcript, AiContext(t, f.heartRate, f.stepsToday, forecast?.let { describe(it) }, alerts, f.dataAsOf, f.health, f.workout), history.toList(), config)
-            } ?: return Answer("OpenRouter isn't working: no answer within ${AssistantAi.TIMEOUT_MS / 1000} s.")
-        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
-            return Answer("OpenRouter isn't working: ${e.message}")
+        turn.forecast = withTimeoutOrNull(4_000) { runCatching { weather.latest() }.getOrNull() }
+        val context = AiContext(t, f.heartRate, f.stepsToday, turn.forecast?.let { describe(it) }, turn.alerts, f.dataAsOf, f.health, f.workout)
+        val runner = object : ToolRunner {
+            override val tools = data.tools + ACTION_TOOLS
+            override suspend fun run(name: String, args: JSONObject): String = data.run(name, args) ?: turn.act(name, args)
         }
-        val answer = carryOut(ask, t, alerts, dryRun)
+        val reply = try {
+            withTimeoutOrNull(AssistantAi.TIMEOUT_MS) { ai.converse(transcript, context, history.toList(), config, runner) }
+                ?: return turn.answer("OpenRouter isn't working: no answer within ${AssistantAi.TIMEOUT_MS / 1000} s.", emptyList())
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
+            return turn.answer("OpenRouter isn't working: ${e.message}", emptyList())
+        }
         if (!dryRun) {
-            // The model's own JSON, so the next turn's history shows it the format to reply in (a plain-text summary
-            // here led a model to answer in that style, 2026-11-06).
-            history += transcript to AssistantAi.json(ask); lastTurn = t.toEpochSecond()
+            history += transcript to reply.text; lastTurn = t.toEpochSecond()
             while (history.size > 6) history.removeAt(0)
         }
-        return answer
+        return turn.answer(reply.text.take(600), reply.toolCalls)
     }
 
-    private suspend fun carryOut(ask: Ask, t: ZonedDateTime, alerts: List<AlexaAlert>, dryRun: Boolean): Answer {
-        suspend fun add(kind: Int, at: Long, label: String = ""): String {
-            val token = "heartline-${listOf("", "alarm", "reminder", "timer")[kind]}-${t.toEpochSecond()}"
-            if (!dryRun) saveAlerts(alerts + AlexaAlert((alerts.maxOfOrNull { it.id } ?: 0) + 1, kind, token, at, label))
+    /** One question's actions: what was sent to the watch and what to tell the user about it. */
+    private inner class Turn(val t: ZonedDateTime, var alerts: List<AlexaAlert>, val dryRun: Boolean) {
+        var forecast: FetchedWeather? = null
+        val frames = ArrayList<ByteArray>()
+        val did = ArrayList<String>()
+        var card = false
+
+        fun answer(text: String, tools: List<String>): Answer {
+            val parts = listOfNotNull(text.takeIf { !card }, did.takeIf { it.isNotEmpty() }?.joinToString("; ", "[", "]"),
+                tools.filter { it.startsWith("get_") }.distinct().takeIf { it.isNotEmpty() }?.joinToString(", ", "(looked up ", ")"))
+            // A card is the answer; a text reply after it would replace it on the screen.
+            return Answer(if (card) null else text, frames.toList(), !card && text.trimEnd().endsWith("?"), parts.joinToString(" "))
+        }
+
+        private suspend fun addAlert(kind: Int, at: Long, label: String = ""): String {
+            val token = "heartline-${listOf("", "alarm", "reminder", "timer")[kind]}-${t.toEpochSecond()}-${alerts.size}"
+            val next = alerts + AlexaAlert((alerts.maxOfOrNull { it.id } ?: 0) + 1, kind, token, at, label)
+            if (!dryRun) saveAlerts(next)
+            alerts = next
             return token
         }
-        return when (ask) {
-            is Ask.Say -> Answer(ask.text, listenAgain = ask.listenAgain)
-            is Ask.Timer -> {
-                val s = ask.seconds
-                val token = add(Alexa.ALERT_TIMER, t.toEpochSecond() + s)
-                Answer("Timer set for ${spoken(s)}.", listOf(Alexa.timer(token, s / 3600, s / 60 % 60, s % 60)), summary = "Timer set for ${spoken(s)} (sets a watch timer).")
+
+        private fun clock(at: LocalDateTime) = at.format(DateTimeFormatter.ofPattern(if (at.toLocalDate() == t.toLocalDate()) "HH:mm" else "EEE HH:mm", Locale.ENGLISH))
+
+        /** When [args] says: "time" as HH:MM (the next one) or "in_seconds"; null if neither is usable. */
+        private fun whenOf(args: JSONObject, roundToMinute: Boolean): LocalDateTime? {
+            args.optInt("in_seconds", 0).takeIf { it > 0 }?.let { s ->
+                val at = t.toLocalDateTime().plusSeconds(s.toLong())
+                return if (roundToMinute) at.plusSeconds(59).truncatedTo(ChronoUnit.MINUTES) else at
             }
-            is Ask.Alarm -> {
-                // Watch alarms ring on the minute: "in N minutes" rounds up to the next whole minute.
-                val at = ask.inSeconds?.let { t.toLocalDateTime().plusSeconds(it + 59L).truncatedTo(java.time.temporal.ChronoUnit.MINUTES) }
-                    ?: next(t, ask.at ?: LocalTime.of(7, 0))
-                val token = add(Alexa.ALERT_ALARM, at.atZone(t.zone).toEpochSecond())
-                val text = "Alarm set for ${at.format(DateTimeFormatter.ofPattern("EEE h:mm a", Locale.ENGLISH))}."
-                Answer(text, listOf(Alexa.alarm(token, wallClock(at))), summary = "$text (sets a watch alarm)")
-            }
-            is Ask.Reminder -> {
-                val at = ask.inSeconds?.let { t.toLocalDateTime().plusSeconds(it.toLong()) } ?: next(t, ask.at ?: LocalTime.of(9, 0))
-                val token = add(Alexa.ALERT_REMINDER, at.atZone(t.zone).toEpochSecond(), ask.label)
-                val text = "I'll remind you to ${ask.label} at ${at.format(DateTimeFormatter.ofPattern(if (at.toLocalDate() == t.toLocalDate()) "h:mm a" else "EEE h:mm a", Locale.ENGLISH))}."
-                Answer(text, listOf(Alexa.reminder(token, wallClock(at), ask.label)), summary = "$text (sets a watch reminder)")
-            }
-            is Ask.Cancel -> {
-                val gone = alerts.filter { it.id in ask.ids }
-                if (gone.isEmpty()) return Answer("There's nothing like that to cancel.")
-                if (!dryRun) saveAlerts(alerts - gone.toSet())
-                val text = "Cancelled the " + gone.joinToString(" and the ") { it.describe(t) } + "."
-                Answer(text, gone.map { Alexa.deleteAlert(it.kind, it.token) }, summary = "$text (removes it from the watch)")
-            }
-            Ask.Weather -> {
-                val w = try { weather.latest() } catch (e: Exception) { return Answer("Couldn't get the weather: ${e.message}") }
-                Answer(null, listOf(card(w, t)), summary = "Shows the weather card: ${describe(w)}")
-            }
-            Ask.Help -> Answer(null, listOf(Alexa.list("Heartline", "Things to ask", listOf(
-                "How did I sleep", "What's my readiness", "How's my stress today", "What's my heart rate", "Start a gym workout",
-                "Timer for 5 minutes", "Alarm at 7 am", "Remind me at 6 pm to call home", "Cancel my alarm", "What's the weather",
-                "Ask me anything").mapIndexed { i, q -> "${i + 1}" to q })), summary = "Shows the list of things to ask")
-            is Ask.StartWorkout -> {
-                val text = "Started ${ask.label} capture for ${spoken(ask.minutes * 60)}. Say stop my workout to end it."
-                if (dryRun) return Answer(text, summary = "$text (starts Heartline's workout capture)")
-                act { actions.startWorkout(ask.label, ask.minutes) } ?: Answer(text)
-            }
-            Ask.StopWorkout -> {
-                if (dryRun) return Answer("Stopped the workout capture.", summary = "Stopped the workout capture. (stops Heartline's workout capture)")
-                var stopped: String? = null
-                act { stopped = actions.stopWorkout() } ?: Answer(stopped?.let { "Stopped $it. Heartline is working out your sets and reps." } ?: "No workout capture is running.")
-            }
-            Ask.Sync -> {
-                if (dryRun) return Answer("Syncing the watch now.", summary = "Syncing the watch now. (starts a sync)")
-                act { actions.sync() } ?: Answer("Syncing the watch now.")
+            val time = args.optString("time").trim().takeIf { it.isNotEmpty() && it != "null" } ?: return null
+            return runCatching { next(t, LocalTime.parse(time.padStart(5, '0'))) }.getOrNull()
+        }
+
+        suspend fun act(name: String, args: JSONObject): String {
+            fun done(what: String): String { did += what; return if (dryRun) "Done (test run, nothing was sent): $what" else "Done: $what" }
+            return when (name) {
+                "set_timer" -> {
+                    val s = args.optInt("seconds", 0).takeIf { it in 1..86_399 } ?: return "Error: seconds must be 1 to 86399"
+                    val token = addAlert(Alexa.ALERT_TIMER, t.toEpochSecond() + s)
+                    frames += Alexa.timer(token, s / 3600, s / 60 % 60, s % 60)
+                    done("timer for ${spoken(s)}, ringing at ${clock(t.toLocalDateTime().plusSeconds(s.toLong()))}")
+                }
+                "set_alarm" -> {
+                    // Watch alarms ring on the minute: "in N minutes" rounds up to the next whole minute.
+                    val at = whenOf(args, roundToMinute = true) ?: return "Error: give time as HH:MM or in_seconds"
+                    val token = addAlert(Alexa.ALERT_ALARM, at.atZone(t.zone).toEpochSecond())
+                    frames += Alexa.alarm(token, wallClock(at))
+                    done("alarm at ${clock(at)}")
+                }
+                "set_reminder" -> {
+                    val label = args.optString("label").trim().ifEmpty { return "Error: label is required" }
+                    val at = whenOf(args, roundToMinute = true) ?: return "Error: give time as HH:MM or in_seconds"
+                    // A watch reminder (the calendar slots, which show their title), written by the agenda sync.
+                    addAlert(Alexa.ALERT_REMINDER, at.atZone(t.zone).toEpochSecond(), label)
+                    done("reminder \"${reminderTitle(label)}\" at ${clock(at)} (the watch shows the first ${dev.heartline.protocol.REMINDER_TITLE_LENGTH} characters)")
+                }
+                "cancel_alerts" -> {
+                    val ids = args.optJSONArray("ids")?.let { a -> (0 until a.length()).map { a.optInt(it, -1) } }.orEmpty()
+                    val gone = alerts.filter { it.id in ids }
+                    if (gone.isEmpty()) return "Error: none of those ids are set; the list is ${if (alerts.isEmpty()) "empty" else alerts.joinToString { "${it.id}: ${it.describe(t)}" }}"
+                    alerts = alerts - gone.toSet()
+                    if (!dryRun) saveAlerts(alerts)
+                    gone.filter { it.kind != Alexa.ALERT_REMINDER }.forEach { frames += Alexa.deleteAlert(it.kind, it.token) }
+                    done("cancelled " + gone.joinToString(" and ") { it.describe(t) })
+                }
+                "get_weather" -> forecast?.let { describe(it) } ?: try { describe(weather.latest().also { forecast = it }) } catch (e: Exception) { "Error: ${e.message}" }
+                "show_weather_card" -> {
+                    val w = forecast ?: try { weather.latest().also { forecast = it } } catch (e: Exception) { return "Error: couldn't get the weather: ${e.message}" }
+                    frames += card(w, t); card = true
+                    done("showed the weather card for ${w.weather.location}")
+                }
+                "show_help" -> {
+                    frames += Alexa.list("Heartline", "Things to ask", HELP.mapIndexed { i, q -> "${i + 1}" to q }); card = true
+                    done("showed the list of things to ask")
+                }
+                "start_workout" -> {
+                    val label = args.optString("label").trim().ifEmpty { "Workout" }
+                    val minutes = args.optInt("minutes", 60).coerceIn(1, 720)
+                    if (!dryRun) try { actions.startWorkout(label, minutes) } catch (e: Exception) { return "Error: ${e.message}" }
+                    done("started the $label capture for ${spoken(minutes * 60)}")
+                }
+                "stop_workout" -> {
+                    val stopped = if (dryRun) "the workout capture" else try { actions.stopWorkout() } catch (e: Exception) { return "Error: ${e.message}" }
+                    stopped?.let { done("stopped $it; Heartline is working out the sets and reps") } ?: "No workout capture is running."
+                }
+                "sync_watch" -> {
+                    if (!dryRun) try { actions.sync() } catch (e: Exception) { return "Error: ${e.message}" }
+                    done("started a sync with the watch")
+                }
+                else -> "Error: there is no tool called $name"
             }
         }
     }
 
-    /** Runs [block]; null when it worked, else an answer saying why it didn't. */
-    private inline fun act(block: () -> Unit): Answer? = try { block(); null } catch (e: Exception) { Answer("Couldn't do that: ${e.message}") }
-
     /** The saved alerts that haven't gone off yet. */
-    private suspend fun alerts(t: ZonedDateTime): List<AlexaAlert> = runCatching {
-        val a = JSONArray(store.get(ALERTS) ?: "[]")
-        (0 until a.length()).map { a.getJSONObject(it) }.map { AlexaAlert(it.getInt("id"), it.getInt("kind"), it.getString("token"), it.getLong("at"), it.optString("label")) }
-    }.getOrDefault(emptyList()).filter { it.at > t.toEpochSecond() }
+    private suspend fun alerts(t: ZonedDateTime): List<AlexaAlert> = parseAlerts(store.get(ALERTS)).filter { it.at > t.toEpochSecond() }
 
     private suspend fun saveAlerts(list: List<AlexaAlert>) = store.set(ALERTS, JSONArray().apply { list.forEach { put(it.json()) } }.toString())
 
@@ -210,14 +258,50 @@ class WatchAssistant(
     companion object {
         const val ALERTS = "alexa_alerts"
 
+        val HELP = listOf("How did I sleep", "Analyse my heart rate today", "How's my stress today", "What's my readiness", "Start a gym workout",
+            "Timer for 5 minutes", "Alarm at 7 am", "Remind me at 6 pm to call home", "Cancel my alarm", "What's the weather", "Ask me anything")
+
+        private fun obj(vararg props: Pair<String, JSONObject>, required: List<String> = emptyList()) =
+            JSONObject().put("type", "object").put("properties", JSONObject().apply { props.forEach { (k, v) -> put(k, v) } }).put("required", JSONArray(required))
+        private fun prop(type: String, description: String) = JSONObject().put("type", type).put("description", description)
+        private val WHEN = arrayOf("time" to prop("string", "Time of day as HH:MM, 24-hour; the next one after now"),
+            "in_seconds" to prop("integer", "Or: how many seconds from now"))
+
+        /** The actions the brain can take on the watch and in Heartline. */
+        val ACTION_TOOLS = listOf(
+            Tool("set_timer", "Start a countdown timer on the watch.", obj("seconds" to prop("integer", "Length in seconds"), required = listOf("seconds"))),
+            Tool("set_alarm", "Set an alarm on the watch, at a time of day or in some time from now.", obj(*WHEN)),
+            Tool("set_reminder", "Set a reminder on the watch; it shows the label at that time.",
+                obj("label" to prop("string", "What to remind them about, short (the watch shows 16 characters)"), *WHEN, required = listOf("label"))),
+            Tool("cancel_alerts", "Cancel alarms, timers or reminders set by voice, by their ids from the list in the instructions.",
+                obj("ids" to JSONObject().put("type", "array").put("items", JSONObject().put("type", "integer")), required = listOf("ids"))),
+            Tool("get_weather", "The weather where the phone is: now, today and the next three days.", obj()),
+            Tool("show_weather_card", "Show the weather card on the watch; use it when they ask what the weather is like.", obj()),
+            Tool("show_help", "Show the list of things they can ask; use it when they ask what you can do.", obj()),
+            Tool("start_workout", "Start Heartline's workout capture, which records sets, reps and heart rate from the watch's sensors.",
+                obj("label" to prop("string", "The workout they named, such as Gym or Run"), "minutes" to prop("integer", "How long to capture; 60 if they don't say"), required = listOf("label"))),
+            Tool("stop_workout", "Stop the running workout capture.", obj()),
+            Tool("sync_watch", "Fetch the latest data from the watch now.", obj()),
+        )
+
+        fun parseAlerts(json: String?): List<AlexaAlert> = runCatching {
+            val a = JSONArray(json ?: "[]")
+            (0 until a.length()).map { a.getJSONObject(it) }.map { AlexaAlert(it.getInt("id"), it.getInt("kind"), it.getString("token"), it.getLong("at"), it.optString("label")) }
+        }.getOrDefault(emptyList())
+
+        /** The voice reminders still to come, for the watch's reminder slots (shared with calendar events). */
+        fun voiceReminders(json: String?, nowEpoch: Long): List<CalendarReminder> =
+            parseAlerts(json).filter { it.kind == Alexa.ALERT_REMINDER && it.at >= nowEpoch }.map { CalendarReminder(reminderTitle(it.label), it.at, it.at) }
+
         /**
          * [text] in characters the watch's font shows: typographic punctuation as plain ASCII, odd spaces (Java's
          * clock format puts U+202F before AM/PM) as spaces, and emoji and other pictographs dropped.
          */
         fun watchText(text: String): String {
-            val plain = text.replace(Regex("[\u00A0\u2000-\u200B\u202F\u205F]"), " ")
-                .replace(Regex("[\u2018\u2019\u201B\u2032]"), "'").replace(Regex("[\u201C\u201D\u201F\u2033]"), "\"")
-                .replace(Regex("[\u2010-\u2015\u2212]"), "-").replace("\u2026", "...").replace("\u2022", "-")
+            val plain = text.replace(Regex("[\\u00A0\\u2000-\\u200B\\u202F\\u205F]"), " ")
+                .replace(Regex("[\\u2018\\u2019\\u201B\\u2032]"), "'").replace(Regex("[\\u201C\\u201D\\u201F\\u2033]"), "\"")
+                .replace(Regex("[\\u2010-\\u2015\\u2212]"), "-").replace("…", "...").replace("•", "-")
+                .replace(Regex("\\*\\*|__|`"), "")
             val sb = StringBuilder()
             var i = 0
             while (i < plain.length) {

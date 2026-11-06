@@ -176,7 +176,8 @@ fun AssistantScreen(controller: HeartlineController, nav: Navigator) {
         result?.let { Gap(10); Text(it, style = HL.type.small, color = c.ink) }
         Gap(16)
         MutedText("Ask shows what the watch would do, without sending anything to it. If the model fails, OpenRouter tries its free router. " +
-            "Each question sends the words heard, the time, your latest heart rate, today's steps, the weather and the alarms, timers and reminders set by voice to OpenRouter.")
+            "Each question sends the words heard, the time, the weather, a short summary of today and the alarms, timers and reminders set by voice to OpenRouter. " +
+            "The model can also ask Heartline for detail (heart rate, stress, sleep, blood oxygen, temperature, activity, readiness, trends, workouts), which is sent when it asks.")
     }
 }
 

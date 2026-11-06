@@ -54,25 +54,32 @@ key (free tier, no request limit in 2026-11), `GeminiSpeech.kt`. One session per
 formatting (numbers and times as digits) and automatic activity detection off, then `activityStart`, 100 ms base64
 16 kHz PCM chunks, `activityEnd`; the text arrives as `serverContent.inputTranscription`. 12 s timeout.
 
-## Answers: OpenRouter
+## Answers: OpenRouter with tool calling
 
 `AssistantAi.kt` sends what Gemini heard to the owner's OpenRouter model (default `nvidia/nemotron-3.5-super-vl:free`,
-falling back to `nvidia/nemotron-3.5-lightning:free` and `google/gemma-4-31b-it:free`; never the `openrouter/free`
-router, which picked a coding model that ignored the format) with the time, the latest heart rate (live or synced per-minute, whichever is newer), today's steps,
-the Open-Meteo forecast for the phone's location (or the place picked in Heartline's weather settings), the alarms,
-timers and reminders set by voice (with ids), the workout capture running, a health summary (`healthSummary` in
-`AssistantSetup.kt`: readiness and its factors, sleep score and last night's stages, strain, body battery, heart rate,
-zones, stress, SpO2, skin temperature, activity, PAI, today's workouts, VO2max and the last 7 days of each trend) and
-the last six turns of the conversation (a 2-minute pause starts a new one). Health questions are answered from that
-summary in one call, which keeps within the watch's wait. It asks for one JSON action: `answer` (text, optionally
-asking back, which reopens the mic), `timer`, `alarm`, `reminder`, `cancel` (by id), `weather` (the card), `help` (the
-list), `start_workout` / `stop_workout` (Heartline's workout capture) or `sync`. Reasoning is turned off for speed; a
-model that requires it (`Reasoning is mandatory for this endpoint`) is asked again with low-effort reasoning and 4000
-tokens. Reasoning cut off by the token limit is never taken as the answer; a plain-text answer, or a reply without an
-action, is shown as it is. The conversation history carries the model's JSON for each turn, so the next reply keeps
-the format. Replies are cleaned for the watch's font (plain punctuation, no emoji). Log lines never pass text through a
-format string: a "%" in an answer (humidity 66%) crashed the app on the weather question (2026-11-06). `WatchAssistant.kt` carries the action out on the watch and keeps the alerts it set in
-`meta["alexa_alerts"]` until they ring, so they can be cancelled by voice.
+falling back to `nvidia/nemotron-3.5-lightning:free` and `google/gemma-4-31b-it:free`, all with tool calling; never the
+`openrouter/free` router, which picked a coding model that ignored the format). The instructions carry the time, the
+latest heart rate, today's steps, the weather where the phone is, the alarms, timers and reminders set by voice (with
+ids), the workout capture running, a short glance at today (readiness, scores, last night, heart rate, stress,
+activity) and the last six turns of the conversation (a 2-minute pause starts a new one).
+
+The model then calls tools (OpenRouter's `tools`, up to 6 rounds), and its final words are the watch's reply:
+
+- **Health data** (`HealthTools.kt`, read-only, from the same data the app's screens show): `get_heart_rate`,
+  `get_stress`, `get_sleep` (with a stage timeline), `get_activity`, `get_spo2_and_temperature`, `get_readiness`,
+  `get_trends`, `get_workout_captures`; each takes a date where it makes sense and returns compact text.
+- **Actions** (`WatchAssistant.kt`): `set_timer`, `set_alarm` (a time, or seconds from now rounded up to the minute),
+  `set_reminder`, `cancel_alerts` (by id), `get_weather`, `show_weather_card`, `show_help`, `start_workout`,
+  `stop_workout`, `sync_watch`. Timers and alarms go to the watch as Alexa alerts. Reminders go into the watch's own
+  reminder slots (shared with calendar events, merged by time, 16-character titles), because the Alexa reminder alert
+  rang without showing its text. The voice alerts are kept in `meta["alexa_alerts"]` until they ring, so they can be
+  cancelled by voice; the agenda sync rewrites the reminder slots whenever that list changes.
+
+A reply that ends with a question reopens the watch's mic. After a card (weather, the help list) no text is sent, since
+it would replace the card. Reasoning is turned off for speed; a model that requires it (`Reasoning is mandatory for this
+endpoint`) is asked again with low-effort reasoning and 4000 tokens for the rest of the conversation. Replies are cleaned
+for the watch's font (plain punctuation, no emoji). Log lines never pass text through a format string: a "%" in an
+answer (humidity 66%) crashed the app on the weather question (2026-11-06).
 
 There are no built-in answers. Whatever fails is shown on the watch instead: no Gemini or OpenRouter key, Gemini or
 OpenRouter errors (OpenRouter's own message, e.g. a rate limit), no words heard, or no weather. The watch waits about

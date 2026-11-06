@@ -6,6 +6,7 @@ import dev.heartline.protocol.WatchWeather
 import dev.heartline.protocol.WeatherDay
 import java.time.LocalDateTime
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.ZonedDateTime
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
@@ -25,148 +26,165 @@ class WatchAssistantTest {
     private val weather = object : AssistantWeather {
         override suspend fun latest(): FetchedWeather {
             weatherError?.let { error(it) }
-            return FetchedWeather(0, WatchWeather(0, 19_800, "Bengaluru", 24, 2, listOf(WeatherDay(2, 29, 19), WeatherDay(61, 26, 18), WeatherDay(0, 28, 17), WeatherDay(3, 27, 18)), 60, 8.0), false)
+            return FetchedWeather(0, WatchWeather(0, 19_800, "Noida", 24, 2, listOf(WeatherDay(2, 29, 19), WeatherDay(61, 26, 18), WeatherDay(0, 28, 17), WeatherDay(3, 27, 18)), 60, 8.0), false)
         }
         override val fahrenheit = false
     }
-    /** The brain's reply for the next question, and the context it was given. */
-    private var brain: () -> String = { """{"action":"answer","reply":"Hi."}""" }
-    private var lastSystem = ""
     private var key = "sk-test"
-    private var health: String? = "Readiness: 62 out of 100\nLast night's sleep: 01:10 to 08:40, 7 h 5 min asleep"
     private val did = ArrayList<String>()
     private var running: String? = null
     private val actions = object : AssistantActions {
         override fun startWorkout(label: String, minutes: Int) { check(running == null) { "A workout capture is already running" }; running = label; did += "start $label $minutes" }
-        override fun stopWorkout(): String? = running?.let { did += "stop"; running = null; "$it after 12 min" }
+        override fun stopWorkout(): String? = running?.let { did += "stop"; running = null; "$it after 12 minutes" }
         override fun sync() { did += "sync" }
     }
+    private val data = object : DataTools {
+        override val tools = listOf(Tool("get_sleep", "Sleep for a night.", JSONObject().put("type", "object").put("properties", JSONObject())))
+        override suspend fun run(name: String, args: JSONObject) = if (name == "get_sleep") "Asleep 4 h 49 min, deep 32 min" else null
+    }
+
+    /** The brain's replies, one per OpenRouter request; and every request body sent. */
+    private val replies = ArrayDeque<String>()
+    private val bodies = ArrayList<JSONObject>()
+    private fun say(text: String) = JSONObject().put("model", "m").put("choices", JSONArray().put(JSONObject().put("finish_reason", "stop")
+        .put("message", JSONObject().put("content", text)))).toString()
+    private fun call(name: String, args: String = "{}") = JSONObject().put("model", "m").put("choices", JSONArray().put(JSONObject().put("finish_reason", "tool_calls")
+        .put("message", JSONObject().put("content", JSONObject.NULL).put("tool_calls", JSONArray().put(JSONObject().put("id", "c${bodies.size}").put("type", "function")
+            .put("function", JSONObject().put("name", name).put("arguments", args))))))).toString()
+    private fun brain(vararg r: String) { replies.clear(); replies.addAll(r) }
+    private fun system() = bodies.last().getJSONArray("messages").getJSONObject(0).getString("content")
+    /** The tool results the model was given in the last request. */
+    private fun toolResults(): List<String> = bodies.last().getJSONArray("messages").let { m -> (0 until m.length()).map { m.getJSONObject(it) }.filter { it.optString("role") == "tool" }.map { it.getString("content") } }
+
     private fun assistant() = WatchAssistant(
-        AssistantAi { _, _, body ->
-            lastSystem = JSONObject(body).getJSONArray("messages").getJSONObject(0).getString("content")
-            JSONObject().put("choices", JSONArray().put(JSONObject().put("message", JSONObject().put("content", brain())))).toString()
-        },
-        { AssistantAiConfig(key) }, { WatchAssistant.Facts("72 bpm at 3:39 PM", 4200, health = health) }, weather, store, actions, { now })
+        AssistantAi { _, _, body -> bodies += JSONObject(body); replies.removeFirstOrNull() ?: say("(no more replies)") },
+        { AssistantAiConfig(key) }, { WatchAssistant.Facts("72 bpm at 3:39 PM", 4200, health = "Readiness: 62 out of 100") }, weather, store, actions, data, { now })
 
     @Test fun answersAreShownAsText() = runBlocking {
-        brain = { """{"action":"answer","reply":"Your heart rate was 72 bpm.","follow_up":false}""" }
+        brain(say("Your heart rate was 72 bpm."))
         val a = assistant().answer("What's my heart rate?")
         assertEquals("Your heart rate was 72 bpm.", a.text)
         assertTrue(a.frames.isEmpty())
         assertFalse(a.listenAgain)
-        assertTrue(lastSystem.contains("Steps today: 4200"))
-        assertTrue(lastSystem.contains("Bengaluru: 24°C, partly cloudy now"))
-        assertTrue(lastSystem.contains("tomorrow light rain, 26°C / 18°C"))
+        listOf("Steps today: 4200", "Noida: 24°C, partly cloudy now", "- Readiness: 62 out of 100").forEach { assertTrue(it, system().contains(it)) }
+        val tools = bodies.last().getJSONArray("tools").let { t -> (0 until t.length()).map { t.getJSONObject(it).getJSONObject("function").getString("name") } }
+        assertEquals(listOf("get_sleep") + WatchAssistant.ACTION_TOOLS.map { it.name }, tools)
+    }
+
+    @Test fun healthDetailComesFromTools() = runBlocking {
+        brain(call("get_sleep", """{"date":"2026-11-06"}"""), say("You slept 4 h 49 min with little deep sleep."))
+        val a = assistant().answer("Analyse my sleep")
+        assertEquals("You slept 4 h 49 min with little deep sleep.", a.text)
+        assertEquals(listOf("Asleep 4 h 49 min, deep 32 min"), toolResults())
+        assertTrue(a.summary.endsWith("(looked up get_sleep)"))
+    }
+
+    @Test fun aQuestionBackListensAgain() = runBlocking {
+        brain(say("Knock knock."))
+        assertFalse(assistant().answer("Tell me a joke").listenAgain)
+        brain(say("Knock knock. Who's there?"))
+        assertTrue(assistant().answer("Tell me a joke").listenAgain)
     }
 
     @Test fun failuresAreToldToTheWatch() = runBlocking {
-        brain = { throw AssistantAi.OpenRouterError("OpenRouter 429: Rate limit exceeded") }
-        assertEquals("OpenRouter isn't working: OpenRouter 429: Rate limit exceeded", assistant().answer("hello").text)
+        val a = WatchAssistant(AssistantAi { _, _, _ -> throw AssistantAi.OpenRouterError("OpenRouter 429: Rate limit exceeded") },
+            { AssistantAiConfig(key) }, { WatchAssistant.Facts() }, weather, store, actions, data, { now })
+        assertEquals("OpenRouter isn't working: OpenRouter 429: Rate limit exceeded", a.answer("hello").text)
         key = ""
         assertTrue(assistant().answer("hello").text!!.startsWith("Add an OpenRouter key"))
         assertEquals("I didn't hear any words. Try again.", assistant().answer(" ").text)
     }
 
-    @Test fun alarmsAreSetAndCancelledByVoice() = runBlocking {
+    @Test fun timersAndAlarmsGoToTheWatchAndCanBeCancelled() = runBlocking {
         val a = assistant()
-        brain = { """{"action":"alarm","time":"07:00"}""" }
-        val set = a.answer("Wake me at 7")
-        assertEquals("Alarm set for Sat 7:00 AM.", set.text)
-        // Wall-clock seconds: Saturday 7:00 counted as if it were UTC.
-        assertArrayEquals(Alexa.alarm("heartline-alarm-${now.toEpochSecond()}", LocalDateTime.of(2026, 11, 7, 7, 0).toEpochSecond(java.time.ZoneOffset.UTC)), set.frames.single())
-        brain = { """{"action":"cancel","ids":[1]}""" }
-        now = now.plusMinutes(1)
+        brain(call("set_timer", """{"seconds":300}"""), say("Timer set for 5 minutes."))
+        val timer = a.answer("Timer for 5 minutes")
+        assertEquals("Timer set for 5 minutes.", timer.text)
+        assertEquals(listOf("Done: timer for 5 minutes, ringing at 15:45"), toolResults())
+        assertArrayEquals(Alexa.timer("heartline-timer-${now.toEpochSecond()}-0", 0, 5, 0), timer.frames.single())
+        brain(call("set_alarm", """{"time":"07:00"}"""), say("Alarm set for 7 AM."))
+        val alarm = a.answer("Wake me at 7")
+        assertArrayEquals(Alexa.alarm("heartline-alarm-${now.toEpochSecond()}-1", LocalDateTime.of(2026, 11, 7, 7, 0).toEpochSecond(ZoneOffset.UTC)), alarm.frames.single())
+        brain(call("cancel_alerts", """{"ids":[2]}"""), say("Cancelled your 7 AM alarm."))
         val cancel = a.answer("Cancel my alarm")
-        assertTrue(lastSystem.contains("id 1: alarm at Sat 07:00"))
-        assertEquals("Cancelled the alarm at Sat 07:00.", cancel.text)
-        assertArrayEquals(Alexa.deleteAlert(Alexa.ALERT_ALARM, "heartline-alarm-${now.minusMinutes(1).toEpochSecond()}"), cancel.frames.single())
-        assertEquals("[]", saved[WatchAssistant.ALERTS])
-        assertEquals("There's nothing like that to cancel.", a.answer("Cancel it").text)
+        assertTrue(system().contains("id 1: timer ringing at 15:45; id 2: alarm at Sat 07:00"))
+        assertArrayEquals(Alexa.deleteAlert(Alexa.ALERT_ALARM, "heartline-alarm-${now.toEpochSecond()}-1"), cancel.frames.single())
+        assertEquals(1, WatchAssistant.parseAlerts(saved[WatchAssistant.ALERTS]).size)
+        brain(call("cancel_alerts", """{"ids":[9]}"""), say("Nothing to cancel."))
+        a.answer("Cancel it")
+        assertTrue(toolResults().last().startsWith("Error: none of those ids are set"))
     }
 
-    @Test fun timersAndRemindersAreKeptUntilTheyRing() = runBlocking {
-        val a = assistant()
-        brain = { """{"action":"timer","seconds":300}""" }
-        assertEquals("Timer set for 5 minutes.", a.answer("Timer for 5 minutes").text)
-        brain = { """{"action":"reminder","time":"18:00","label":"call home"}""" }
-        assertEquals("I'll remind you to call home at 6:00 PM.", a.answer("Remind me at 6 pm to call home").text)
-        assertTrue(lastSystem.contains("id 1: timer ringing at 15:45"))
-        now = now.plusMinutes(10) // the timer has rung
-        brain = { """{"action":"answer","reply":"ok"}""" }
-        a.answer("anything set?")
-        assertFalse(lastSystem.contains("timer ringing"))
-        assertTrue(lastSystem.contains("id 2: reminder at 18:00 to call home"))
+    @Test fun alarmsInMinutesRingOnTheNextWholeMinute() = runBlocking {
+        now = now.plusSeconds(20) // 15:40:20
+        brain(call("set_alarm", """{"in_seconds":60}"""), say("Alarm set."))
+        assistant().answer("Set an alarm for one minute from now")
+        assertEquals("Done: alarm at 15:42", toolResults().single())
     }
 
-    @Test fun dryRunsChangeNothing() = runBlocking {
-        brain = { """{"action":"timer","seconds":60}""" }
-        val a = assistant().answer("Timer for a minute", dryRun = true)
-        assertEquals("Timer set for 1 minute (sets a watch timer).", a.summary)
-        assertNull(saved[WatchAssistant.ALERTS])
-    }
-
-    @Test fun healthDataIsInTheContext() = runBlocking {
-        brain = { """{"action":"answer","reply":"You slept 7 hours 5 minutes."}""" }
-        assertEquals("You slept 7 hours 5 minutes.", assistant().answer("How did I sleep?").text)
-        assertTrue(lastSystem.contains("- Readiness: 62 out of 100\n- Last night's sleep: 01:10 to 08:40"))
-        assertTrue(lastSystem.contains("Workout capture in Heartline: not running"))
-        health = null
-        assistant().answer("How did I sleep?")
-        assertTrue(lastSystem.contains("- not available"))
+    @Test fun remindersUseTheWatchsReminderSlots() = runBlocking {
+        brain(call("set_reminder", """{"label":"drink water","in_seconds":120}"""), say("I'll remind you to drink water at 15:42."))
+        val a = assistant().answer("Remind me in 2 minutes to drink water")
+        assertTrue(a.frames.isEmpty()) // the agenda sync writes the slot
+        val r = WatchAssistant.voiceReminders(saved[WatchAssistant.ALERTS], now.toEpochSecond()).single()
+        assertEquals("drink water", r.title)
+        assertEquals(now.plusMinutes(2).toEpochSecond(), r.start)
+        assertTrue(WatchAssistant.voiceReminders(saved[WatchAssistant.ALERTS], now.plusMinutes(3).toEpochSecond()).isEmpty())
+        brain(call("set_reminder", """{"time":"18:00"}"""), say("What should I remind you about?"))
+        assistant().answer("Remind me at 6")
+        assertEquals("Error: label is required", toolResults().single())
     }
 
     @Test fun workoutCaptureStartsAndStopsByVoice() = runBlocking {
         val a = assistant()
-        brain = { """{"action":"start_workout","label":"Gym","minutes":45}""" }
-        assertEquals("Started Gym capture for 45 minutes. Say stop my workout to end it.", a.answer("Start a gym workout for 45 minutes").text)
-        assertEquals("Couldn't do that: A workout capture is already running", a.answer("Start a gym workout").text)
-        brain = { """{"action":"stop_workout"}""" }
-        assertEquals("Stopped Gym after 12 min. Heartline is working out your sets and reps.", a.answer("Stop my workout").text)
-        assertEquals("No workout capture is running.", a.answer("Stop my workout").text)
-        brain = { """{"action":"sync"}""" }
-        assertEquals("Syncing the watch now.", a.answer("Sync my watch").text)
+        brain(call("start_workout", """{"label":"Gym","minutes":45}"""), say("Started your gym capture."))
+        assertEquals("Started your gym capture.", a.answer("Start a gym workout for 45 minutes").text)
+        brain(call("start_workout", """{"label":"Gym"}"""), say("One is already running."))
+        a.answer("Start a gym workout")
+        assertEquals("Error: A workout capture is already running", toolResults().single())
+        brain(call("stop_workout"), say("Stopped."))
+        a.answer("Stop my workout")
+        assertEquals("Done: stopped Gym after 12 minutes; Heartline is working out the sets and reps", toolResults().single())
+        brain(call("sync_watch"), say("Syncing."))
+        a.answer("Sync my watch")
         assertEquals(listOf("start Gym 45", "stop", "sync"), did)
-        brain = { """{"action":"start_workout","label":"Run"}""" }
-        assertTrue(a.answer("Start a run", dryRun = true).summary.contains("(starts Heartline's workout capture)"))
-        assertEquals(listOf("start Gym 45", "stop", "sync"), did)
     }
 
-    @Test fun alarmsInMinutesRingOnTheNextWholeMinute() = runBlocking {
-        brain = { """{"action":"alarm","seconds":60}""" }
-        now = now.plusSeconds(20) // 15:40:20
-        val a = assistant().answer("Set an alarm for one minute from now")
-        assertEquals("Alarm set for Fri 3:42 PM.", WatchAssistant.watchText(a.text!!))
-    }
-
-    @Test fun textIsCleanedForTheWatch() {
-        assertEquals("I don't have a preference - both are good.", WatchAssistant.watchText("I don\u2019t have a preference \u2014 both are good."))
-        assertEquals("Lettuce in!", WatchAssistant.watchText("Lettuce in! \uD83D\uDE04"))
-        assertEquals("74 bpm at 5:19 PM, 27\u00B0C", WatchAssistant.watchText("74\u202Fbpm at 5:19\u202FPM, 27\u00B0C"))
-        assertEquals("\"Hi\"...", WatchAssistant.watchText("\u201CHi\u201D\u2026"))
-    }
-
-    @Test fun historyShowsTheModelJson() = runBlocking {
-        val a = assistant()
-        brain = { """{"action":"timer","seconds":60}""" }
-        a.answer("Timer for a minute")
-        var sent = ""
-        val b = WatchAssistant(AssistantAi { _, _, body -> sent = body; JSONObject().put("choices", JSONArray().put(JSONObject().put("message", JSONObject().put("content", "{\"action\":\"help\"}")))).toString() },
-            { AssistantAiConfig(key) }, { WatchAssistant.Facts() }, weather, store, actions, { now })
-        b.answer("one"); b.answer("two")
-        val messages = JSONObject(sent).getJSONArray("messages")
-        assertEquals("{\"action\":\"help\"}", messages.getJSONObject(2).getString("content"))
+    @Test fun dryRunsChangeNothing() = runBlocking {
+        brain(call("set_timer", """{"seconds":60}"""), call("start_workout", """{"label":"Run"}"""), say("Done."))
+        val a = assistant().answer("Timer and a run", dryRun = true)
+        assertEquals("Done. [timer for 1 minute, ringing at 15:41; started the Run capture for 1 hour]", a.summary)
+        assertNull(saved[WatchAssistant.ALERTS])
+        assertTrue(did.isEmpty())
     }
 
     @Test fun weatherIsARealCard() = runBlocking {
-        brain = { """{"action":"weather"}""" }
+        brain(call("show_weather_card"), say("Here's the weather."))
         val a = assistant().answer("What's the weather like?")
         assertNull(a.text)
-        val card = a.frames.single()
-        assertEquals(Alexa.REPLY_COMPLEX, card[0].toInt())
-        val body = String(card, Charsets.UTF_8)
-        listOf("Bengaluru", "Partly cloudy", "Partly Cloudy", "24", "29", "19").forEach { assertTrue(it, body.contains(it)) }
-        assertFalse(body.contains("Sample"))
+        val body = String(a.frames.single(), Charsets.UTF_8)
+        listOf("Noida", "Partly cloudy", "Partly Cloudy", "24", "29", "19").forEach { assertTrue(it, body.contains(it)) }
         weatherError = "choose a place in Heartline's weather settings"
-        assertEquals("Couldn't get the weather: choose a place in Heartline's weather settings", assistant().answer("Weather?").text)
+        brain(call("show_weather_card"), say("I couldn't get the weather."))
+        assertEquals("I couldn't get the weather.", assistant().answer("Weather?").text)
+        assertEquals("Error: couldn't get the weather: choose a place in Heartline's weather settings", toolResults().single())
+    }
+
+    @Test fun historyCarriesTheReplies() = runBlocking {
+        val a = assistant()
+        brain(say("Knock knock."))
+        a.answer("Tell me a knock knock joke")
+        brain(say("Lettuce."))
+        a.answer("Who's there?")
+        val m = bodies.last().getJSONArray("messages")
+        assertEquals("Knock knock.", m.getJSONObject(2).getString("content"))
+        assertEquals("Who's there?", m.getJSONObject(3).getString("content"))
+    }
+
+    @Test fun textIsCleanedForTheWatch() {
+        assertEquals("I don't have a preference - both are good.", WatchAssistant.watchText("I don’t have a preference — both are good."))
+        assertEquals("Lettuce in!", WatchAssistant.watchText("Lettuce in! 😄"))
+        assertEquals("74 bpm at 5:19 PM, 27°C", WatchAssistant.watchText("74 bpm at 5:19 PM, 27°C"))
+        assertEquals("\"Hi\"... bold", WatchAssistant.watchText("“Hi”… **bold**"))
     }
 }

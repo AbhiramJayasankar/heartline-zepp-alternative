@@ -32,7 +32,7 @@ internal class WatchAgendaSync(
         }
     }
     private val settingsJob = scope.launch {
-        db.meta.observeAll().map { it[ALARMS_KEY] to it[REMINDERS_KEY] }.distinctUntilChanged().collect { changes.trySend(Unit) }
+        db.meta.observeAll().map { listOf(it[ALARMS_KEY], it[REMINDERS_KEY], it[WatchAssistant.ALERTS]) }.distinctUntilChanged().collect { changes.trySend(Unit) }
     }
     private val syncJob = scope.launch {
         try {
@@ -69,13 +69,16 @@ internal class WatchAgendaSync(
         } else if (!permitted) stopObserving()
         // Losing permission must not turn a failed read into deletion of existing events.
         if (prefs.enabled && !permitted) return
-        if (!prefs.enabled && slots.snapshot().isEmpty()) return
         val now = Instant.now()
+        // Reminders set with the Alexa button share the watch's reminder slots, so they show their title.
+        val voice = WatchAssistant.voiceReminders(db.meta.get(WatchAssistant.ALERTS), now.epochSecond)
+        if (!prefs.enabled && voice.isEmpty() && slots.snapshot().isEmpty()) return
         val zone = ZoneId.systemDefault()
-        val events = if (prefs.enabled) withContext(Dispatchers.IO) {
+        val calendar = if (prefs.enabled) withContext(Dispatchers.IO) {
             val selected = prefs.selected.intersect(provider.calendars().map { it.id }.toSet())
             upcomingReminders(provider.instances(selected, now), selected, now, zone)
         } else emptyList()
+        val events = (voice + calendar).sortedBy { it.start }.take(REMINDER_SLOTS)
         val desired = (0 until REMINDER_SLOTS).map { calendarReminderCommand(it, events.getOrNull(it), zone) }
         for (slot in slots.changed(desired)) {
             service.command { it.writeCalendarReminder(desired[slot]) }
