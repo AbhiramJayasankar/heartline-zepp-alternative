@@ -21,7 +21,8 @@ import java.io.File
  * Answers the watch's Alexa button. The watch sends start (with its settings as JSON), then streams voice live, ten
  * 20 ms SILK packets every 200 ms, until it is told to stop or reaches 30 s, then sends end. The voice is decoded as it
  * arrives, [SpeechEndpointer] decides when the speaker has finished, and each session is saved under files/alexa/ as
- * the raw voice messages (.bin) and audio (.wav). Speech-to-text and an AI come next.
+ * the raw voice messages (.bin) and audio (.wav, plus the 16 kHz copy sent to Gemini). Gemini turns the speech into
+ * text and [WatchAssistant] (an OpenRouter model) answers; if either fails, the watch shows why.
  *
  * The working sequence (2026-11-03): ack the start, take the live voice, send 06 (triggered) when speech ends, which
  * turns "Listening" into "Thinking", then a simple reply (09), which the watch shows. It waits ~40 s for the reply
@@ -36,10 +37,10 @@ import java.io.File
  * watch just streams voice again (opening with its start tone), so voice after a reply begins a new turn.
  * There is no known "stop listening" command. 02 (end) from the phone does not stop it and even lifts its 30 s limit;
  * with the stalled acks, 06 (triggered) was the one command that made it drop its buffered voice. So once speech
- * ends the bridge works through [STOPS], moving on whenever voice is still arriving [ESCALATE_MS] later.
+ * ends the bridge works through [STOPS], moving on whenever voice is still arriving 3 s later.
  */
 class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchConnection, private val db: HeartlineDatabase, private val folder: File,
-                  private val speech: SpeechToText, private val assistant: SampleAssistant) {
+                  private val gemini: GeminiSpeech, private val assistant: WatchAssistant) {
     private var voice = ByteArrayOutputStream()
     private var packets = 0
     private var decoder: MicDecoder? = null
@@ -58,8 +59,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
     private var name = ""
 
     fun start() = scope.launch {
-        launch(Dispatchers.IO) { decodeOld() }
-        launch { sttSelfTest() }
+        launch(Dispatchers.IO) { pruneRecordings() }
         watch.chunked2021.collect { m ->
             if (m.endpoint != Endpoint2021.ALEXA || m.payload.isEmpty()) return@collect
             try {
@@ -123,7 +123,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         withContext(Dispatchers.IO) { audio.forEach(d::feed) }
         if (!stopRequested) return
         val now = System.currentTimeMillis()
-        if (stopSent > 0 && now - stopSent < ESCALATE_MS) return
+        if (stopSent > 0 && now - stopSent < ESCALATE_MS * 2) return
         if (stop >= STOPS.size) return
         // Still streaming: escalate to the next way of telling the watch to stop.
         stopSent = now
@@ -135,8 +135,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
                 replied = true
                 answerJob = scope.launch { respond() }
             }
-            1 -> if (!replied) reply()
-            2 -> watch.send2021(Endpoint2021.ALEXA, Alexa.error(3, "Heartline could not stop listening"))
+            1 -> watch.send2021(Endpoint2021.ALEXA, Alexa.error(3, "Heartline could not stop listening"))
         }
     }
 
@@ -179,9 +178,8 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
 
     private suspend fun finish() {
         active = false
-        val wasReplied = replied
+        if (!replied) db.events.add("info", "Alexa: the watch closed the session before Heartline stopped listening; no answer sent")
         saveTurn()
-        if (!wasReplied) reply()
     }
 
     private suspend fun saveTurn() {
@@ -189,6 +187,13 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         File(folder, "$name.bin").writeBytes(voice.toByteArray())
         val after = if (stopSent > 0) ", stopped with ${STOPS[stop - 1]}" else ", no stop sent"
         db.events.add("info", "Alexa voice, turn $turn: $packets packets = %.1f s (speech %.1f s)$after, saved $name.wav".format(packets * 0.02, endpointer.speechFrames * 0.02))
+        withContext(Dispatchers.IO) { pruneRecordings() }
+    }
+
+    /** Keeps the newest [KEEP_TURNS] turns' recordings (.bin, .wav, -16k.wav). */
+    private fun pruneRecordings() {
+        val turns = folder.listFiles { f -> f.name.startsWith("alexa-") }?.groupBy { it.name.substringBefore('.').removeSuffix("-16k") } ?: return
+        turns.keys.sortedDescending().drop(KEEP_TURNS).forEach { k -> turns.getValue(k).forEach { it.delete() } }
     }
 
     private var repliedAt = 0L
@@ -196,22 +201,6 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
     private val pcm16 = ShortBuffer()
     private var down = 0
     private var downN = 0
-
-    /**
-     * Debug: if files/alexa/.stt-test names a 16 kHz WAV, transcribe it once per recognizer mode at app start and log
-     * each result, so speech-to-text can be tuned without the watch.
-     */
-    private suspend fun sttSelfTest() {
-        val flag = File(folder, ".stt-test").takeIf { it.exists() } ?: return
-        val wav = File(folder, flag.readText().trim()); flag.delete()
-        val pcm = runCatching { val d = wav.readBytes(); ShortArray((d.size - 44) / 2) { i -> ((d[44 + 2 * i].toInt() and 255) or (d[45 + 2 * i].toInt() shl 8)).toShort() } }
-            .getOrElse { db.events.add("warn", "STT test: ${it.message}"); return }
-        repeat(2) { // the first run includes unpacking and loading the model
-            val t0 = System.currentTimeMillis()
-            val r = runCatching { speech.transcribe(pcm) }
-            db.events.add("info", "STT test %d ms: ".format(System.currentTimeMillis() - t0) + r.fold({ "\"${it.text}\"" }, { "failed: ${it.message}" }))
-        }
-    }
 
     private fun wav16k(pcm: ShortArray): ByteArray {
         val b = java.nio.ByteBuffer.allocate(44 + pcm.size * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN)
@@ -229,29 +218,27 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         fun snapshot() = a.copyOf(size)
     }
 
-    /** Speech-to-text on the turn's audio, then a sample answer (see [SampleAssistant]); the watch is on "Thinking". */
+    /** Gemini on the turn's audio, then the OpenRouter brain; the watch is on "Thinking" (it waits about 40 s). */
     private suspend fun respond() {
         val audio = synchronized(pcm16) { pcm16.snapshot() }
         runCatching { File(folder, "$name-16k.wav").writeBytes(wav16k(audio)) }
+        val key = SpeechConfig.parse(db.meta.get(SpeechConfig.KEY)).geminiKey
         val t0 = System.currentTimeMillis()
-        val transcript = runCatching { speech.transcribe(audio) }
-        val heard = transcript.getOrNull()?.text.orEmpty()
-        db.events.add("info", transcript.fold(
-            { "Alexa heard (${it.engine}, %.1f s audio, %d ms): \"${it.text}\"".format(audio.size / 16_000.0, System.currentTimeMillis() - t0) },
-            { "Alexa speech-to-text failed after %d ms: ${it.message}".format(System.currentTimeMillis() - t0) }))
-        val answer = if (transcript.isFailure) SampleAssistant.Answer("Sorry, speech-to-text failed: ${transcript.exceptionOrNull()?.message}")
-            else runCatching { assistant.answer(heard) }.getOrElse { SampleAssistant.Answer("Sorry, that went wrong: ${it.message}") }
+        val answer = if (key.isBlank()) WatchAssistant.Answer("Add a Gemini key in Heartline (Watch, Alexa answers) so I can hear you.")
+        else try {
+            val heard = gemini.transcribe(audio, key)
+            db.events.add("info", "Alexa heard (%.1f s audio, %d ms): \"${heard.text}\"".format(audio.size / 16_000.0, System.currentTimeMillis() - t0))
+            val t1 = System.currentTimeMillis()
+            assistant.answer(heard.text).also { db.events.add("info", "Alexa answer (%d ms): ${it.summary}".format(System.currentTimeMillis() - t1)) }
+        } catch (e: CancellationException) { throw e } catch (e: Exception) {
+            db.events.add("warn", "Alexa: Gemini failed after %d ms: ${e.message}".format(System.currentTimeMillis() - t0))
+            WatchAssistant.Answer("Gemini isn't working: ${e.message}")
+        }
         answer.frames.forEach { watch.send2021(Endpoint2021.ALEXA, it) }
         answer.text?.let { watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple(it)) }
         repliedAt = System.currentTimeMillis()
-        db.events.add("info", "Alexa answered: ${answer.text ?: "(no text)"}; ${answer.frames.size} extra frame(s)" + if (answer.listenAgain) ", listening again" else "")
+        db.events.add("info", "Alexa replied %.1f s after the stop: ${answer.text ?: "(card)"}".format((repliedAt - stopSent) / 1000.0) + if (answer.listenAgain) "; listening again" else "")
         if (answer.listenAgain) { delay(600); watch.send2021(Endpoint2021.ALEXA, Alexa.listenAgain) }
-    }
-
-    private suspend fun reply() {
-        replied = true; repliedAt = System.currentTimeMillis()
-        // The simple reply (09) shows on the GTR 2e; the card (08 06) is acked but left on "Thinking".
-        watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple("Heard %.1f s. Speech-to-text and AI answers are coming next.".format(packets * 0.02)))
     }
 
     private suspend fun closeDecoder() {
@@ -260,24 +247,11 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         withContext(Dispatchers.IO) { runCatching { d.close() } }
     }
 
-    /** Recordings saved before the bridge decoded audio: the .bin is the voice messages without their 05 byte. */
-    private fun decodeOld() = folder.listFiles { f -> f.name.endsWith(".bin") }?.forEach { bin ->
-        val wav = File(bin.path.removeSuffix(".bin") + ".wav")
-        if (wav.exists()) return@forEach
-        runCatching {
-            val d = bin.readBytes(); val audio = ArrayList<ByteArray>(); var i = 0
-            while (i + 4 <= d.size) {
-                val n = (d[i].toInt() and 255) or ((d[i + 1].toInt() and 255) shl 8) or ((d[i + 2].toInt() and 255) shl 16) or ((d[i + 3].toInt() and 255) shl 24)
-                audio += Alexa.voicePackets(byteArrayOf(Alexa.VOICE.toByte()) + d.copyOfRange(i, minOf(d.size, i + 4 + n))); i += 4 + n
-            }
-            MicDecoder(wav).use { dec -> audio.forEach(dec::feed) }
-        }
-    }
-
     private companion object {
         const val FRAME = 960
         const val ESCALATE_MS = 1500L
         val ORPHAN_STOPS = listOf("triggered (06)", "a card", "a simple reply", "an error (0f)", "end (02)")
-        val STOPS = listOf("triggered (06)", "the reply again", "an error (0f)")
+        val STOPS = listOf("triggered (06)", "an error (0f)")
+        const val KEEP_TURNS = 30
     }
 }

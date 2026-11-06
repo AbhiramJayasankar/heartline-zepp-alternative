@@ -1,6 +1,5 @@
 package dev.heartline.service
 
-import dev.heartline.data.HeartlineDatabase
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeout
@@ -13,38 +12,15 @@ import okio.ByteString
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Speech-to-text for the watch's Alexa button: [pcm] is 16 kHz mono 16-bit audio. */
-fun interface SpeechToText {
-    suspend fun transcribe(pcm: ShortArray): VoskSpeech.Transcript
-}
+/** What Gemini heard in one Alexa question. */
+class Transcript(val text: String, val engine: String)
 
-/** Which recognizer answers the Alexa button, and the owner's Gemini key (typed into the app, stored in meta). */
-data class SpeechConfig(val source: String = VOSK, val geminiKey: String = "") {
-    fun json(): String = JSONObject().put("source", source).put("gemini_key", geminiKey).toString()
+/** The owner's Gemini key for the Alexa button's speech-to-text (typed into the app, stored in meta; never logged). */
+data class SpeechConfig(val geminiKey: String = "") {
+    fun json(): String = JSONObject().put("gemini_key", geminiKey).toString()
     companion object {
         const val KEY = "alexa_speech"
-        const val VOSK = "vosk"; const val GEMINI = "gemini"
-        fun parse(text: String?): SpeechConfig = runCatching {
-            val o = JSONObject(text ?: "{}")
-            SpeechConfig(o.optString("source").takeIf { it in setOf(VOSK, GEMINI) } ?: VOSK, o.optString("gemini_key").trim())
-        }.getOrDefault(SpeechConfig())
-    }
-}
-
-/** The chosen recognizer, falling back to Vosk (with a log line saying why) so the button always answers. */
-class SpeechRouter(private val db: HeartlineDatabase, private val vosk: VoskSpeech,
-                   private val gemini: GeminiSpeech = GeminiSpeech()) : SpeechToText {
-    override suspend fun transcribe(pcm: ShortArray): VoskSpeech.Transcript {
-        val config = SpeechConfig.parse(db.meta.get(SpeechConfig.KEY))
-        val chosen: SpeechToText? = when (config.source) {
-            SpeechConfig.GEMINI -> if (config.geminiKey.isNotBlank()) SpeechToText { gemini.transcribe(it, config.geminiKey) } else null
-            else -> null
-        }
-        if (chosen != null) {
-            runCatching { chosen.transcribe(pcm) }.onSuccess { return it }
-                .onFailure { db.events.add("warn", "${config.source.replaceFirstChar(Char::uppercase)} speech-to-text failed (${it.message}); used Vosk") }
-        }
-        return vosk.transcribe(pcm)
+        fun parse(text: String?): SpeechConfig = runCatching { SpeechConfig(JSONObject(text ?: "{}").optString("gemini_key").trim()) }.getOrDefault(SpeechConfig())
     }
 }
 
@@ -54,8 +30,8 @@ class SpeechRouter(private val db: HeartlineDatabase, private val vosk: VoskSpee
  * digits, fillers dropped), then activityStart, the audio in 100 ms chunks, activityEnd; the final text arrives as
  * serverContent.inputTranscription. The key goes in the URL's key parameter, as the Live API documents; it's never logged.
  */
-class GeminiSpeech(private val client: OkHttpClient = OkHttpClient.Builder().readTimeout(15, TimeUnit.SECONDS).build()) {
-    suspend fun transcribe(pcm: ShortArray, key: String): VoskSpeech.Transcript = withTimeout(15_000) {
+class GeminiSpeech(private val client: OkHttpClient = OkHttpClient.Builder().readTimeout(TIMEOUT_MS, TimeUnit.MILLISECONDS).build()) {
+    suspend fun transcribe(pcm: ShortArray, key: String): Transcript = withTimeout(TIMEOUT_MS) {
         val done = CompletableDeferred<String>()
         val session = Session(pcm)
         val socket = client.newWebSocket(Request.Builder().url("$URL?key=$key").build(), object : WebSocketListener() {
@@ -77,8 +53,8 @@ class GeminiSpeech(private val client: OkHttpClient = OkHttpClient.Builder().rea
         })
         try {
             // Final text can come in pieces at pauses; take what has arrived if the turn never formally completes.
-            val text = runCatching { withTimeout(10_000) { done.await() } }.getOrElse { session.closed() ?: throw it }
-            VoskSpeech.Transcript(text, "Gemini transcribe live")
+            val text = runCatching { withTimeout(TIMEOUT_MS - 2_000) { done.await() } }.getOrElse { session.closed() ?: throw it }
+            Transcript(text, "Gemini transcribe live")
         } finally { socket.close(1000, null) }
     }
 
@@ -107,6 +83,8 @@ class GeminiSpeech(private val client: OkHttpClient = OkHttpClient.Builder().rea
     companion object {
         const val URL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
         const val MODEL = "models/gemini-3.5-transcribe-live"
+        /** Leaves OpenRouter most of the ~40 s the watch waits on "Thinking". */
+        const val TIMEOUT_MS = 12_000L
 
         fun setupMessage(): String = JSONObject().put("setup", JSONObject()
             .put("model", MODEL)

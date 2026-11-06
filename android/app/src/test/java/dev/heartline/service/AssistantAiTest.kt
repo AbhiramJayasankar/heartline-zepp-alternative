@@ -1,6 +1,5 @@
 package dev.heartline.service
 
-import dev.heartline.service.SampleAssistant.Ask
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -11,13 +10,14 @@ import org.junit.Test
 
 class AssistantAiTest {
     private val config = AssistantAiConfig("sk-test")
-    private val context = AiContext(ZonedDateTime.of(2026, 11, 4, 1, 50, 0, 0, ZoneId.of("Asia/Kolkata")), "72 bpm at 1:49 AM", 715)
+    private val context = AiContext(ZonedDateTime.of(2026, 11, 6, 15, 40, 0, 0, ZoneId.of("Asia/Kolkata")), "72 bpm at 3:39 PM", 715,
+        "Bengaluru: 24°C, partly cloudy now", listOf(AlexaAlert(3, 1, "heartline-alarm-1", 1_794_000_000)))
     private fun reply(content: String) = JSONObject().put("choices", org.json.JSONArray().put(JSONObject().put("message", JSONObject().put("content", content)))).toString()
 
-    @Test fun requestCarriesModelsKeyAndClock() = runBlocking {
+    @Test fun requestCarriesModelsKeyAndContext() = runBlocking {
         var sent: Triple<String, Map<String, String>, String>? = null
-        val ai = AssistantAi { url, headers, body -> sent = Triple(url, headers, body); reply("""{"action":"alarm","alarm_time":"09:30"}""") }
-        assertEquals(Ask.Alarm(LocalTime.of(9, 30)), ai.interpret("set an alarm for my and thirty am", context, listOf("hi" to "Hello."), config))
+        val ai = AssistantAi { url, headers, body -> sent = Triple(url, headers, body); reply("""{"action":"alarm","time":"09:30"}""") }
+        assertEquals(Ask.Alarm(LocalTime.of(9, 30)), ai.interpret("Set an alarm for 9:30 a.m.", context, listOf("hi" to "Hello."), config))
         val (url, headers, body) = sent!!
         assertEquals(AssistantAi.URL, url)
         assertEquals("Bearer sk-test", headers["Authorization"])
@@ -28,16 +28,36 @@ class AssistantAiTest {
         assertFalse(json.getJSONObject("reasoning").getBoolean("enabled"))
         val messages = json.getJSONArray("messages")
         assertEquals(4, messages.length()) // system, one past turn, the question
-        assertTrue(messages.getJSONObject(0).getString("content").contains("Asia/Kolkata"))
-        assertTrue(messages.getJSONObject(0).getString("content").contains("01:50"))
-        assertEquals("set an alarm for my and thirty am", messages.getJSONObject(3).getString("content"))
+        val system = messages.getJSONObject(0).getString("content")
+        listOf("Asia/Kolkata", "15:40", "Bengaluru: 24°C", "id 3: alarm at").forEach { assertTrue(it, system.contains(it)) }
+    }
+
+    @Test fun modelsThatMustReasonAreAskedAgainWithReasoning() = runBlocking {
+        val bodies = ArrayList<JSONObject>()
+        val ai = AssistantAi { _, _, body ->
+            bodies += JSONObject(body)
+            if (bodies.size == 1) throw AssistantAi.OpenRouterError("OpenRouter 400: Reasoning is mandatory for this endpoint and cannot be disabled.")
+            reply("""{"action":"help"}""")
+        }
+        assertEquals(Ask.Help, ai.interpret("What all can you do?", context, emptyList(), config))
+        assertEquals(2, bodies.size)
+        assertFalse(bodies[1].has("reasoning"))
+    }
+
+    @Test fun otherErrorsAreNotRetried() = runBlocking {
+        var calls = 0
+        val ai = AssistantAi { _, _, _ -> calls++; throw AssistantAi.OpenRouterError("OpenRouter 429: Rate limit exceeded") }
+        val e = runCatching { ai.interpret("hello", context, emptyList(), config) }.exceptionOrNull()
+        assertEquals("OpenRouter 429: Rate limit exceeded", e?.message)
+        assertEquals(1, calls)
     }
 
     @Test fun actionsMapToAsks() {
         assertEquals(Ask.Timer(300), AssistantAi.toAsk("""{"action":"timer","seconds":300}"""))
-        assertEquals(Ask.Reminder(120, "drink water"), AssistantAi.toAsk("""{"action":"reminder","seconds":120,"label":"drink water"}"""))
-        assertEquals(Ask.Alarm(LocalTime.of(7, 5)), AssistantAi.toAsk("""{"action":"alarm","alarm_time":"7:05"}"""))
-        assertEquals(Ask.CancelTimer, AssistantAi.toAsk("""{"action":"cancel_timer"}"""))
+        assertEquals(Ask.Reminder("drink water", inSeconds = 120), AssistantAi.toAsk("""{"action":"reminder","seconds":120,"label":"drink water"}"""))
+        assertEquals(Ask.Reminder("call home", at = LocalTime.of(18, 0)), AssistantAi.toAsk("""{"action":"reminder","time":"18:00","label":"call home"}"""))
+        assertEquals(Ask.Alarm(LocalTime.of(7, 5)), AssistantAi.toAsk("""{"action":"alarm","time":"7:05"}"""))
+        assertEquals(Ask.Cancel(listOf(1, 3)), AssistantAi.toAsk("""{"action":"cancel","ids":[1,3]}"""))
         assertEquals(Ask.Weather, AssistantAi.toAsk("""{"action":"weather"}"""))
         assertEquals(Ask.Say("Paris.", false), AssistantAi.toAsk("""{"action":"answer","reply":"Paris."}"""))
         assertEquals(Ask.Say("Which city?", true), AssistantAi.toAsk("""{"action":"answer","reply":"Which city?","follow_up":true}"""))
@@ -48,24 +68,18 @@ class AssistantAiTest {
 
     @Test fun nullContentFallsBackToReasoning() = runBlocking {
         // A thinking model that left content null (seen with gemma-4-26b-a4b-it:free, 2026-11-05).
-        val r = """{"model":"m","choices":[{"finish_reason":"stop","message":{"content":null,"reasoning":"They want 9:30. {\"action\":\"alarm\",\"alarm_time\":\"09:30\"}"}}]}"""
-        assertEquals(Ask.Alarm(LocalTime.of(9, 30)), AssistantAi { _, _, _ -> r }.interpret("my and thirty", context, emptyList(), config))
+        val r = """{"model":"m","choices":[{"finish_reason":"stop","message":{"content":null,"reasoning":"They want 9:30. {\"action\":\"alarm\",\"time\":\"09:30\"}"}}]}"""
+        assertEquals(Ask.Alarm(LocalTime.of(9, 30)), AssistantAi { _, _, _ -> r }.interpret("alarm 9:30", context, emptyList(), config))
         val empty = AssistantAi { _, _, _ -> """{"model":"m","choices":[{"finish_reason":"length","message":{"content":null}}]}""" }
-        assertNull(empty.interpret("hi", context, emptyList(), config))
-        assertTrue(empty.lastError!!.contains("finish length"))
+        val e = runCatching { empty.interpret("hi", context, emptyList(), config) }.exceptionOrNull()
+        assertTrue(e!!.message!!.contains("unusable answer (length)"))
     }
 
-    @Test fun failuresReturnNull() = runBlocking {
-        val failing = AssistantAi { _, _, _ -> error("OpenRouter 429: rate limited") }
-        assertNull(failing.interpret("hello", context, emptyList(), config))
-        assertEquals("OpenRouter 429: rate limited", failing.lastError)
-        assertNull(AssistantAi { _, _, _ -> "<html>" }.interpret("hello", context, emptyList(), config))
-    }
-
-    @Test fun noKeyNeverCalls() = runBlocking {
-        var called = false
-        assertNull(AssistantAi { _, _, _ -> called = true; "" }.interpret("hello", context, emptyList(), AssistantAiConfig()))
-        assertFalse(called)
+    @Test fun errorMessagesComeFromOpenRouter() {
+        assertEquals("Rate limit exceeded: free-models-per-day", AssistantAi.errorMessage("""{"error":{"message":"Rate limit exceeded: free-models-per-day","code":429}}"""))
+        assertEquals("Provider returned error: model overloaded",
+            AssistantAi.errorMessage("""{"error":{"message":"Provider returned error","metadata":{"raw":"{\"error\":{\"message\":\"model overloaded\"}}"}}}"""))
+        assertEquals("<html>", AssistantAi.errorMessage("<html>"))
     }
 
     @Test fun configRoundTripsAndDefaults() {

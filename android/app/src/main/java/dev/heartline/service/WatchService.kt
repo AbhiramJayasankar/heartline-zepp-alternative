@@ -38,8 +38,9 @@ class WatchService : Service() {
         calls = CallForwarder(this, scope, app.settings, watch)
         agenda = WatchAgendaSync(this, scope, app.db, watch)
         scope.launch(kotlinx.coroutines.Dispatchers.IO) { backfillWatchWorkouts() }
-        AlexaBridge(scope, watch, app.db, java.io.File(filesDir, "alexa"), SpeechRouter(app.db, VoskSpeech(this)), SampleAssistant(app.db, ai = AssistantAi(),
-            aiConfig = { AssistantAiConfig.parse(app.db.meta.get(AssistantAiConfig.KEY)) })).start()
+        AlexaBridge(scope, watch, app.db, java.io.File(filesDir, "alexa"), GeminiSpeech(), watchAssistant(app.db, app.settings)).start()
+        // The offline Vosk model unpacked by older versions (about 70 MB).
+        scope.launch(Dispatchers.IO) { java.io.File(filesDir, "vosk-en").takeIf { it.exists() }?.deleteRecursively() }
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Watch connection", NotificationManager.IMPORTANCE_LOW).apply {
             setSound(null, null); enableVibration(false); setShowBadge(false)

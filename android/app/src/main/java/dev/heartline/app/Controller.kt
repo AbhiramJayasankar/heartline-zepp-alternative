@@ -69,14 +69,14 @@ interface HeartlineController {
     val assistantAi: StateFlow<AssistantAiUi>
     /** [key] null keeps the saved one, blank removes it. */
     fun setAssistantAi(key: String?, model: String)
-    /** One sample question through the saved key and model: the answer or why it failed. */
+    /** [question] through the saved key and model, without sending anything to the watch: what the watch would do. */
     suspend fun testAssistantAi(question: String): String
 
-    /** Which recognizer turns Alexa questions into text: "vosk" or "gemini" (the key's last 4 shown only). */
+    /** The Gemini key that turns Alexa questions into text (its last 4 characters only). */
     val speech: StateFlow<SpeechUi>
-    /** [geminiKey] null keeps the saved one, blank removes it. */
-    fun setSpeech(source: String, geminiKey: String?)
-    /** The last Alexa recording through the chosen recognizer, with no fallback: the text or why it failed. */
+    /** Blank removes the key. */
+    fun setGeminiKey(key: String)
+    /** The last Alexa recording through Gemini and then the answers model, without sending anything to the watch. */
     suspend fun testSpeech(): String
 
     /** The watch's app list in order; saved locally, sent by [sendWatchMenu]. */
@@ -218,7 +218,7 @@ data class CaptureAnalysisUi(
 
 data class PlaceUi(val name: String, val region: String?, val lat: Double, val lon: Double)
 data class AssistantAiUi(val keyEnd: String?, val model: String)
-data class SpeechUi(val source: String, val geminiKeyEnd: String?)
+data class SpeechUi(val geminiKeyEnd: String?)
 
 data class WeatherUi(
     val enabled: Boolean = false, val place: PlaceUi? = null, val tempC: Int? = null, val condition: String? = null,

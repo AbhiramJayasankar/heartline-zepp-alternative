@@ -4,7 +4,7 @@ import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 
-class SpeechSourcesTest {
+class GeminiSpeechTest {
     @Test fun setupAsksForSmartTextTranscriptionWithManualActivity() {
         val setup = JSONObject(GeminiSpeech.setupMessage()).getJSONObject("setup")
         assertEquals("models/gemini-3.5-transcribe-live", setup.getString("model"))
@@ -45,10 +45,10 @@ class SpeechSourcesTest {
         assertNull(GeminiSpeech.Session(ShortArray(10)).closed())
     }
 
-    @Test fun speechConfigDefaultsToVoskAndRoundTrips() {
+    @Test fun speechConfigRoundTripsTheKey() {
         assertEquals(SpeechConfig(), SpeechConfig.parse(null))
-        assertEquals(SpeechConfig.VOSK, SpeechConfig.parse("""{"source":"cloud"}""").source)
-        val c = SpeechConfig(SpeechConfig.GEMINI, "k")
-        assertEquals(c, SpeechConfig.parse(c.json()))
+        // Settings saved before Vosk was removed still carry a "source": the key survives.
+        assertEquals(SpeechConfig("k"), SpeechConfig.parse("""{"source":"gemini","gemini_key":" k "}"""))
+        assertEquals(SpeechConfig("k"), SpeechConfig.parse(SpeechConfig("k").json()))
     }
 }

@@ -1,9 +1,9 @@
 # Alexa button on the GTR 2e
 
-Heartline answers the watch's Alexa button itself: the watch streams the voice to the phone, the phone turns it into
-text offline and sends a reply the watch shows. Found on the owner's watch (firmware V1.7.3.1) on 2026-11-03, with
+Heartline answers the watch's Alexa button itself: the watch streams the voice to the phone, Gemini turns it into
+text, an OpenRouter model decides the answer, and the phone sends a reply the watch shows. Found on the owner's watch (firmware V1.7.3.1) on 2026-11-03, with
 the command meanings completed from the Zepp app 10.9.0. Code: `core/protocol/.../Chunked2021.kt`,
-`app/.../service/AlexaBridge.kt`, `VoskSpeech.kt`, `SampleAssistant.kt`.
+`app/.../service/AlexaBridge.kt`, `GeminiSpeech.kt`, `AssistantAi.kt`, `WatchAssistant.kt`.
 
 ## Transport
 
@@ -37,7 +37,7 @@ reply streams voice again in the same session (no new start).
 |---|---|---|
 | 1 weather | u32 field mask `0x3fd`, then time, location, date line, description, icon (name, url), current, high, low, forecast days (time, high, low, icon) | Shown |
 | 2 alerts | `op kind token\0 details`: op 1 add, 2 delete; kind 1 alarm, 2 reminder, 3 timer; timer details `h m s`; alarm/reminder `label\0 label\0 u32 wall-clock time, u32 0, u32 repeat days` | Timer shown and rings |
-| 3 list | `title\0 count (left\0 right\0 \0)* subtitle\0` | Not yet tried |
+| 3 list | `title\0 count (left\0 right\0 \0)* subtitle\0` | Shown (a narrow left column) |
 | 4 local actions | `action [args]` | Not tried |
 | 6 card | `title\0 subtitle\0 text\0` | Zepp sends it only to assistant version 3+; this watch reports 2 (`21 02 01`) and ignores it |
 
@@ -45,14 +45,30 @@ Other commands: `07 flag text` shows up to 50 characters, `0a flag u32 length au
 an error, `14` / `15` set and clear the notification indicator, `10`/`11` languages (current `en-US`, 14 English
 variants and others), `20`/`21` capabilities.
 
-## Speech-to-text
+## Speech-to-text: Gemini
 
 Android's own recognizer accepts recorded audio (`EXTRA_AUDIO_SOURCE`) but returned nothing for these clips on the
-S24 Ultra, on-device or not (and needs the microphone permission even then). Heartline has two recognizers
-(`SpeechSources.kt`), chosen on the Alexa answers screen; if the chosen one fails, Vosk answers:
+S24 Ultra. Vosk's small offline model worked but misheard too much and added 60 MB to the app, so it was removed
+(2026-11-06). Speech-to-text is **Gemini 3.5 Transcribe Live** over the Live API WebSocket with the owner's AI Studio
+key (free tier, no request limit in 2026-11), `GeminiSpeech.kt`. One session per question: setup with SMART
+formatting (numbers and times as digits) and automatic activity detection off, then `activityStart`, 100 ms base64
+16 kHz PCM chunks, `activityEnd`; the text arrives as `serverContent.inputTranscription`. 12 s timeout.
 
-- **Vosk** with the small English model (default): about 0.5–1 s per question, offline, bundled in the app's
-  assets (fetched at build time). Often mishears numbers ("my and thirty" for "nine thirty").
-- **Gemini 3.5 Transcribe Live** over the Live API WebSocket with the owner's AI Studio key (free tier: no request
-  limit in 2026-11). One session per question: setup with SMART formatting and automatic activity detection off,
-  then `activityStart`, 100 ms base64 PCM chunks, `activityEnd`; the text arrives as `serverContent.inputTranscription`.
+## Answers: OpenRouter
+
+`AssistantAi.kt` sends what Gemini heard to the owner's OpenRouter model (default `google/gemma-4-31b-it:free`, then
+`openrouter/free`) with the time, latest heart rate, today's steps, the Open-Meteo forecast for the place chosen in
+Heartline's weather settings, the alarms, timers and reminders set by voice (with ids) and the last six turns of the
+conversation (a 2-minute pause starts a new one). It asks for one JSON action: `answer` (text, optionally asking back,
+which reopens the mic), `timer`, `alarm`, `reminder`, `cancel` (by id), `weather` (the card) or `help` (the list).
+Reasoning is turned off for speed; a model that requires it (`Reasoning is mandatory for this endpoint`) is asked
+again with it on. `WatchAssistant.kt` carries the action out on the watch and keeps the alerts it set in
+`meta["alexa_alerts"]` until they ring, so they can be cancelled by voice.
+
+There are no built-in answers. Whatever fails is shown on the watch instead: no Gemini or OpenRouter key, Gemini or
+OpenRouter errors (OpenRouter's own message, e.g. a rate limit), no words heard, or no weather. The watch waits about
+40 s on "Thinking"; Gemini plus OpenRouter usually take 3 to 6 s.
+
+Each turn is saved under `files/alexa/` (the voice messages `.bin`, 48 kHz `.wav` and the 16 kHz `-16k.wav` sent to
+Gemini); the newest 30 turns are kept. The Alexa answers screen can run the last recording or a typed question through
+the same pipeline without sending anything to the watch.

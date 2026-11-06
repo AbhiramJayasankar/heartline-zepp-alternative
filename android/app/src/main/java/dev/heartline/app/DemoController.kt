@@ -166,10 +166,10 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
         if (query.isBlank()) emptyList() else listOf(bengaluru, PlaceUi("Bengaluru Rural", "Karnataka, India", 13.28, 77.53)).filter { it.name.contains(query, true) }
     override val assistantAi = MutableStateFlow(AssistantAiUi(null, dev.heartline.service.AssistantAiConfig.DEFAULT_MODEL))
     override fun setAssistantAi(key: String?, model: String) { assistantAi.update { AssistantAiUi(key?.takeLast(4) ?: it.keyEnd, model) } }
-    override suspend fun testAssistantAi(question: String) = "Demo mode: Say(text=Two plus two is four.)"
-    override val speech = MutableStateFlow(SpeechUi("vosk", null))
-    override fun setSpeech(source: String, geminiKey: String?) { speech.update { SpeechUi(source, geminiKey?.takeLast(4) ?: it.geminiKeyEnd) } }
-    override suspend fun testSpeech() = "Demo mode: \"set an alarm for 9:30 am\" (Gemini transcribe live, 640 ms, 3.4 s of audio)"
+    override suspend fun testAssistantAi(question: String) = "The watch would show: Alarm set for Sat 9:30 AM. (sets a watch alarm)\nOpenRouter took 0.9 s."
+    override val speech = MutableStateFlow(SpeechUi(null))
+    override fun setGeminiKey(key: String) { speech.value = SpeechUi(key.trim().takeLast(4).ifEmpty { null }) }
+    override suspend fun testSpeech() = "Gemini heard \"Set an alarm for 9:30 a.m.\" (3.4 s of audio, 0.6 s).\nThe watch would show: Alarm set for Sat 9:30 AM. (sets a watch alarm)"
     override fun setWeather(enabled: Boolean, place: PlaceUi?) = weather.update { it.copy(enabled = enabled, place = place ?: it.place) }
     override fun refreshWeather() = weather.update { it.copy(updatedAt = now(), sentToWatchAt = now()) }
     override fun setMusicControl(enabled: Boolean) = phoneLink.update { it.copy(musicEnabled = enabled) }

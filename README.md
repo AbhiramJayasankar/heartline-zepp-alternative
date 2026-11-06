@@ -52,10 +52,9 @@ numbers you can use, on the phone, offline.
   (scheduled), move reminders, high heart rate alerts, disconnect alert, language, wrist, step goal and more.
 - **Watch app list**: choose and order the apps, and what goes in the More screen.
 - **Alarms, calendar reminders, weather** (Open-Meteo, no API key), vibration counts, set clock, find watch.
-- **Alexa button**: the watch's Alexa button works again. Replies cover time, heart rate, steps, timers, alarms and
-  reminders that ring on the watch. Speech is recognised **offline with Vosk**, or with **Gemini 3.5 Transcribe Live**
-  (free tier, paste your Google AI Studio key).
-  Optionally, add a free **OpenRouter** key and an AI model answers anything and fixes misheard words.
+- **Alexa button**: the watch's Alexa button works again. **Gemini 3.5 Transcribe Live** hears you and a free
+  **OpenRouter** model answers: questions of any kind, your heart rate and steps, real weather, and timers, alarms and
+  reminders that ring on the watch (and can be cancelled by voice). Both run on free tiers with your own keys.
 
 **Your data stays yours**
 - Everything is stored in a local database on the phone. Export it, back it up, or share it with other apps through
@@ -84,7 +83,7 @@ and open it on your phone, or install it with `adb install -r heartline-*.apk`.
 |---|---|
 | Watch | Amazfit GTR 2e (tested on firmware V1.7.3.1). GTR 2 / GTS 2 family: untested |
 | Phone | Android 12 or newer (arm64). Tested on a Galaxy S24 Ultra, Android 17 |
-| Build | JDK 17+, Android SDK platform 37. The Vosk speech model (40 MB) is downloaded at build time |
+| Build | JDK 17+, Android SDK platform 37 |
 
 ## Build from source
 
@@ -135,7 +134,7 @@ Heartline does one watch in depth: it decodes the watch's skin temperature, even
 health scores, heart checks from the raw pulse, gym set and rep detection, and a working Alexa button.
 
 **Does it need the internet?**
-No. Only optional features go online: weather (Open-Meteo), and for the Alexa button Gemini speech recognition and AI answers (OpenRouter).
+No. Only optional features go online: weather (Open-Meteo) and the Alexa button (Gemini to hear you, OpenRouter to answer).
 
 **Will it work on my GTR 2, GTS 2 or GTS 2e?**
 Probably in large part, since they share the protocol, but only the GTR 2e has been tested. Reports are welcome
@@ -144,8 +143,7 @@ in the [issues](https://github.com/AbhiramJayasankar/heartline-zepp-alternative/
 ## Credits
 
 Protocol knowledge from [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge); auth keys via
-[huami-token](https://github.com/argrento/huami-token); offline speech recognition by
-[Vosk](https://alphacephei.com/vosk/) (Apache 2.0); weather from [Open-Meteo](https://open-meteo.com).
+[huami-token](https://github.com/argrento/huami-token); weather from [Open-Meteo](https://open-meteo.com).
 Not affiliated with Zepp Health or Amazfit.
 
 ## License

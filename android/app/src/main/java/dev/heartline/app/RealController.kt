@@ -315,40 +315,30 @@ class RealController(
         }
     }
     override val speech: StateFlow<SpeechUi> = db.meta.observe(dev.heartline.service.SpeechConfig.KEY)
-        .map { dev.heartline.service.SpeechConfig.parse(it).let { c -> SpeechUi(c.source, c.geminiKey.takeIf { k -> k.isNotBlank() }?.takeLast(4)) } }
-        .stateIn(scope, SharingStarted.Eagerly, SpeechUi(dev.heartline.service.SpeechConfig.VOSK, null))
-    override fun setSpeech(source: String, geminiKey: String?) {
-        scope.launch {
-            val saved = dev.heartline.service.SpeechConfig.parse(db.meta.get(dev.heartline.service.SpeechConfig.KEY))
-            db.meta.set(dev.heartline.service.SpeechConfig.KEY, dev.heartline.service.SpeechConfig(source, geminiKey?.trim() ?: saved.geminiKey).json())
-        }
+        .map { SpeechUi(dev.heartline.service.SpeechConfig.parse(it).geminiKey.takeIf { k -> k.isNotBlank() }?.takeLast(4)) }
+        .stateIn(scope, SharingStarted.Eagerly, SpeechUi(null))
+    override fun setGeminiKey(key: String) {
+        scope.launch { db.meta.set(dev.heartline.service.SpeechConfig.KEY, dev.heartline.service.SpeechConfig(key.trim()).json()) }
     }
+    /** The same assistant the watch uses; the test buttons run it as a dry run. */
+    private val testAssistant by lazy { dev.heartline.service.watchAssistant(db, settings) }
     override suspend fun testSpeech(): String = withContext(Dispatchers.IO) {
         val wav = java.io.File(context.filesDir, "alexa").listFiles { f -> f.name.endsWith("-16k.wav") }?.maxByOrNull { it.lastModified() }
             ?: return@withContext "No Alexa recording yet: ask the watch something first."
         val d = wav.readBytes()
         val pcm = ShortArray((d.size - 44) / 2) { i -> ((d[44 + 2 * i].toInt() and 255) or (d[45 + 2 * i].toInt() shl 8)).toShort() }
-        val config = dev.heartline.service.SpeechConfig.parse(db.meta.get(dev.heartline.service.SpeechConfig.KEY))
+        val key = dev.heartline.service.SpeechConfig.parse(db.meta.get(dev.heartline.service.SpeechConfig.KEY)).geminiKey
+        if (key.isBlank()) return@withContext "Save a Gemini key first."
         val started = System.nanoTime()
-        runCatching {
-            when (config.source) {
-                dev.heartline.service.SpeechConfig.GEMINI -> {
-                    check(config.geminiKey.isNotBlank()) { "Save a Gemini key first" }
-                    dev.heartline.service.GeminiSpeech().transcribe(pcm, config.geminiKey)
-                }
-                else -> dev.heartline.service.VoskSpeech(context).transcribe(pcm)
-            }
-        }.fold({ "\"${it.text}\" (${it.engine}, ${(System.nanoTime() - started) / 1_000_000} ms, %.1f s of audio)".format(pcm.size / 16_000.0) },
-            { "Failed after ${(System.nanoTime() - started) / 1_000_000} ms: ${it.message}" })
+        val heard = try { dev.heartline.service.GeminiSpeech().transcribe(pcm, key) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
+            return@withContext "Gemini failed after %.1f s: ${e.message}".format((System.nanoTime() - started) / 1e9)
+        }
+        "Gemini heard \"${heard.text}\" (%.1f s of audio, %.1f s).\n".format(pcm.size / 16_000.0, (System.nanoTime() - started) / 1e9) + testAssistantAi(heard.text)
     }
     override suspend fun testAssistantAi(question: String): String {
-        val config = dev.heartline.service.AssistantAiConfig.parse(db.meta.get(dev.heartline.service.AssistantAiConfig.KEY))
-        if (!config.enabled) return "Save a key first."
-        val ai = dev.heartline.service.AssistantAi()
         val started = System.nanoTime()
-        val ask = ai.interpret(question, dev.heartline.service.AiContext(java.time.ZonedDateTime.now(), null, null), emptyList(), config)
-        val ms = (System.nanoTime() - started) / 1_000_000
-        return if (ask == null) "No answer after $ms ms: ${ai.lastError ?: "unknown"}" else "$ask ($ms ms)"
+        val answer = testAssistant.answer(question, dryRun = true)
+        return "The watch would show: ${answer.summary}\nOpenRouter took %.1f s.".format((System.nanoTime() - started) / 1e9)
     }
     override val phoneLink = taskA.phoneLink
     override suspend fun searchPlaces(query: String): List<PlaceUi> = taskA.searchPlaces(query)

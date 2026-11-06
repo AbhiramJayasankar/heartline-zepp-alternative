@@ -143,15 +143,16 @@ fun AssistantScreen(controller: HeartlineController, nav: Navigator) {
     val scope = rememberCoroutineScope()
     var key by remember { mutableStateOf("") }
     var model by remember(ai.model) { mutableStateOf(ai.model) }
+    var question by remember { mutableStateOf("Set an alarm for 9:30 am") }
     var result by remember { mutableStateOf<String?>(null) }
     var testing by remember { mutableStateOf(false) }
     Screen("Alexa answers", onBack = { nav.pop() },
-        subtitle = "With an OpenRouter key, a free AI model reads what the watch heard, fixes misheard numbers, and answers questions. Without one, only the built-in answers work.") {
+        subtitle = "The watch's Alexa button: Gemini turns what you say into text, and an OpenRouter model answers. If either isn't working, the watch says so.") {
         SpeechSection(controller)
         Gap(24)
-        Text("Answers", style = HL.type.bodyStrong, color = c.ink)
+        Text("Answers (OpenRouter)", style = HL.type.bodyStrong, color = c.ink)
         Gap(4)
-        MutedText(ai.keyEnd?.let { "OpenRouter key saved, ending in $it." } ?: "No OpenRouter key saved.")
+        MutedText(ai.keyEnd?.let { "OpenRouter key saved, ending in $it." } ?: "Paste an OpenRouter API key. Free models work.")
         Gap(8)
         OutlinedTextField(key, { key = it.trim() }, label = { Text(if (ai.keyEnd == null) "OpenRouter API key" else "Replace the key") }, singleLine = true,
             visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
@@ -160,24 +161,26 @@ fun AssistantScreen(controller: HeartlineController, nav: Navigator) {
         Gap(10)
         Row(verticalAlignment = Alignment.CenterVertically) {
             PillButton("Save", { controller.setAssistantAi(key.ifEmpty { null }, model); key = "" })
-            Spacer(Modifier.width(10.dp))
-            PillButton(if (testing) "Asking…" else "Test", {
-                testing = true; result = null
-                scope.launch { result = controller.testAssistantAi("set an alarm for my and thirty am"); testing = false }
-            }, style = ButtonStyle.QUIET, enabled = !testing && ai.keyEnd != null)
             if (ai.keyEnd != null) {
                 Spacer(Modifier.width(10.dp))
                 PillButton("Remove key", { controller.setAssistantAi("", model) }, style = ButtonStyle.QUIET)
             }
         }
+        Gap(16)
+        OutlinedTextField(question, { question = it }, label = { Text("Try a question") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Gap(8)
+        PillButton(if (testing) "Asking…" else "Ask", {
+            testing = true; result = null
+            scope.launch { result = controller.testAssistantAi(question.trim()); testing = false }
+        }, style = ButtonStyle.QUIET, enabled = !testing && question.isNotBlank())
         result?.let { Gap(10); Text(it, style = HL.type.small, color = c.ink) }
         Gap(16)
-        MutedText("Test asks \"set an alarm for my and thirty am\", a real mishearing of \"nine thirty\"; a working setup answers with an alarm at 09:30. " +
-            "Free models are rate-limited by OpenRouter. If the model fails, Heartline tries openrouter/free, then its built-in answers. Each question sends the words heard, the time, your latest heart rate and steps to OpenRouter.")
+        MutedText("Ask shows what the watch would do, without sending anything to it. If the model fails, OpenRouter tries its free router. " +
+            "Each question sends the words heard, the time, your latest heart rate, today's steps, the weather and the alarms, timers and reminders set by voice to OpenRouter.")
     }
 }
 
-/** Which recognizer hears the Alexa button: the built-in Vosk model or Gemini's Live transcription. */
+/** The Gemini key that turns what's said to the Alexa button into text, and a test with the last recording. */
 @Composable
 private fun SpeechSection(controller: HeartlineController) {
     val c = HL.colors
@@ -186,31 +189,24 @@ private fun SpeechSection(controller: HeartlineController) {
     var key by remember { mutableStateOf("") }
     var result by remember { mutableStateOf<String?>(null) }
     var testing by remember { mutableStateOf(false) }
-    Text("Speech recognition", style = HL.type.bodyStrong, color = c.ink)
+    Text("Speech recognition (Gemini)", style = HL.type.bodyStrong, color = c.ink)
+    Gap(4)
+    MutedText(speech.geminiKeyEnd?.let { "Gemini key saved, ending in $it. Uses Gemini 3.5 Transcribe Live (free tier)." }
+        ?: "Paste a Gemini API key from Google AI Studio. Uses Gemini 3.5 Transcribe Live (free tier).")
     Gap(8)
-    Segmented(listOf("vosk" to "Built-in", "gemini" to "Gemini"), speech.source, { controller.setSpeech(it, null); result = null })
+    OutlinedTextField(key, { key = it.trim() }, label = { Text(if (speech.geminiKeyEnd == null) "Gemini API key" else "Replace the Gemini key") }, singleLine = true,
+        visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
     Gap(8)
-    when (speech.source) {
-        "gemini" -> {
-            MutedText(speech.geminiKeyEnd?.let { "Gemini key saved, ending in $it. Uses Gemini 3.5 Transcribe Live (free tier)." }
-                ?: "Paste a Gemini API key from Google AI Studio. Uses Gemini 3.5 Transcribe Live (free tier).")
-            Gap(8)
-            OutlinedTextField(key, { key = it.trim() }, label = { Text(if (speech.geminiKeyEnd == null) "Gemini API key" else "Replace the Gemini key") }, singleLine = true,
-                visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-            Gap(8)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                PillButton("Save key", { controller.setSpeech("gemini", key); key = "" }, enabled = key.isNotEmpty())
-                if (speech.geminiKeyEnd != null) { Spacer(Modifier.width(10.dp)); PillButton("Remove key", { controller.setSpeech("gemini", "") }, style = ButtonStyle.QUIET) }
-            }
-        }
-        else -> MutedText("Vosk's small English model, on the phone. Often mishears numbers.")
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        PillButton("Save key", { controller.setGeminiKey(key); key = "" }, enabled = key.isNotEmpty())
+        if (speech.geminiKeyEnd != null) { Spacer(Modifier.width(10.dp)); PillButton("Remove key", { controller.setGeminiKey("") }, style = ButtonStyle.QUIET) }
     }
     Gap(10)
     PillButton(if (testing) "Listening…" else "Test with the last question", {
         testing = true; result = null
         scope.launch { result = controller.testSpeech(); testing = false }
-    }, style = ButtonStyle.QUIET, enabled = !testing)
+    }, style = ButtonStyle.QUIET, enabled = !testing && speech.geminiKeyEnd != null)
     result?.let { Gap(8); Text(it, style = HL.type.small, color = c.ink) }
     Gap(6)
-    MutedText("If the chosen one fails, the built-in model answers instead. Gemini receives the recording of each question.")
+    MutedText("The test runs your last Alexa recording through Gemini and the answers model, without sending anything to the watch. Gemini receives the recording of each question.")
 }
