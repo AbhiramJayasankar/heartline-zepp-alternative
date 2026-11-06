@@ -88,7 +88,7 @@ fun AlexaScreen(controller: HeartlineController, nav: Navigator) {
         Gap(20)
         SectionTitle("Set up")
         NavRow("Voice", speech.geminiKeyEnd?.let { "Gemini key ending in $it, ${s.geminiModel.removePrefix("models/")}" } ?: "No Gemini key") { nav.push(Route.AlexaPage(AlexaPages.VOICE)) }
-        NavRow("Brain", listOfNotNull(ai.model, ai.keyEnd?.let { "key ending in $it" } ?: "no key", ai.key2End?.let { "second key ending in $it" }).joinToString(", ")) { nav.push(Route.AlexaPage(AlexaPages.BRAIN)) }
+        NavRow("Brain", listOfNotNull(ai.model, ai.keyEnd?.let { "key ending in $it" } ?: "no key", ai.key2End?.let { "second key ending in $it" }, ai.key3End?.let { "third key ending in $it" }).joinToString(", ")) { nav.push(Route.AlexaPage(AlexaPages.BRAIN)) }
         NavRow("Web search", listOfNotNull("Tavily".takeIf { web.tavilyEnd != null }, "Exa".takeIf { web.exaEnd != null }).joinToString(" and ").ifEmpty { "Off: no key" }) { nav.push(Route.AlexaPage(AlexaPages.WEB)) }
         Gap(20)
         SectionTitle("How it answers")

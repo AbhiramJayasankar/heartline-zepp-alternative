@@ -73,7 +73,8 @@ interface HeartlineController {
     /** [key] null keeps the saved one, blank removes it. */
     fun setAssistantAi(key: String?, model: String)
     /** The second account's key, used when OpenRouter refuses the first; blank removes it. */
-    fun setAssistantAiSecondKey(key: String)
+    /** The OpenRouter key from another account in [slot] 2 or 3; blank removes it. */
+    fun setAssistantAiExtraKey(slot: Int, key: String)
     /** Everything the Alexa button does that the owner can change: instructions, tools, models, speech, limits. */
     val alexaSettings: StateFlow<dev.heartline.service.AlexaSettings>
     fun updateAlexaSettings(change: (dev.heartline.service.AlexaSettings) -> dev.heartline.service.AlexaSettings)
@@ -244,7 +245,7 @@ data class PlaceUi(val name: String, val region: String?, val lat: Double, val l
 data class AlexaToolUi(val name: String, val group: String, val description: String, val parameters: String)
 data class AlexaAlertUi(val id: Int, val kind: String, val text: String, val at: Long)
 data class WebSearchUi(val tavilyEnd: String? = null, val exaEnd: String? = null)
-data class AssistantAiUi(val keyEnd: String?, val model: String, val key2End: String? = null)
+data class AssistantAiUi(val keyEnd: String?, val model: String, val key2End: String? = null, val key3End: String? = null)
 data class SpeechUi(val geminiKeyEnd: String?)
 
 data class WeatherUi(

@@ -307,7 +307,7 @@ class RealController(
     override val weather = taskA.weather
     override val assistantAi: StateFlow<AssistantAiUi> = db.meta.observe(dev.heartline.service.AssistantAiConfig.KEY)
         .map { dev.heartline.service.AssistantAiConfig.parse(it).let { c -> AssistantAiUi(c.apiKey.takeIf { k -> k.isNotBlank() }?.takeLast(4), c.model,
-            c.apiKey2.takeIf { k -> k.isNotBlank() }?.takeLast(4)) } }
+            c.apiKey2.takeIf { k -> k.isNotBlank() }?.takeLast(4), c.apiKey3.takeIf { k -> k.isNotBlank() }?.takeLast(4)) } }
         .stateIn(scope, SharingStarted.Eagerly, AssistantAiUi(null, dev.heartline.service.AssistantAiConfig.DEFAULT_MODEL))
     override fun setAssistantAi(key: String?, model: String) {
         scope.launch {
@@ -316,10 +316,11 @@ class RealController(
                 model = model.trim().ifEmpty { dev.heartline.service.AssistantAiConfig.DEFAULT_MODEL }).json())
         }
     }
-    override fun setAssistantAiSecondKey(key: String) {
+    override fun setAssistantAiExtraKey(slot: Int, key: String) {
         scope.launch {
             val saved = dev.heartline.service.AssistantAiConfig.parse(db.meta.get(dev.heartline.service.AssistantAiConfig.KEY))
-            db.meta.set(dev.heartline.service.AssistantAiConfig.KEY, saved.copy(apiKey2 = key.trim()).json())
+            val next = if (slot == 3) saved.copy(apiKey3 = key.trim()) else saved.copy(apiKey2 = key.trim())
+            db.meta.set(dev.heartline.service.AssistantAiConfig.KEY, next.json())
         }
     }
     private val alexaLock = kotlinx.coroutines.sync.Mutex()

@@ -129,6 +129,22 @@ class AssistantAiTest {
         assertTrue(AssistantAiConfig(apiKey2 = "sk-two").enabled)
     }
 
+    @Test fun aThirdAccountsKeyTakesOverWhenBothAreRefused() = runBlocking {
+        val three = AssistantAiConfig("sk-one", apiKey2 = "sk-two", apiKey3 = "sk-tri")
+        val used = ArrayList<String>()
+        val ai = AssistantAi { _, headers, _ ->
+            val key = headers.getValue("Authorization").removePrefix("Bearer ")
+            used += key
+            if (key != "sk-tri") throw AssistantAi.OpenRouterError("OpenRouter 429: Rate limit exceeded: free-models-per-day")
+            content("Hi.")
+        }
+        assertEquals("Hi.", ai.converse("hi", context, emptyList(), three, Runner()).text)
+        assertEquals(listOf("sk-one", "sk-two", "sk-tri"), used)
+        assertEquals(3, ai.lastKey)
+        assertEquals(three, AssistantAiConfig.parse(three.json()))
+        assertEquals(listOf("sk-one", "sk-tri"), AssistantAiConfig("sk-one", apiKey3 = "sk-tri").keys)
+    }
+
     @Test fun theAnsweringModelIsRemembered() = runBlocking {
         val ai = AssistantAi { _, _, _ -> content("Hi.", model = "nvidia/nemotron-3.5-lightning:free") }
         ai.converse("hi", context, emptyList(), config, Runner())

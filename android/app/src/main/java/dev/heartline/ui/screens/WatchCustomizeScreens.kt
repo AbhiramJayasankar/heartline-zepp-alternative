@@ -142,7 +142,6 @@ internal fun OpenRouterKeys(controller: HeartlineController) {
     val c = HL.colors
     val ai by controller.assistantAi.collectAsStateWithLifecycle()
     var key by remember { mutableStateOf("") }
-    var key2 by remember { mutableStateOf("") }
     var model by remember(ai.model) { mutableStateOf(ai.model) }
     Text("OpenRouter key and model", style = HL.type.bodyStrong, color = c.ink)
     Gap(4)
@@ -161,19 +160,31 @@ internal fun OpenRouterKeys(controller: HeartlineController) {
         }
     }
     Gap(16)
-    Text("Second account", style = HL.type.bodyStrong, color = c.ink)
+    ExtraOpenRouterKey(controller, 2, ai.key2End)
+    Gap(16)
+    ExtraOpenRouterKey(controller, 3, ai.key3End)
+}
+
+/** An OpenRouter key from another account, in [slot] 2 or 3, tried when OpenRouter refuses the keys before it. */
+@Composable
+private fun ExtraOpenRouterKey(controller: HeartlineController, slot: Int, end: String?) {
+    val c = HL.colors
+    val nth = if (slot == 3) "third" else "second"
+    val before = if (slot == 3) "the first two" else "the first"
+    var key by remember { mutableStateOf("") }
+    Text(if (slot == 3) "Third account" else "Second account", style = HL.type.bodyStrong, color = c.ink)
     Gap(4)
-    MutedText(ai.key2End?.let { "Second key saved, ending in $it. Used when OpenRouter refuses the first, such as at its daily free limit." }
-        ?: "Optional: a key from another OpenRouter account, used when OpenRouter refuses the first (such as at its daily free limit).")
+    MutedText(end?.let { "${nth.replaceFirstChar { it.uppercase() }} key saved, ending in $it. Used when OpenRouter refuses $before, such as at its daily free limit." }
+        ?: "Optional: a key from another OpenRouter account, used when OpenRouter refuses $before (such as at its daily free limit).")
     Gap(8)
-    OutlinedTextField(key2, { key2 = it.trim() }, label = { Text(if (ai.key2End == null) "Second OpenRouter API key" else "Replace the second key") }, singleLine = true,
+    OutlinedTextField(key, { key = it.trim() }, label = { Text(if (end == null) "${nth.replaceFirstChar { it.uppercase() }} OpenRouter API key" else "Replace the $nth key") }, singleLine = true,
         visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
     Gap(8)
     Row(verticalAlignment = Alignment.CenterVertically) {
-        PillButton("Save second key", { controller.setAssistantAiSecondKey(key2); key2 = "" }, enabled = key2.isNotEmpty())
-        if (ai.key2End != null) {
+        PillButton("Save $nth key", { controller.setAssistantAiExtraKey(slot, key); key = "" }, enabled = key.isNotEmpty())
+        if (end != null) {
             Spacer(Modifier.width(10.dp))
-            PillButton("Remove", { controller.setAssistantAiSecondKey("") }, style = ButtonStyle.QUIET)
+            PillButton("Remove", { controller.setAssistantAiExtraKey(slot, "") }, style = ButtonStyle.QUIET)
         }
     }
 }

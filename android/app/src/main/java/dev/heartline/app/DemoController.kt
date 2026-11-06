@@ -166,7 +166,10 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
         if (query.isBlank()) emptyList() else listOf(bengaluru, PlaceUi("Bengaluru Rural", "Karnataka, India", 13.28, 77.53)).filter { it.name.contains(query, true) }
     override val assistantAi = MutableStateFlow(AssistantAiUi(null, dev.heartline.service.AssistantAiConfig.DEFAULT_MODEL))
     override fun setAssistantAi(key: String?, model: String) { assistantAi.update { it.copy(keyEnd = key?.takeLast(4) ?: it.keyEnd, model = model) } }
-    override fun setAssistantAiSecondKey(key: String) { assistantAi.update { it.copy(key2End = key.trim().takeLast(4).ifEmpty { null }) } }
+    override fun setAssistantAiExtraKey(slot: Int, key: String) {
+        val end = key.trim().takeLast(4).ifEmpty { null }
+        assistantAi.update { if (slot == 3) it.copy(key3End = end) else it.copy(key2End = end) }
+    }
     override val alexaSettings = MutableStateFlow(dev.heartline.service.AlexaSettings())
     override fun updateAlexaSettings(change: (dev.heartline.service.AlexaSettings) -> dev.heartline.service.AlexaSettings) { alexaSettings.update { change(it).clamped() } }
     override val alexaTurns = MutableStateFlow(listOf(dev.heartline.service.TurnRecord(System.currentTimeMillis() - 600_000, "Watch", "How did I sleep?", 2.1, 900,

@@ -11,13 +11,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * The owner's OpenRouter keys (typed into the app, stored in meta) and model; no key = no answers. [apiKey2] is a key
- * from a second account, used when OpenRouter refuses the first (such as its daily free-model limit).
+ * The owner's OpenRouter keys (typed into the app, stored in meta) and model; no key = no answers. [apiKey2] and
+ * [apiKey3] are keys from other accounts, tried in turn when OpenRouter refuses one (such as its daily free-model limit).
  */
-data class AssistantAiConfig(val apiKey: String = "", val model: String = DEFAULT_MODEL, val apiKey2: String = "") {
-    val keys get() = listOf(apiKey, apiKey2).filter { it.isNotBlank() }.distinct()
+data class AssistantAiConfig(val apiKey: String = "", val model: String = DEFAULT_MODEL, val apiKey2: String = "", val apiKey3: String = "") {
+    val keys get() = listOf(apiKey, apiKey2, apiKey3).filter { it.isNotBlank() }.distinct()
     val enabled get() = keys.isNotEmpty()
-    fun json(): String = JSONObject().put("key", apiKey).put("model", model).put("key2", apiKey2).toString()
+    fun json(): String = JSONObject().put("key", apiKey).put("model", model).put("key2", apiKey2).put("key3", apiKey3).toString()
     companion object {
         const val KEY = "assistant_ai"
         /** NVIDIA's newest free model on OpenRouter (2026-10-15), with tool calling. */
@@ -32,7 +32,7 @@ data class AssistantAiConfig(val apiKey: String = "", val model: String = DEFAUL
         fun parse(text: String?): AssistantAiConfig = runCatching {
             val o = JSONObject(text ?: "{}")
             AssistantAiConfig(o.optString("key").trim(), o.optString("model").trim().takeUnless { it.isEmpty() || it in OLD_DEFAULTS } ?: DEFAULT_MODEL,
-                o.optString("key2").trim())
+                o.optString("key2").trim(), o.optString("key3").trim())
         }.getOrDefault(AssistantAiConfig())
     }
 }
