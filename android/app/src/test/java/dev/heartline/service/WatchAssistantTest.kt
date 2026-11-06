@@ -66,7 +66,7 @@ class WatchAssistantTest {
         assertEquals("Your heart rate was 72 bpm.", a.text)
         assertTrue(a.frames.isEmpty())
         assertFalse(a.listenAgain)
-        listOf("Steps today: 4200", "Noida: 24°C, partly cloudy now", "- Readiness: 62 out of 100").forEach { assertTrue(it, system().contains(it)) }
+        listOf("Steps today: 4200", "show_weather_card", "- Readiness: 62 out of 100").forEach { assertTrue(it, system().contains(it)) }
         val tools = bodies.last().getJSONArray("tools").let { t -> (0 until t.length()).map { t.getJSONObject(it).getJSONObject("function").getString("name") } }
         assertEquals(listOf("get_sleep") + WatchAssistant.ACTION_TOOLS.map { it.name }, tools)
     }
@@ -179,6 +179,19 @@ class WatchAssistantTest {
         val m = bodies.last().getJSONArray("messages")
         assertEquals("Knock knock.", m.getJSONObject(2).getString("content"))
         assertEquals("Who's there?", m.getJSONObject(3).getString("content"))
+    }
+
+    @Test fun longAnswersContinueAsNotifications() {
+        val story = (1..120).joinToString(" ") { "Sentence number $it of the story goes here." }
+        val (shown, rest) = WatchAssistant.splitReply(story, 700)
+        assertTrue(shown!!.length <= 700)
+        assertTrue(shown.endsWith(". (continued in notifications)"))
+        assertTrue(rest.all { it.toByteArray().size <= WatchAssistant.NOTIFICATION_TEXT })
+        assertEquals(story, (shown.removeSuffix(" (continued in notifications)") + " " + rest.joinToString(" ")))
+        assertEquals("Short." to emptyList<String>(), WatchAssistant.splitReply("Short.", 700))
+        assertEquals(null to emptyList<String>(), WatchAssistant.splitReply(null, 700))
+        val word = "x".repeat(500) // no spaces at all still splits
+        assertEquals(word, WatchAssistant.notificationChunks(word).joinToString(""))
     }
 
     @Test fun textIsCleanedForTheWatch() {

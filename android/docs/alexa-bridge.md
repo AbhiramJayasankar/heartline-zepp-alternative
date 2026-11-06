@@ -75,7 +75,11 @@ The model then calls tools (OpenRouter's `tools`, up to 6 rounds), and its final
   rang without showing its text. The voice alerts are kept in `meta["alexa_alerts"]` until they ring, so they can be
   cancelled by voice; the agenda sync rewrites the reminder slots whenever that list changes.
 
-A reply that ends with a question reopens the watch's mic. After a card (weather, the help list) no text is sent, since
+Long answers (a story, a detailed explanation) are written in full: the reply screen shows as much as the watch's
+`ttsTextLimit` allows (sent in the start JSON, logged once; ~700 characters scrolled fine), cut at a sentence, and the
+rest follows as numbered watch notifications of up to 190 bytes each (the watch takes 230 per notification). A Gemini
+timeout is reported on the watch; before, it surfaced as a cancellation and the turn ended in silence until the watch
+said "I didn't hear you clearly". A reply that ends with a question reopens the watch's mic. After a card (weather, the help list) no text is sent, since
 it would replace the card. Reasoning is turned off for speed; a model that requires it (`Reasoning is mandatory for this
 endpoint`) is asked again with low-effort reasoning and 4000 tokens for the rest of the conversation. Replies are cleaned
 for the watch's font (plain punctuation, no emoji). Log lines never pass text through a format string: a "%" in an

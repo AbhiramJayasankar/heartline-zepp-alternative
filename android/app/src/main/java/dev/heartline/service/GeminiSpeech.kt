@@ -31,7 +31,11 @@ data class SpeechConfig(val geminiKey: String = "") {
  * serverContent.inputTranscription. The key goes in the URL's key parameter, as the Live API documents; it's never logged.
  */
 class GeminiSpeech(private val client: OkHttpClient = OkHttpClient.Builder().readTimeout(TIMEOUT_MS, TimeUnit.MILLISECONDS).build()) {
-    suspend fun transcribe(pcm: ShortArray, key: String): Transcript = withTimeout(TIMEOUT_MS) {
+    /** Throws IllegalStateException (not a cancellation) when Gemini sends nothing back in time. */
+    suspend fun transcribe(pcm: ShortArray, key: String): Transcript = try { transcribeWithin(pcm, key) }
+        catch (e: kotlinx.coroutines.TimeoutCancellationException) { throw IllegalStateException("Gemini sent no words back within ${TIMEOUT_MS / 1000} s") }
+
+    private suspend fun transcribeWithin(pcm: ShortArray, key: String): Transcript = withTimeout(TIMEOUT_MS) {
         val done = CompletableDeferred<String>()
         val session = Session(pcm)
         val socket = client.newWebSocket(Request.Builder().url("$URL?key=$key").build(), object : WebSocketListener() {

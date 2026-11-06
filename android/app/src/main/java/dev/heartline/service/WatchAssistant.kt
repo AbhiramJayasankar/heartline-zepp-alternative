@@ -133,7 +133,7 @@ class WatchAssistant(
             history += transcript to reply.text; lastTurn = t.toEpochSecond()
             while (history.size > 6) history.removeAt(0)
         }
-        return turn.answer(reply.text.take(600), reply.toolCalls)
+        return turn.answer(reply.text.take(20_000), reply.toolCalls)
     }
 
     /** One question's actions: what was sent to the watch and what to tell the user about it. */
@@ -276,7 +276,7 @@ class WatchAssistant(
             Tool("cancel_alerts", "Cancel alarms, timers or reminders set by voice, by their ids from the list in the instructions.",
                 obj("ids" to JSONObject().put("type", "array").put("items", JSONObject().put("type", "integer")), required = listOf("ids"))),
             Tool("get_weather", "The weather where the phone is: now, today and the next three days.", obj()),
-            Tool("show_weather_card", "Show the weather card on the watch; use it when they ask what the weather is like.", obj()),
+            Tool("show_weather_card", "Show the weather card on the watch (now, today and the next three days). Use it whenever they ask about the weather in general.", obj()),
             Tool("show_help", "Show the list of things they can ask; use it when they ask what you can do.", obj()),
             Tool("start_workout", "Start Heartline's workout capture, which records sets, reps and heart rate from the watch's sensors.",
                 obj("label" to prop("string", "The workout they named, such as Gym or Run"), "minutes" to prop("integer", "How long to capture; 60 if they don't say"), required = listOf("label"))),
@@ -311,6 +311,41 @@ class WatchAssistant(
                 sb.appendCodePoint(cp)
             }
             return sb.toString().replace(Regex(" {2,}"), " ").trim()
+        }
+
+        /** Bytes of answer per watch notification, leaving room for the title within the watch's 230. */
+        const val NOTIFICATION_TEXT = 190
+
+        /**
+         * [text] as the part the reply screen shows (up to [limit] characters, cut at a sentence or word) and the rest,
+         * in pieces for watch notifications.
+         */
+        fun splitReply(text: String?, limit: Int): Pair<String?, List<String>> {
+            if (text == null || text.length <= limit) return text to emptyList()
+            val note = " (continued in notifications)"
+            val cut = cutAt(text, limit - note.length)
+            return (text.substring(0, cut).trimEnd() + note) to notificationChunks(text.substring(cut))
+        }
+
+        /** [text] in pieces that fit a watch notification, cut at sentences or words. */
+        fun notificationChunks(text: String): List<String> {
+            val out = ArrayList<String>()
+            var rest = text.trim()
+            while (rest.isNotEmpty()) {
+                val cut = if (rest.toByteArray().size <= NOTIFICATION_TEXT) rest.length else cutAt(rest, NOTIFICATION_TEXT, bytes = true)
+                out += rest.substring(0, cut).trim(); rest = rest.substring(cut).trim()
+            }
+            return out
+        }
+
+        /** Where to cut [text] to at most [max] characters (or UTF-8 bytes): after a sentence, else at a space. */
+        private fun cutAt(text: String, max: Int, bytes: Boolean = false): Int {
+            var end = minOf(text.length, max)
+            if (bytes) while (end > 1 && text.substring(0, end).toByteArray().size > max) end--
+            val head = text.substring(0, end)
+            val sentence = maxOf(head.lastIndexOf(". "), head.lastIndexOf("! "), head.lastIndexOf("? "), head.lastIndexOf("\n"))
+            val space = head.lastIndexOf(' ')
+            return when { sentence > end / 2 -> sentence + 1; space > end / 2 -> space; else -> end }
         }
 
         /** Alexa's weather icon names for Open-Meteo's WMO codes. */

@@ -83,7 +83,7 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
             fun withReasoning() = JSONObject(body.toString()).put("max_tokens", REASONING_MAX_TOKENS)
                 .put("reasoning", JSONObject().put("effort", "low").put("exclude", true)).toString()
             val reply = if (mustReason) send(config, withReasoning()) else try {
-                send(config, JSONObject(body.toString()).put("max_tokens", 1500).put("reasoning", JSONObject().put("enabled", false)).toString())
+                send(config, JSONObject(body.toString()).put("max_tokens", MAX_TOKENS).put("reasoning", JSONObject().put("enabled", false)).toString())
             } catch (e: OpenRouterError) {
                 if (!e.reasoning) throw e
                 mustReason = true
@@ -152,7 +152,9 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
 
     companion object {
         const val URL = "https://openrouter.ai/api/v1/chat/completions"
-        const val REASONING_MAX_TOKENS = 4000
+        /** Room for a long answer when asked for one (a 1,000-word story is about 1,400 tokens). */
+        const val MAX_TOKENS = 4000
+        const val REASONING_MAX_TOKENS = 6000
         /** Tool calls and answers: each round is one OpenRouter request. */
         const val MAX_ROUNDS = 6
         /**
@@ -166,7 +168,6 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
             run inside Heartline, the phone app that reads the watch's health data.
             Now: ${c.now.format(DateTimeFormatter.ofPattern("EEEE d MMMM yyyy, HH:mm", Locale.ENGLISH))} (${c.now.zone.id}).
             Latest heart rate: ${c.heartRate ?: "unknown"}. Steps today: ${c.stepsToday?.toString() ?: "unknown"}${c.dataAsOf?.let { " (watch data synced up to $it)" } ?: ""}.
-            Weather: ${c.weather ?: "unknown"}.
             Alarms, timers and reminders set by voice: ${if (c.alerts.isEmpty()) "none" else c.alerts.joinToString("; ") { "id ${it.id}: ${it.describe(c.now)}" }}.
             Workout capture in Heartline: ${c.workout ?: "not running"}.
             Today at a glance:
@@ -175,10 +176,13 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
             trends or workouts, call the get_ tools for the detail (several if useful) and answer from what they return,
             with a short analysis when they ask how something was. Use the action tools to set timers, alarms and
             reminders, cancel them by id, show the weather card or the list of things to ask, start or stop a workout
-            capture, and sync the watch. Never say you did something without calling its tool. For an alarm or reminder
+            capture, and sync the watch. When they ask what the weather is like, call show_weather_card (the watch shows
+            the weather), and get_weather only for a specific question such as whether it will rain tomorrow. Never say you
+            did something without calling its tool. For an alarm or reminder
             time without am/pm, pick the next occurrence after now; for "in N minutes" use in_seconds.
-            Your reply is shown on a small watch screen: short plain sentences, at most 300 characters, no emoji or
-            markdown. After showing a card, a few words are enough. A question at the end makes the watch listen again, so
+            Your reply is shown on the watch: plain sentences, no emoji or markdown. Keep it short (at most 300 characters)
+            unless they ask for something long, like a story or a detailed explanation: then write it in full, never refuse
+            because of the screen; a long reply continues as watch notifications. After showing a card, a few words are enough. A question at the end makes the watch listen again, so
             ask one only when you need their answer (never offers like "Want me to check anything else?"); for a game or
             joke where they answer back, like a knock-knock joke, say only your next line.
         """.trimIndent().replace("{HEALTH}", c.health?.lines()?.filter { it.isNotBlank() }?.joinToString("\n") { "- $it" } ?: "- not available")
