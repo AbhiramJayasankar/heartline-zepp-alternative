@@ -243,7 +243,9 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         val stoppedAt = stopSent
         val audio = synchronized(pcm16) { pcm16.snapshot() }
         runCatching { File(folder, "$name-16k.wav").writeBytes(wav16k(audio)) }
-        val work = scope.async { understand(audio) }
+        // Nothing was said (the endpointer heard no speech): Gemini would wait for words that never come.
+        val silent = endpointer.state == SpeechEndpointer.State.NOTHING_SAID
+        val work = scope.async { if (silent) WatchAssistant.Answer("I didn't hear anything.") else understand(audio) }
         var handedOff = false
         try {
             val answer = withTimeoutOrNull((WATCH_WAIT_MS - (System.currentTimeMillis() - stoppedAt)).coerceAtLeast(1)) { work.await() }

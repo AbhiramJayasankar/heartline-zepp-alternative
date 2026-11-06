@@ -163,7 +163,7 @@ class WatchAssistantTest {
         val a = assistant().answer("What's the weather like?")
         assertNull(a.text)
         val body = String(a.frames.single(), Charsets.UTF_8)
-        listOf("Noida", "Partly cloudy", "Partly Cloudy", "24", "29", "19").forEach { assertTrue(it, body.contains(it)) }
+        listOf("Noida", "Partly cloudy", "/currentWeatherIcon/partly_cloudy.png", "/weatherForecast/rainy.png", "24", "29", "19").forEach { assertTrue(it, body.contains(it)) }
         weatherError = "choose a place in Heartline's weather settings"
         brain(call("show_weather_card"), say("I couldn't get the weather."))
         assertEquals("I couldn't get the weather.", assistant().answer("Weather?").text)

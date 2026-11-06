@@ -79,7 +79,12 @@ Long answers (a story, a detailed explanation) are written in full: the reply sc
 `ttsTextLimit` allows (sent in the start JSON, logged once; ~700 characters scrolled fine), cut at a sentence, and the
 rest follows as numbered watch notifications of up to 190 bytes each (the watch takes 230 per notification). A Gemini
 timeout is reported on the watch; before, it surfaced as a cancellation and the turn ended in silence until the watch
-said "I didn't hear you clearly". A reply that ends with a question reopens the watch's mic. After a card (weather, the help list) no text is sent, since
+said "I didn't hear you clearly". Weather icons are Alexa's: a description and the image URL whose file name names the icon (the Zepp app passes
+Alexa's values on; a name with no URL showed a question mark). Alexa's image server has eight
+(`images-na.ssl-images-amazon.com/images/G/01/alexa/avs/gui/small/weatherForecast/<name>.png`): sunny, partly_cloudy,
+partly_cloudy_night, cloudy, rainy, snow, windy and lightning, so every condition maps to one of those. When no speech is
+heard at all, the watch is told so at once instead of waiting on Gemini. A reply that ends with a question reopens the
+watch's mic. After a card (weather, the help list) no text is sent, since
 it would replace the card. Reasoning is turned off for speed; a model that requires it (`Reasoning is mandatory for this
 endpoint`) is asked again with low-effort reasoning and 4000 tokens for the rest of the conversation. Replies are cleaned
 for the watch's font (plain punctuation, no emoji). Log lines never pass text through a format string: a "%" in an

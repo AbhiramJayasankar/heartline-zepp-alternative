@@ -249,8 +249,9 @@ class WatchAssistant(
         val w = f.weather
         val start = t.toLocalDate().atStartOfDay(t.zone)
         fun deg(c: Int) = temp(c).dropLast(1)
+        val night = w.sunrise != null && w.sunset != null && t.toLocalTime().let { it.isBefore(w.sunrise) || it.isAfter(w.sunset) }
         return Alexa.weather(t.toEpochSecond(), w.location, t.format(DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy", Locale.ENGLISH)),
-            wmoCondition(w.wmo).text, icon(w.wmo), deg(w.tempC), deg(w.days.first().highC), deg(w.days.first().lowC),
+            wmoCondition(w.wmo).text, icon(w.wmo, current = true, night = night, windKmh = w.windKmh), deg(w.tempC), deg(w.days.first().highC), deg(w.days.first().lowC),
             w.days.drop(1).take(3).mapIndexed { i, d -> Alexa.Forecast(start.plusDays(i + 1L).toEpochSecond(), deg(d.highC), deg(d.lowC), icon(d.wmo)) },
             t.offset.totalSeconds)
     }
@@ -348,12 +349,27 @@ class WatchAssistant(
             return when { sentence > end / 2 -> sentence + 1; space > end / 2 -> space; else -> end }
         }
 
-        /** Alexa's weather icon names for Open-Meteo's WMO codes. */
-        fun icon(wmo: Int): Alexa.Icon = Alexa.Icon(when (wmo) {
-            0, 1 -> "Sunny"; 2 -> "Partly Cloudy"; 3 -> "Cloudy"; 45, 48 -> "Fog"
-            in 51..67, in 80..82 -> "Rain"; in 71..77, 85, 86 -> "Snow"; in 95..99 -> "Thunderstorm"
-            else -> "Cloudy"
-        })
+        /**
+         * The weather icon as Alexa sends it, which the Zepp app passes on unchanged: a description and the icon's image
+         * URL, whose file name names the icon ("Partly cloudy", .../weatherForecast/partly_cloudy.png in a real Alexa
+         * payload, avs-device-sdk issue 477). Without the URL the watch showed a question mark. Alexa's image server has
+         * eight names (checked 2026-11-06): sunny, partly_cloudy, partly_cloudy_night, cloudy, rainy, snow, windy and
+         * lightning; everything else is 404, so each WMO code maps to the nearest of those.
+         */
+        fun icon(wmo: Int, current: Boolean = false, night: Boolean = false, windKmh: Double = 0.0): Alexa.Icon = alexaIcon(when (wmo) {
+            0, 1 -> if (night) "partly_cloudy_night" else if (current && windKmh >= 40) "windy" else "sunny"
+            2 -> if (night) "partly_cloudy_night" else "partly_cloudy"
+            3, 45, 48 -> if (current && windKmh >= 40) "windy" else "cloudy"
+            in 51..67, in 80..82 -> "rainy"
+            in 71..77, 85, 86 -> "snow"
+            in 95..99 -> "lightning"
+            else -> "cloudy"
+        }, current)
+
+        /** [name] (one of Alexa's icon file names) as the icon Alexa would send. */
+        fun alexaIcon(name: String, current: Boolean = false): Alexa.Icon =
+            Alexa.Icon(name.replace('_', ' ').replaceFirstChar { it.uppercase() },
+                "https://images-na.ssl-images-amazon.com/images/G/01/alexa/avs/gui/small/${if (current) "currentWeatherIcon" else "weatherForecast"}/$name.png")
 
         /** The next [time] after [t] (today or tomorrow). */
         fun next(t: ZonedDateTime, time: LocalTime): LocalDateTime =
