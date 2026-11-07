@@ -45,7 +45,7 @@ private val SIGNALS = listOf(
     Signal("HRV", "hrv", "hrv", 0.35, Area.HEART,
         "Heart rate variability: how much the time between heartbeats varies, measured as RMSSD. When you're rested your nervous system " +
             "lets each beat drift a little; stress, illness, alcohol and hard training make the rhythm stiffer and the number drops.",
-        "Today's RMSSD (from a heart check, or the watch's own night reading) against your last 28 days. Higher than usual helps. It is the " +
+        "Today's RMSSD from your heart checks (the GTR 2e keeps no HRV record of its own) against your last 28 days. Higher than usual helps. It is the " +
             "biggest weight because it reacts first, often a day before you feel run down.",
         "Not counted today: it needs an HRV reading today and at least three earlier days with one in the last 28. A one-minute heart check " +
             "after waking, before coffee, gives the cleanest number."),

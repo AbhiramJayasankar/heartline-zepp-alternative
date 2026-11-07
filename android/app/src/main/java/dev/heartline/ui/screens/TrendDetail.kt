@@ -102,7 +102,7 @@ private fun trendAbout(key: String): About? = when (key) {
         "The watch's own resting value when it gives one; otherwise the lowest 30-minute median of your heart rate while asleep.",
         "60–100 bpm for most adults; 40s–50s is common in fit people. A rise of 5 or more above your baseline for a few days often means poor recovery or a coming illness.", "Resting heart rate")
     "hrv" -> About("Heart rate variability (RMSSD): how much the gap between beats changes. Higher usually means better recovered.",
-        "From heart checks with at least 70% clean signal and 45 s of beats, or the watch's own overnight HRV. One value per day.",
+        "From Heartline's heart checks with at least 70% clean signal and 45 s of beats; the median when there are several in a day. The GTR 2e answers requests for its own HRV record with no data.",
         "About 19–75 ms in short resting readings from healthy adults; it falls with age and varies hugely between people. Compare with your own baseline only.", "HRV")
     "sleep" -> About("Hours asleep each night, light, deep and REM together.",
         "The watch classifies every minute; Heartline joins asleep minutes into a night, bridging awake gaps of up to 30 minutes.",
