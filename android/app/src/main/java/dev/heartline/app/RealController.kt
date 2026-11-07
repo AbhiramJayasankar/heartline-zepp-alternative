@@ -62,6 +62,8 @@ class RealController(
         override fun onBindingDied(name: ComponentName?) { service.value = null; if (bound) context.unbindService(this); bound = false }
     }
     init {
+        // Saved heart checks from an older analysis are worked out again from their recordings, once.
+        scope.launch(Dispatchers.IO) { runCatching { reanalyseChecks() }.onFailure { db.events.add("warn", "Re-analysing heart checks failed: ${it.message}") } }
         scope.launch { settings.rawSensorDefaultSelection.collect { selected ->
             if (!sensors.value.streaming) sensors.update { it.copy(selected = selected.mapNotNull { sensorFromName(it.name) }.toSet()) }
         } }
@@ -290,6 +292,23 @@ class RealController(
             context.contentResolver.openOutputStream(uri, "wt").use { out -> Exporter.exportCsvZip(db, checkNotNull(out), -Double.MAX_VALUE, Double.MAX_VALUE) }
             db.events.add("info", "Exported data")
         }
+    }
+    private suspend fun reanalyseChecks() {
+        var done = 0
+        for (c in db.checks.list()) {
+            val version = c.json?.let { runCatching { org.json.JSONObject(it).optInt("analysis_version", 1) }.getOrDefault(1) } ?: 1
+            if (version >= ANALYSIS_VERSION) continue
+            val file = c.file ?: continue
+            val path = runCatching { recordingFile(file) }.getOrNull()?.takeIf { it.isFile } ?: continue
+            val result = analyzeSession(readRecording(path), file)
+            val json = result.json()
+            db.checks.upsert(dev.heartline.data.model.Check(result.start, file, result.hrBpm, result.hrv.rmssdMs, result.hrv.sdnnMs, result.rhythm.status, json))
+            db.recordings.setAnalysis(file, json)
+            db.insights.save(dev.heartline.data.model.InsightSession(file, path.lastModified() / 1000.0, result.start, result.durationS, result.signalQuality,
+                result.usableS, result.hrBpm, result.hrv.rmssdMs, result.hrv.sdnnMs, result.rhythm.status, result.respiratoryRate, json))
+            done++
+        }
+        if (done > 0) db.events.add("info", "Re-analysed $done heart check${if (done > 1) "s" else ""} with the improved breathing and beat analysis")
     }
     private fun recordingFile(name: String): File {
         val root = File(context.filesDir, "raw").canonicalFile

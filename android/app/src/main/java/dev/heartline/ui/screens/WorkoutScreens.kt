@@ -133,7 +133,7 @@ fun CaptureScreen(controller: HeartlineController, nav: Navigator) {
             }
         } else {
             val elapsed = ((now / 1000) - r.startedAt).coerceAtLeast(0)
-            Column(Modifier.fillMaxWidth().paper().padding(vertical = 18.dp)) {
+            Column(Modifier.fillMaxWidth().padding(vertical = 18.dp)) {
                 Text(r.label, style = HL.type.label, color = c.inkSoft)
                 Text(clock(elapsed.toDouble()), style = HL.type.hero.copy(fontSize = 96.sp), color = c.ink)
                 MutedText(if (r.plannedS >= 180 * 60) "until you tap Stop (stops itself after 3 h)" else "of ${r.plannedS / 60} min, stops by itself")
@@ -291,7 +291,7 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
 private fun PaperPanel(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
     val c = HL.colors
     val shape = RoundedCornerShape(10.dp)
-    Column(Modifier.fillMaxWidth().clip(shape).background(c.surface).paper().border(1.dp, c.line, shape).padding(12.dp), content = content)
+    Column(Modifier.fillMaxWidth().clip(shape).background(c.surface).border(1.dp, c.line, shape).padding(12.dp), content = content)
 }
 
 @Composable

@@ -75,7 +75,20 @@ data class ChartLine(
     val points: List<SeriesPoint>, val color: Color, val label: String, val unit: String = "",
     val width: Dp = 2.dp, val fill: Boolean = false, val dashed: Boolean = false, val step: Boolean = false,
     val gap: Double = 600.0, val format: (Double) -> String = { "%.0f".format(it) }, val axis: Boolean = true,
+    /** The normal time between readings (the median when null). Joins longer than 1.5x this, but within [gap], are drawn
+     *  dashed and faded as assumed: the line only bridges the readings either side. */
+    val spacing: Double? = null,
 )
+
+/** The usual time between this line's readings. */
+internal fun ChartLine.usualStep(): Double = spacing ?: points.zipWithNext { p, q -> q.t - p.t }.filter { it > 0 }.sorted().let { if (it.isEmpty()) gap else it[it.size / 2] }
+
+/** Whether any join in [a]..[b] bridges missing readings. */
+internal fun ChartLine.bridges(a: Double, b: Double): Boolean {
+    if (width.value <= 0f || dashed || step) return false
+    val s = usualStep() * 1.5
+    return points.zipWithNext().any { (p, q) -> q.t >= a && p.t <= b && q.t - p.t > s && q.t - p.t <= gap }
+}
 /** Bars from [SeriesPoint.t] to t + [width] (x units), e.g. steps per hour. */
 data class ChartBars(val points: List<SeriesPoint>, val width: Double, val color: Color, val label: String, val unit: String = "",
     val format: (Double) -> String = { "%.0f".format(it) })
@@ -120,7 +133,7 @@ fun InteractiveChart(
     var view by remember(xStart, xEnd) { mutableStateOf(xStart to xEnd) }
     var selected by remember(xStart, xEnd) { mutableStateOf<Double?>(null) }
     var widthPx by remember { mutableStateOf(1f) }
-    val rightPad = with(androidx.compose.ui.platform.LocalDensity.current) { 36.dp.toPx() }
+    val rightPad = with(androidx.compose.ui.platform.LocalDensity.current) { 42.dp.toPx() }
     val leftPad = with(androidx.compose.ui.platform.LocalDensity.current) { 6.dp.toPx() }
     fun toX(px: Float): Double { val (a, b) = view; return a + ((px - leftPad) / (widthPx - rightPad - leftPad)).coerceIn(0f, 1f) * (b - a) }
 
@@ -226,10 +239,12 @@ fun InteractiveChart(
                 val x1 = x(s.start).coerceAtLeast(leftPad); val x2 = x(s.end).coerceAtMost(right)
                 if (x2 > x1) drawRect(s.color, Offset(x1, top), Size(max(x2 - x1, 1.5f), bottom - top))
             }
-            // Grid and y labels at round values.
-            niceTicks(lo, hi, 4).forEach { v ->
+            // Grid only where the axes are labelled: a line at each y value, and (below) at each x label.
+            val yTicks = niceTicks(lo, hi, 5).filter { it in lo..hi }
+            val unit = lines.firstOrNull { it.axis && it.unit.isNotEmpty() }?.unit ?: bars.firstOrNull { it.unit.isNotEmpty() }?.unit
+            yTicks.forEachIndexed { i, v ->
                 drawLine(c.line, Offset(leftPad, y(v)), Offset(right, y(v)), 1f)
-                label(tm, formatTick(v), right + 4.dp.toPx(), y(v) - 7.dp.toPx(), c.inkSoft)
+                label(tm, formatTick(v) + if (i == yTicks.lastIndex && unit != null && unit.length <= 4) " $unit" else "", right + 4.dp.toPx(), y(v) - 7.dp.toPx(), c.inkSoft)
             }
             bars.forEach { s ->
                 s.points.forEach { p ->
@@ -258,35 +273,53 @@ fun InteractiveChart(
                     val cols = java.util.TreeMap<Int, DoubleArray>()
                     pts.forEach { p ->
                         val k = ((x(p.t) - leftPad) / colPx).toInt()
-                        val acc = cols.getOrPut(k) { doubleArrayOf(p.v, p.v, 0.0, 0.0, p.t) }
+                        val acc = cols.getOrPut(k) { doubleArrayOf(p.v, p.v, 0.0, 0.0, p.t, p.t) }
                         acc[0] = min(acc[0], p.v); acc[1] = max(acc[1], p.v); acc[2] += p.v; acc[3] += 1.0; acc[4] = p.t
                     }
-                    val avgPath = Path(); var lastT: Double? = null
+                    val avgPath = Path(); val bridgePath = Path(); var lastT: Double? = null; var lastX = 0f; var lastY = 0f
+                    val colSpan = (b - a) / ((right - leftPad) / colPx)
+                    val assumed = max(l.usualStep() * 1.5, colSpan * 1.5)
                     cols.forEach { (k, acc) ->
                         val cx = leftPad + (k + 0.5f) * colPx
                         if (cx < leftPad || cx > right) return@forEach
                         drawLine(l.color.copy(alpha = 0.16f), Offset(cx, y(acc[1])), Offset(cx, y(acc[0])), colPx * 0.7f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
                         val ay = y(acc[2] / acc[3])
-                        if (lastT == null || acc[4] - lastT!! > l.gap + (b - a) / ((right - leftPad) / colPx)) avgPath.moveTo(cx, ay) else avgPath.lineTo(cx, ay)
-                        lastT = acc[4]
+                        val jump = lastT?.let { acc[5] - it }
+                        when {
+                            jump == null || jump > l.gap + colSpan -> avgPath.moveTo(cx, ay)
+                            jump > assumed -> { bridgePath.moveTo(lastX, lastY); bridgePath.lineTo(cx, ay); avgPath.moveTo(cx, ay) }
+                            else -> avgPath.lineTo(cx, ay)
+                        }
+                        lastT = acc[4]; lastX = cx; lastY = ay
                     }
+                    drawPath(bridgePath, l.color.copy(alpha = 0.45f), style = Stroke(1.4.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f))))
                     if (l.fill) drawPath(Path().apply { addPath(avgPath) }, l.color.copy(alpha = 0f))
                     drawPath(avgPath, l.color, style = Stroke(1.6.dp.toPx(), join = StrokeJoin.Round))
                     return@forEach
                 }
-                val path = Path(); var started = false; var prev: SeriesPoint? = null
+                // [path] is the whole line (for the fill); [solid] and [bridge] split it into measured and assumed joins.
+                val path = Path(); val solid = Path(); val bridge = Path(); var started = false; var prev: SeriesPoint? = null
+                val assumed = if (l.step || l.dashed) Double.MAX_VALUE else l.usualStep() * 1.5
                 pts.forEach { p ->
                     val px = x(p.t); val py = y(p.v)
-                    if (!started || (prev != null && p.t - prev!!.t > l.gap)) { path.moveTo(px, py); started = true }
-                    else { if (l.step) path.lineTo(px, y(prev!!.v)); path.lineTo(px, py) }
+                    if (!started || (prev != null && p.t - prev!!.t > l.gap)) { path.moveTo(px, py); solid.moveTo(px, py); started = true }
+                    else if (p.t - prev!!.t > assumed) {
+                        path.lineTo(px, py); bridge.moveTo(x(prev!!.t), y(prev!!.v)); bridge.lineTo(px, py); solid.moveTo(px, py)
+                    } else {
+                        if (l.step) { path.lineTo(px, y(prev!!.v)); solid.lineTo(px, y(prev!!.v)) }
+                        path.lineTo(px, py); solid.lineTo(px, py)
+                    }
                     prev = p
                 }
                 if (l.fill && pts.size > 1) {
                     val area = Path().apply { addPath(path); lineTo(x(pts.last().t), bottom); lineTo(x(pts.first().t), bottom); close() }
                     drawPath(area, l.color.copy(alpha = 0.12f))
                 }
-                drawPath(path, l.color, style = Stroke(min(l.width.toPx(), 2.dp.toPx()), join = StrokeJoin.Round,
+                drawPath(solid, l.color, style = Stroke(min(l.width.toPx(), 2.dp.toPx()), join = StrokeJoin.Round,
                     pathEffect = if (l.dashed) PathEffect.dashPathEffect(floatArrayOf(10f, 7f)) else null))
+                drawPath(bridge, l.color.copy(alpha = 0.45f), style = Stroke(1.4.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f))))
+                // Measured readings get a dot when they are few enough to see, so it is clear where the data is.
+                if (pts.size <= 40 && !l.dashed) pts.forEach { p -> drawCircle(l.color, 2.5.dp.toPx(), Offset(x(p.t), y(p.v))) }
                 if (pts.size == 1) drawCircle(l.color, l.width.toPx() * 1.5f, Offset(x(pts[0].t), y(pts[0].v)))
             }
             // X labels at a round step for the visible span.
@@ -301,7 +334,8 @@ fun InteractiveChart(
                 val w = tm.measure(text, axisStyle).size.width
                 // Keep edge labels inside the chart instead of half off it.
                 val lx = (px - w / 2f).coerceIn(0f, right - w.toFloat())
-                drawLine(c.line.copy(alpha = 0.5f), Offset(px, bottom), Offset(px, bottom + 3.dp.toPx()), 1f)
+                drawLine(c.line.copy(alpha = 0.7f), Offset(px, top), Offset(px, bottom), 1f)
+                drawLine(c.line, Offset(px, bottom), Offset(px, bottom + 3.dp.toPx()), 1f)
                 label(tm, text, lx, bottom + 9.dp.toPx(), c.inkSoft)
                 t += step
             }
@@ -316,6 +350,17 @@ fun InteractiveChart(
         if (view.second - view.first < xEnd - xStart - 1) {
             Spacer(Modifier.height(4.dp))
             MutedText("Zoomed to ${xLabel(view.first)}–${xLabel(view.second)}. Double-tap to zoom out.")
+        }
+        // Be open about filled-in stretches.
+        if (lines.any { it.bridges(view.first, view.second) }) {
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Canvas(Modifier.size(width = 22.dp, height = 8.dp)) {
+                    drawLine(c.inkSoft, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), 1.4.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f)))
+                }
+                Spacer(Modifier.width(6.dp))
+                MutedText("Dashed: no readings there. The line only joins the readings either side.")
+            }
         }
     }
 }

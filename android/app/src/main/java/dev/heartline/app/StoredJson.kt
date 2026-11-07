@@ -30,7 +30,11 @@ internal fun StoredWorkout.ui(): WorkoutUi {
     return WorkoutUi(start, j.optInt("duration_s"), j.optString("type", "Workout"), j.number("avg_hr")?.toInt(), j.number("max_hr")?.toInt(),
         j.number("calories")?.toInt(), j.number("steps")?.toInt(), j.number("distance_m")?.toInt(), points)
 }
+/** Bumped when the heart check analysis changes, so saved checks are worked out again (2: breathing ignores Mayer waves, 25 Hz preview). */
+internal const val ANALYSIS_VERSION = 2
+
 internal fun SessionResult.json(): String = JSONObject().apply {
+    put("analysis_version", ANALYSIS_VERSION)
     put("file", file); put("start", start); put("duration_s", durationS); put("signal_quality", signalQuality); put("usable_s", usableS)
     put("hr_bpm", hrBpm); put("beats", beats); put("respiratory_rate", respiratoryRate); put("preview_fs", previewFs)
     put("hrv", JSONObject().put("mean_rr_ms", hrv.meanRrMs).put("sdnn_ms", hrv.sdnnMs).put("rmssd_ms", hrv.rmssdMs)
@@ -50,7 +54,8 @@ internal fun sessionFromJson(text: String, id: String): SessionUi {
         rhythmStatus(r.optString("status")), r.optInt("ectopic_beats"), r.optJSONArray("notes")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty(),
         j.optJSONArray("rr")?.objects()?.map { RrUi(it.getDouble("t"), it.getDouble("rr_ms"), it.optBoolean("ectopic")) }.orEmpty(),
         j.optJSONArray("ppg_preview")?.numbers()?.map { it.toFloat() }?.toFloatArray() ?: FloatArray(0), j.number("preview_fs") ?: 25.0,
-        j.optJSONArray("beat_times")?.numbers()?.toDoubleArray() ?: DoubleArray(0), usableS = j.optDouble("usable_s", 0.0))
+        j.optJSONArray("beat_times")?.numbers()?.toDoubleArray() ?: DoubleArray(0), usableS = j.optDouble("usable_s", 0.0),
+        beatGood = j.optJSONArray("beat_good")?.let { a -> BooleanArray(a.length()) { a.optBoolean(it) } } ?: BooleanArray(0))
 }
 
 internal fun readRecording(file: File) = file.bufferedReader().use(::readRecordingCsv)

@@ -77,7 +77,7 @@ fun HeartScreen(controller: HeartlineController, nav: Navigator) {
 
     ScrollPage {
         // ---- Live ----
-        Column(Modifier.fillMaxWidth().paper().statusBarsPadding().padding(horizontal = Gutter).padding(top = 14.dp, bottom = 18.dp)) {
+        Column(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = Gutter).padding(top = 14.dp, bottom = 18.dp)) {
             Text("Heart", style = HL.type.title, color = c.ink)
             Gap(6)
             val todayDay by remember { controller.healthDay(LocalDate.now()) }.collectAsState(initial = null)

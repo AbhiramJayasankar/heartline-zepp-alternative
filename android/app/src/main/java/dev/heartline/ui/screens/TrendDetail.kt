@@ -55,13 +55,13 @@ fun TrendDetailScreen(controller: HeartlineController, key: String, nav: Navigat
             Stat("Range", "${fmt(values.min())}–${fmt(values.max())}", Modifier.weight(1f))
         }
         Gap(18)
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.surface).paper().padding(12.dp)) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.surface).padding(12.dp)) {
             val dayLabel = { t: Double -> Instant.ofEpochSecond(t.toLong()).atZone(zone).format(shortDay) }
             val dayLong = { t: Double -> Instant.ofEpochSecond(t.toLong()).atZone(zone).format(longDay) }
             val baseline = s.baseline?.let { b -> listOf(ChartLine(listOf(SeriesPoint(start, b), SeriesPoint(end, b)), c.inkSoft, "28-day baseline", s.unit, width = 1.dp, dashed = true, gap = 1e12, format = ::fmt)) } ?: emptyList()
             if (s.bars) InteractiveChart(baseline, start, end, height = 220.dp, bars = listOf(ChartBars(pts, 86_400.0, if (s.accent) c.pulse else c.ink, s.title, s.unit, format = ::fmt)),
                 xLabel = dayLabel, readoutX = dayLong, minSpan = 3 * 86_400.0, idleHint = "Touch a day for its value.")
-            else InteractiveChart(listOf(ChartLine(pts.map { SeriesPoint(it.t + 43_200, it.v) }, if (s.accent) c.pulse else c.ink, s.title, s.unit, gap = 2 * 86_400.0, format = ::fmt)) + baseline,
+            else InteractiveChart(listOf(ChartLine(pts.map { SeriesPoint(it.t + 43_200, it.v) }, if (s.accent) c.pulse else c.ink, s.title, s.unit, gap = 8 * 86_400.0, spacing = 86_400.0, format = ::fmt)) + baseline,
                 start, end, height = 220.dp, xLabel = dayLabel, readoutX = { dayLong(it - 43_200) }, minSpan = 3 * 86_400.0, idleHint = "Touch a day for its value.")
         }
         trendAbout(key)?.let { a ->

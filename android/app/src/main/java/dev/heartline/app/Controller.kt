@@ -344,6 +344,8 @@ data class SessionUi(
     val rr: List<RrUi>, val ppgPreview: FloatArray, val previewFs: Double, val beatTimes: DoubleArray,
     /** Seconds of clean beat intervals; the HRV trend needs 45. */
     val usableS: Double = 0.0,
+    /** For each of [beatTimes]: whether the beat passed the shape, size and movement checks. Empty for old checks. */
+    val beatGood: BooleanArray = BooleanArray(0),
 )
 data class CheckRunUi(val seconds: Int, val startedAt: Long, val analysing: Boolean, val result: SessionUi?, val error: String?)
 

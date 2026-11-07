@@ -10,7 +10,8 @@ fun analyzeSession(rec: Recording, name: String): SessionResult {
     val nn = DoubleArray(keep.size) { iv.rr[keep[it]] }
     val hr = if (nn.size >= 10) rounded(60 / mean(nn), 1).takeIf { it in 35.0..200.0 } else null
     val (resp, components) = breathingRate(beats, iv)
-    val previewStep = max(1, ceil(beats.filtered.size / 2000.0).toInt())
+    // About 2000 points, but never thinner than 25 Hz: a coarser waveform puts beat marks beside their peaks.
+    val previewStep = max(1, min(ceil(beats.filtered.size / 2000.0).toInt(), 4))
     val preview = DoubleArray((beats.filtered.size + previewStep - 1) / previewStep) { beats.filtered[it * previewStep] }
     val scale = if (preview.isEmpty()) 1.0 else percentile(DoubleArray(preview.size) { abs(preview[it]) }, 99.0).let {
         if (it == 0.0) 1.0 else it

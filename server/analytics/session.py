@@ -36,7 +36,7 @@ def analyze(rec: ppg.Recording, name: str) -> dict:
         "rr": [{"t": round(float(t), 3), "rr_ms": round(float(r) * 1000, 1), "ectopic": bool(e)}
                for t, r, e in zip(iv.t, iv.rr, iv.ectopic)],
         "ppg_preview": ppg.preview(beats),
-        "preview_fs": round(ppg.WORK_FS / max(1, int(np.ceil(len(beats.filtered) / 2000))), 3) if len(beats.filtered) else None,
+        "preview_fs": round(ppg.WORK_FS / ppg.preview_step(len(beats.filtered)), 3) if len(beats.filtered) else None,
         "beat_times": [round(float(t), 3) for t in beats.times],
         "beat_good": [bool(g) for g in beats.good],
         "motion": [{"t": round(float(t), 2), "g": round(float(g), 4)} for t, g in zip(mt[::step], mv[::step])],

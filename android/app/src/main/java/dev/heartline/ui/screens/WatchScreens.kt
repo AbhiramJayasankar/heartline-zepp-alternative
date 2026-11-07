@@ -142,7 +142,7 @@ fun SensorsScreen(controller: HeartlineController, nav: Navigator) {
         Gap(18)
 
         if (Sensor.PPG in s.selected) {
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).paper().border(1.dp, c.line, RoundedCornerShape(18.dp)).padding(12.dp)) {
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.surface).border(1.dp, c.line, RoundedCornerShape(18.dp)).padding(12.dp)) {
                 Row(verticalAlignment = Alignment.Bottom) {
                     Text("Optical pulse", style = HL.type.label, color = c.inkSoft, modifier = Modifier.weight(1f))
                     Text(s.ppgBpm?.let { "$it bpm" } ?: "–", style = HL.type.stat.copy(fontSize = 20.sp), color = c.pulse)

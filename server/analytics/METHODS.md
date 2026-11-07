@@ -61,10 +61,17 @@ Amazfit GTR 2e, not a medical device. Each section ends with a trust label:
 
 - Three respiratory modulations of the PPG (Karlen et al. 2013; Charlton et al. reviews): RIIV (baseline
   intensity at each beat), RIAV (beat amplitude), RIFV (beat interval, i.e. respiratory sinus arrhythmia).
-  Each is resampled at 4 Hz, band-passed 0.1–0.5 Hz, and its spectral peak taken; estimates are fused weighted
-  by peak sharpness, keeping the agreeing pair when one disagrees by > 4 br/min (Karlen's "smart fusion" idea;
-  newer work fuses with Kalman smoothers, Khreis et al. 2019, or synchrosqueezing, Dehkordi et al. 2018).
-  **adapted**; needs ≥ 30 s of still signal. Real sessions gave 7–9 br/min (plausible for seated rest).
+- **Mayer waves.** On the GTR 2e a ~0.1 Hz (6/min) blood-pressure oscillation dominates RIIV and RIAV. The first
+  version searched 0.1–0.5 Hz and fused the agreeing pair, so it locked onto that wave: every real check read
+  6–9 br/min. On 7 Nov 2026 the wearer counted ~12/min by hand right after a 5-minute check the app called 7.1;
+  RIAV and RIFV in that recording peak at 14.7, and counting breath cycles minute by minute gives 13–18.
+- Now: each series is resampled at 4 Hz, detrended, band-passed 0.13–0.6 Hz twice (order-2 Butterworth, zero
+  phase), and Welch-averaged (64 s Hann windows, half overlap, 4096-point FFT). Only true local peaks between
+  0.15 and 0.5 Hz (9–30/min) count. RIAV and RIFV vote: if their peaks agree within 3/min (and one stands at
+  least 2x above its band median) they are averaged; otherwise the peak of their summed normalised spectra is
+  used, and nothing is reported when that peak is under 2x the median. RIIV is still reported, without a vote.
+- Results on the five real checks: 14.7, 13.4, 14.9, 13.2, 14.7 br/min (were 7.1, 7.0, 7.3, 6.1, 8.8).
+  Breathing slower than 9/min cannot be read this way. **adapted**; needs ≥ 30 s of still signal.
 
 ## Daily scores (`daily.py`)
 

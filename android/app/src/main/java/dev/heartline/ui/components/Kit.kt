@@ -249,8 +249,8 @@ fun DayBars(points: List<DayPoint>, color: Color, modifier: Modifier = Modifier,
             }
         }
         Canvas(Modifier.fillMaxWidth().height(height).semantics { contentDescription = spoken }
-            .pointerInput(points) { detectTapGestures { o -> val i = ((o.x / size.width) * points.size).toInt().coerceIn(0, points.lastIndex); picked = if (picked == i) null else i } }
-            .pointerInput(points) { detectHorizontalDragGestures { ch, _ -> picked = ((ch.position.x / size.width) * points.size).toInt().coerceIn(0, points.lastIndex); ch.consume() } }) {
+            .pointerInput(points) { detectTapGestures { o -> val i = ((o.x / (size.width - 30.dp.toPx())) * points.size).toInt().coerceIn(0, points.lastIndex); picked = if (picked == i) null else i } }
+            .pointerInput(points) { detectHorizontalDragGestures { ch, _ -> picked = ((ch.position.x / (size.width - 30.dp.toPx())) * points.size).toInt().coerceIn(0, points.lastIndex); ch.consume() } }) {
             if (points.isEmpty()) return@Canvas
             val padB = 18.dp.toPx(); val plotH = size.height - padB - 4.dp.toPx()
             val vals = valid + listOfNotNull(reference)
@@ -258,13 +258,28 @@ fun DayBars(points: List<DayPoint>, color: Color, modifier: Modifier = Modifier,
             var lo = if (zeroBased) 0.0 else vals.min(); var hi = vals.max()
             if (!zeroBased) { val pad = (hi - lo).coerceAtLeast(1.0) * 0.15; lo -= pad; hi += pad }
             if (hi <= lo) hi = lo + 1
-            val slot = size.width / points.size
+            val axisW = 30.dp.toPx()
+            val slot = (size.width - axisW) / points.size
             fun x(i: Int) = slot * i + slot / 2
             fun y(v: Double) = 4.dp.toPx() + (1 - ((v - lo) / (hi - lo)).toFloat()) * plotH
+            // Gridlines only at the labelled values.
+            dayTicks(lo, hi).forEach { v ->
+                drawLine(c.line, Offset(0f, y(v)), Offset(size.width - axisW, y(v)), 1f)
+                label(tm, format(v), size.width - axisW + 4.dp.toPx(), y(v) - 7.dp.toPx(), c.inkSoft)
+            }
             if (line) {
-                val path = Path(); var started = false; var prev = -2
-                points.forEachIndexed { i, p -> p.value?.let { v -> if (!started || i - prev > 1) path.moveTo(x(i), y(v)) else path.lineTo(x(i), y(v)); started = true; prev = i } }
+                // Measured days solid; days with no reading are bridged with a faded dashed line (see the note below).
+                val path = Path(); val bridge = Path(); var started = false; var prev = -2; var prevV = 0.0
+                points.forEachIndexed { i, p -> p.value?.let { v ->
+                    if (!started) path.moveTo(x(i), y(v))
+                    else if (i - prev > 1) { bridge.moveTo(x(prev), y(prevV)); bridge.lineTo(x(i), y(v)); path.moveTo(x(i), y(v)) }
+                    else path.lineTo(x(i), y(v))
+                    started = true; prev = i; prevV = v
+                } }
                 drawPath(path, color, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round))
+                drawPath(bridge, color.copy(alpha = 0.45f), style = Stroke(1.4.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f))))
+                // A hollow tick on the baseline marks each day without a reading.
+                points.forEachIndexed { i, p -> if (p.value == null && i > 0 && i < points.lastIndex) drawCircle(c.inkSoft, 2.5.dp.toPx(), Offset(x(i), size.height - padB - 2.dp.toPx()), style = Stroke(1.dp.toPx())) }
                 points.forEachIndexed { i, p -> p.value?.let { v ->
                     val last = i == points.lastIndex && highlightLast
                     drawCircle(if (picked == i) c.ink else color, (if (last || picked == i) 4.5f else 3f).dp.toPx(), Offset(x(i), y(v)))
@@ -277,7 +292,7 @@ fun DayBars(points: List<DayPoint>, color: Color, modifier: Modifier = Modifier,
                     drawRoundRect(color.copy(alpha = alpha), Offset(x(i) - bw / 2, top), Size(bw, max(2f, base - top)), CornerRadius(bw / 3))
                 } }
             }
-            reference?.let { r -> drawLine(c.inkSoft, Offset(0f, y(r)), Offset(size.width, y(r)), 1.2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f))) }
+            reference?.let { r -> drawLine(c.inkSoft, Offset(0f, y(r)), Offset(size.width - axisW, y(r)), 1.2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f))) }
             // Day initials under the bars, every day if they fit, otherwise every few.
             val every = if (points.size <= 14) 1 else (points.size / 7)
             points.forEachIndexed { i, p ->
@@ -286,9 +301,15 @@ fun DayBars(points: List<DayPoint>, color: Color, modifier: Modifier = Modifier,
                 label(tm, label, x(i), size.height - padB / 2, if (i == points.lastIndex) c.ink else c.inkSoft, center = true)
             }
         }
-        if (points.isNotEmpty()) Row(Modifier.fillMaxWidth()) {
+        if (points.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(end = 30.dp)) {
             Text(points.first().date.format(dayShort), style = HL.type.small.copy(fontSize = 11.sp), color = c.inkSoft, modifier = Modifier.weight(1f))
             Text(points.last().date.format(dayShort), style = HL.type.small.copy(fontSize = 11.sp), color = c.inkSoft)
+        }
+        val missing = points.drop(1).dropLast(1).count { it.value == null }
+        if (line && missing > 0 && valid.size >= 2) {
+            Spacer(Modifier.height(4.dp))
+            Text("Dashed: $missing day${if (missing > 1) "s" else ""} with no reading (hollow dots). The line only joins the days either side.",
+                style = HL.type.small.copy(fontSize = 12.sp), color = c.inkSoft)
         }
     }
 }
@@ -391,3 +412,15 @@ fun hm(min: Int?): String = min?.let { "${it / 60}h ${"%02d".format(it % 60)}m" 
 fun List<DayPoint>.latest(): DayPoint? = lastOrNull { it.value != null }
 fun List<DayPoint>.avgOf(days: Int = size): Double? = takeLast(days).mapNotNull { it.value }.takeIf { it.isNotEmpty() }?.average()
 fun shortDate(d: LocalDate): String = d.format(dayShort)
+
+/** Two or three round values inside [lo]..[hi] for a small chart's axis. */
+private fun dayTicks(lo: Double, hi: Double): List<Double> {
+    val raw = (hi - lo) / 3
+    if (raw <= 0) return emptyList()
+    val mag = Math.pow(10.0, Math.floor(Math.log10(raw)))
+    val step = listOf(1.0, 2.0, 2.5, 5.0, 10.0).map { it * mag }.first { it >= raw }
+    var v = Math.ceil(lo / step) * step
+    val out = ArrayList<Double>()
+    while (v <= hi + 1e-9) { if (v > lo + (hi - lo) * 0.04) out.add(v); v += step }
+    return out
+}

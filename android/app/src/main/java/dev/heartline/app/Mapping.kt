@@ -61,7 +61,7 @@ fun DailyResult.trendsUi(health: Map<String, Map<LocalDate, Double>>): TrendsUi 
 fun SessionResult.sessionUi(id: String = file) = SessionUi(id, start.toLong(), durationS, signalQuality, hrBpm,
     hrv.rmssdMs, hrv.sdnnMs, hrv.pnn50, hrv.stressIndex, hrv.lfHf, respiratoryRate, rhythmStatus(rhythm.status),
     rhythm.ectopicBeats, rhythm.notes, rr.map { RrUi(it.t, it.rrMs, it.ectopic) }, ppgPreview.map { it.toFloat() }.toFloatArray(),
-    previewFs ?: 25.0, beatTimes.toDoubleArray(), usableS)
+    previewFs ?: 25.0, beatTimes.toDoubleArray(), usableS, beatGood.toBooleanArray())
 
 fun quietNow(minute: Int, start: Int?, end: Int?): Boolean {
     if (start == null || end == null || start == end) return false

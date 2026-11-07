@@ -194,11 +194,16 @@ def signal_quality(beats: Beats) -> float:
     return float(beats.good.mean()) if len(beats.good) else 0.0
 
 
+def preview_step(n: int, max_points: int = 2000) -> int:
+    """Keep about max_points samples, but never thin below 25 Hz: coarser waveforms put beat marks beside their peaks."""
+    return max(1, min(int(np.ceil(n / max_points)), 4))
+
+
 def preview(beats: Beats, max_points: int = 2000) -> list[float]:
     y = beats.filtered
     if not len(y):
         return []
-    step = max(1, int(np.ceil(len(y) / max_points)))
+    step = preview_step(len(y), max_points)
     v = y[::step]
     scale = np.percentile(np.abs(v), 99) or 1.0
     return [round(float(a / scale), 4) for a in v]

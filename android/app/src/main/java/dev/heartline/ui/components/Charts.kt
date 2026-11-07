@@ -1,5 +1,12 @@
 package dev.heartline.ui.components
 
+import androidx.compose.material3.Text
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.layout.Column
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
@@ -72,7 +79,7 @@ fun HrTraceChart(points: List<HrPoint>, windowS: Long, nowS: Long, modifier: Mod
     val end = (nowS / 60 + 1) * 60.0
     val start = end - windowS
     val pts = points.filter { it.ts >= start && it.bpm > 0 }.map { SeriesPoint(it.ts.toDouble(), it.bpm.toDouble()) }
-    InteractiveChart(listOf(ChartLine(pts, c.pulse, "Heart rate", "bpm", gap = 180.0)), start, end, modifier, height = 200.dp, minSpan = 60.0,
+    InteractiveChart(listOf(ChartLine(pts, c.pulse, "Heart rate", "bpm", gap = 180.0, spacing = 60.0)), start, end, modifier, height = 200.dp, minSpan = 60.0,
         idleHint = if (pts.isEmpty()) "No readings in this window yet." else "Touch for the reading at a moment. Pinch to zoom.")
 }
 
@@ -199,70 +206,156 @@ fun DayTimeline(minutes: List<MinuteUi>, dayStart: Long, modifier: Modifier = Mo
 }
 
 /** Beat-to-beat intervals over the recording; extra beats in red. */
+/** Round axis values every [step] from [lo] to [hi]. */
+private fun ticksEvery(lo: Double, hi: Double, step: Double): List<Double> {
+    val out = ArrayList<Double>(); var v = kotlin.math.ceil(lo / step) * step
+    while (v <= hi + 1e-9) { out.add(v); v += step }
+    return out
+}
+/** A step giving 3 to 6 round ticks across [span]. */
+private fun niceStep(span: Double, targets: Int = 4): Double {
+    val raw = span / targets
+    val mag = Math.pow(10.0, Math.floor(Math.log10(raw)))
+    return listOf(1.0, 2.0, 2.5, 5.0, 10.0).map { it * mag }.first { it >= raw }
+}
+/** The range most gaps fall in (2nd to 98th percentile, padded), so one bad gap doesn't squash the chart. */
+private fun rrRange(rr: List<RrUi>): Pair<Double, Double> {
+    val v = rr.map { it.rrMs }.sorted()
+    val lo = v[(v.size * 0.02).toInt()]; val hi = v[((v.size - 1) * 0.98).toInt()]
+    val pad = max(20.0, (hi - lo) * 0.12)
+    return (lo - pad) to (hi + pad)
+}
+/** A gap more than 30% off the median is one Heartline set aside (a missed beat or movement). */
+private fun outlier(v: Double, median: Double) = kotlin.math.abs(v - median) / median > 0.30
+
+/**
+ * Every gap between beats through the check. Gridlines sit at the labelled values. Gaps Heartline set aside are hollow,
+ * and any outside the chart's range are pinned to its edge with an arrow-like mark, so they don't squash the rest.
+ */
 @Composable
 fun Tachogram(rr: List<RrUi>, modifier: Modifier = Modifier) {
     val c = HL.colors
     val tm = rememberTextMeasurer()
-    Canvas(modifier.fillMaxWidth().height(170.dp)) {
+    Canvas(modifier.fillMaxWidth().height(180.dp)) {
         if (rr.size < 2) return@Canvas
-        val padR = 46.dp.toPx(); val padB = 16.dp.toPx()
-        val lo = rr.minOf { it.rrMs } - 30; val hi = rr.maxOf { it.rrMs } + 30
+        val padR = 46.dp.toPx(); val padB = 16.dp.toPx(); val padT = 6.dp.toPx()
+        val (lo, hi) = rrRange(rr)
+        val med = rr.map { it.rrMs }.sorted()[rr.size / 2]
         val tMax = rr.last().t.coerceAtLeast(1.0)
         val w = size.width - padR; val h = size.height - padB
         fun x(t: Double) = (t / tMax).toFloat() * w
-        fun y(v: Double) = (1 - ((v - lo) / (hi - lo)).toFloat()) * h
-        val path = Path()
-        rr.forEachIndexed { i, p -> if (i == 0) path.moveTo(x(p.t), y(p.rrMs)) else path.lineTo(x(p.t), y(p.rrMs)) }
-        drawPath(path, c.ink, style = Stroke(1.5.dp.toPx(), join = StrokeJoin.Round))
-        rr.forEach { p -> drawCircle(if (p.ectopic) c.pulse else c.ink, if (p.ectopic) 4.dp.toPx() else 2.dp.toPx(), Offset(x(p.t), y(p.rrMs))) }
-        listOf(lo + 30, (lo + hi) / 2, hi - 30).forEach { v -> label(tm, "${v.toInt()} ms", w + 6.dp.toPx(), y(v), c.inkSoft) }
-        label(tm, "0 s", 0f, size.height - padB / 2, c.inkSoft)
-        label(tm, "${tMax.toInt()} s", w, size.height - padB / 2, c.inkSoft, alignEnd = true)
+        fun y(v: Double) = padT + (1 - ((v.coerceIn(lo, hi) - lo) / (hi - lo)).toFloat()) * (h - padT)
+        ticksEvery(lo, hi, niceStep(hi - lo)).forEach { v ->
+            drawLine(c.line, Offset(0f, y(v)), Offset(w, y(v)), 1f)
+            label(tm, "${v.toInt()} ms", w + 6.dp.toPx(), y(v) - 6.dp.toPx(), c.inkSoft)
+        }
+        ticksEvery(0.0, tMax, niceStep(tMax, 5)).forEach { t ->
+            drawLine(c.line.copy(alpha = 0.7f), Offset(x(t), padT), Offset(x(t), h), 1f)
+            label(tm, "${t.toInt()} s", x(t), size.height - padB / 2, c.inkSoft, center = t > 0 && x(t) < w - 20f)
+        }
+        // The line joins clean gaps only; set-aside ones break it.
+        val path = Path(); var open = false
+        rr.forEach { p ->
+            val bad = p.ectopic || outlier(p.rrMs, med)
+            if (bad) { open = false; return@forEach }
+            if (!open) { path.moveTo(x(p.t), y(p.rrMs)); open = true } else path.lineTo(x(p.t), y(p.rrMs))
+        }
+        drawPath(path, c.ink, style = Stroke(1.3.dp.toPx(), join = StrokeJoin.Round))
+        rr.forEach { p ->
+            val o = Offset(x(p.t), y(p.rrMs))
+            when {
+                p.ectopic -> drawCircle(c.pulse, 4.dp.toPx(), o)
+                outlier(p.rrMs, med) -> drawCircle(c.inkSoft, 4.dp.toPx(), o, style = Stroke(1.5.dp.toPx()))
+                else -> drawCircle(c.ink, 1.8.dp.toPx(), o)
+            }
+        }
     }
 }
 
-/** Each interval against the next. A tight cigar along the diagonal is a steady rhythm; a cloud is irregular. */
+/** Each gap against the next. A tight cigar along the diagonal is a steady rhythm; a cloud is irregular. */
 @Composable
 fun PoincarePlot(rr: List<RrUi>, modifier: Modifier = Modifier) {
     val c = HL.colors
     val tm = rememberTextMeasurer()
     Canvas(modifier.fillMaxWidth().aspectRatio(1f)) {
         if (rr.size < 3) return@Canvas
-        val lo = rr.minOf { it.rrMs } - 40; val hi = rr.maxOf { it.rrMs } + 40
-        val pad = 24.dp.toPx(); val s = size.width - pad * 1.4f
-        fun p(v: Double) = pad + ((v - lo) / (hi - lo)).toFloat() * s
-        drawLine(c.gridMajor, Offset(p(lo), size.height - p(lo)), Offset(p(hi), size.height - p(hi)), 1f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f, 5f)))
-        for (i in 0 until rr.size - 1) {
-            val ect = rr[i].ectopic || rr[i + 1].ectopic
-            drawCircle(if (ect) c.pulse else c.ink.copy(alpha = 0.55f), if (ect) 4.dp.toPx() else 3.dp.toPx(), Offset(p(rr[i].rrMs), size.height - p(rr[i + 1].rrMs)))
+        val (lo, hi) = rrRange(rr)
+        val med = rr.map { it.rrMs }.sorted()[rr.size / 2]
+        val padL = 40.dp.toPx(); val padB = 30.dp.toPx(); val padT = 22.dp.toPx(); val padR = 6.dp.toPx()
+        val side = min(size.width - padL - padR, size.height - padB - padT)
+        fun px(v: Double) = padL + ((v.coerceIn(lo, hi) - lo) / (hi - lo)).toFloat() * side
+        fun py(v: Double) = padT + side - ((v.coerceIn(lo, hi) - lo) / (hi - lo)).toFloat() * side
+        ticksEvery(lo, hi, niceStep(hi - lo)).forEach { v ->
+            drawLine(c.line, Offset(px(v), padT), Offset(px(v), padT + side), 1f)
+            drawLine(c.line, Offset(padL, py(v)), Offset(padL + side, py(v)), 1f)
+            label(tm, "${v.toInt()}", px(v), padT + side + 8.dp.toPx(), c.inkSoft, center = true)
+            label(tm, "${v.toInt()}", padL - 4.dp.toPx(), py(v) - 6.dp.toPx(), c.inkSoft, alignEnd = true)
         }
-        label(tm, "interval n, ms", size.width / 2, size.height - 6.dp.toPx(), c.inkSoft, center = true)
-        label(tm, "${(lo + 40).toInt()}", pad, size.height - 18.dp.toPx(), c.inkSoft)
-        label(tm, "${(hi - 40).toInt()}", p(hi - 40), size.height - 18.dp.toPx(), c.inkSoft, alignEnd = true)
+        drawLine(c.gridMajor, Offset(px(lo), py(lo)), Offset(px(hi), py(hi)), 1.2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f, 5f)))
+        for (i in 0 until rr.size - 1) {
+            val a = rr[i]; val b = rr[i + 1]
+            val o = Offset(px(a.rrMs), py(b.rrMs))
+            when {
+                a.ectopic || b.ectopic -> drawCircle(c.pulse, 4.dp.toPx(), o)
+                outlier(a.rrMs, med) || outlier(b.rrMs, med) -> drawCircle(c.inkSoft, 3.5.dp.toPx(), o, style = Stroke(1.4.dp.toPx()))
+                else -> drawCircle(c.ink.copy(alpha = 0.55f), 2.6.dp.toPx(), o)
+            }
+        }
+        label(tm, "this gap, ms", padL + side / 2, size.height - 8.dp.toPx(), c.inkSoft, center = true)
+        label(tm, "next gap, ms", 0f, 0f, c.inkSoft)
     }
 }
 
 /** The last 15 s of the filtered pulse with each detected beat marked. */
+/**
+ * The filtered pulse with every beat Heartline found: filled dots were used, hollow ones were rejected (odd shape or
+ * size, or the wrist was moving). Shows 15 s at a time; drag sideways to move through the whole recording.
+ */
 @Composable
-fun BeatsPlot(preview: FloatArray, fs: Double, beatTimes: DoubleArray, modifier: Modifier = Modifier) {
+fun BeatsPlot(preview: FloatArray, fs: Double, beatTimes: DoubleArray, modifier: Modifier = Modifier, beatGood: BooleanArray = BooleanArray(0)) {
     val c = HL.colors
-    Canvas(modifier.fillMaxWidth().height(120.dp)) {
-        if (preview.size < 2 || fs <= 0) return@Canvas
-        val dur = preview.size / fs
-        val show = min(15.0, dur)
-        val from = max(0, (preview.size - show * fs).toInt())
-        val part = preview.copyOfRange(from, preview.size)
-        val t0 = from / fs
-        val lo = part.min(); val hi = part.max().coerceAtLeast(lo + 1e-3f)
-        fun x(t: Double) = ((t - t0) / show).toFloat() * size.width
-        fun y(v: Float) = 6f + (1 - (v - lo) / (hi - lo)) * (size.height - 12f)
-        val path = Path()
-        part.forEachIndexed { i, v -> val px = x(t0 + i / fs); if (i == 0) path.moveTo(px, y(v)) else path.lineTo(px, y(v)) }
-        drawPath(path, c.ink, style = Stroke(1.5.dp.toPx(), join = StrokeJoin.Round))
-        beatTimes.filter { it >= t0 }.forEach { bt ->
-            val i = min(preview.size - 1, (bt * fs).toInt())
-            drawCircle(c.pulse, 3.dp.toPx(), Offset(x(bt), y(preview[i])))
+    val tm = rememberTextMeasurer()
+    if (preview.size < 2 || fs <= 0) return
+    val dur = preview.size / fs
+    val show = min(15.0, dur)
+    var from by remember(preview) { mutableStateOf(max(0.0, dur - show)) }
+    Column(modifier.fillMaxWidth()) {
+        Canvas(Modifier.fillMaxWidth().height(140.dp).pointerInput(preview) {
+            detectHorizontalDragGestures { ch, drag -> from = (from - drag / size.width * show).coerceIn(0.0, max(0.0, dur - show)); ch.consume() }
+        }) {
+            val axisH = 16.dp.toPx()
+            val i0 = (from * fs).toInt().coerceIn(0, preview.size - 1)
+            val i1 = ((from + show) * fs).toInt().coerceIn(i0 + 1, preview.size)
+            val part = preview.copyOfRange(i0, i1)
+            val lo = part.min(); val hi = part.max().coerceAtLeast(lo + 1e-3f)
+            fun x(t: Double) = ((t - from) / show).toFloat() * size.width
+            fun y(v: Float) = 6f + (1 - (v - lo) / (hi - lo)) * (size.height - axisH - 12f)
+            // A gridline at every whole second (labelled every 5), the only grid on this chart.
+            var sec = kotlin.math.ceil(from)
+            while (sec <= from + show) {
+                val px = x(sec)
+                drawLine(c.line.copy(alpha = if (sec.toInt() % 5 == 0) 0.9f else 0.4f), Offset(px, 0f), Offset(px, size.height - axisH), 1f)
+                if (sec.toInt() % 5 == 0) label(tm, "${sec.toInt()} s", px, size.height - axisH / 2, c.inkSoft, center = true)
+                sec += 1.0
+            }
+            val path = Path()
+            part.forEachIndexed { k, v -> val px = x((i0 + k) / fs); if (k == 0) path.moveTo(px, y(v)) else path.lineTo(px, y(v)) }
+            drawPath(path, c.ink, style = Stroke(1.5.dp.toPx(), join = StrokeJoin.Round))
+            beatTimes.forEachIndexed { b, bt ->
+                if (bt < from || bt > from + show) return@forEachIndexed
+                // The wave's value at the beat's exact time, so the dot sits on the curve.
+                val f = bt * fs; val k = f.toInt().coerceIn(0, preview.size - 2); val w = (f - k).toFloat().coerceIn(0f, 1f)
+                val v = preview[k] * (1 - w) + preview[k + 1] * w
+                val good = beatGood.getOrNull(b) ?: true
+                if (good) drawCircle(c.pulse, 3.5.dp.toPx(), Offset(x(bt), y(v)))
+                else drawCircle(c.inkSoft, 4.dp.toPx(), Offset(x(bt), y(v)), style = Stroke(1.6.dp.toPx()))
+            }
         }
+        val used = if (beatGood.isEmpty()) beatTimes.size else beatGood.count { it }
+        Text("${"%.0f".format(from)}–${"%.0f".format(from + show)} s of ${"%.0f".format(dur)} s" + if (dur > show) " · drag to move" else "",
+            style = HL.type.small.copy(fontSize = 12.sp), color = c.inkSoft)
+        if (beatGood.isNotEmpty()) Text("$used of ${beatTimes.size} beats used (filled); ${beatTimes.size - used} rejected (hollow) for an odd shape or size, or movement.",
+            style = HL.type.small.copy(fontSize = 12.sp), color = c.inkSoft)
     }
 }
 

@@ -105,7 +105,7 @@ fun CheckRunScreen(controller: HeartlineController, nav: Navigator) {
     val left = if (r == null) 0 else (r.seconds - elapsed).toInt().coerceAtLeast(0)
     val progress by animateFloatAsState(if (r == null) 0f else (elapsed / r.seconds).coerceIn(0f, 1f), tween(250), label = "progress")
 
-    Column(Modifier.fillMaxSize().paper().statusBarsPadding().verticalScroll(rememberScrollState()).padding(Gutter)) {
+    Column(Modifier.fillMaxSize().background(HL.colors.paper).statusBarsPadding().verticalScroll(rememberScrollState()).padding(Gutter)) {
         Text("Heart check", style = HL.type.title, color = c.ink)
         Gap(6)
         MutedText(if (r?.analysing == true) "Finding every beat…" else "Rest your arm, breathe normally and keep still.")
@@ -190,7 +190,7 @@ fun CheckResultScreen(controller: HeartlineController, id: String, nav: Navigato
             Gap(6)
             Tachogram(s.rr)
             Gap(6)
-            MutedText("Each dot is the gap before one beat. The gaps lengthen as you breathe out and shorten as you breathe in; that gentle wave is healthy. Sudden single spikes are extra beats or movement.")
+            MutedText("Each dot is the gap before one beat. The gaps lengthen as you breathe out and shorten as you breathe in; that gentle wave is healthy. Red dots are extra beats; hollow ones are gaps Heartline set aside (a missed beat or movement), pinned to the edge if they fall off the scale.")
         }
         Gap(14)
         Panel {
@@ -198,13 +198,13 @@ fun CheckResultScreen(controller: HeartlineController, id: String, nav: Navigato
             Gap(6)
             PoincarePlot(s.rr)
             Gap(6)
-            MutedText("Each dot pairs one beat interval with the next. A tight cigar along the diagonal is a steady rhythm; a scattered cloud means the rhythm is irregular.")
+            MutedText("Each dot pairs one gap between beats with the next. A tight cigar along the dashed diagonal is a steady rhythm; its length shows how much your heart rate swings with breathing, its width the beat-to-beat changes (RMSSD). A scattered cloud means an irregular rhythm. Hollow dots involve a set-aside gap.")
         }
         Gap(14)
         Panel {
             Text("Detected beats", style = HL.type.label, color = c.inkSoft)
             Gap(6)
-            BeatsPlot(s.ppgPreview, s.previewFs, s.beatTimes)
+            BeatsPlot(s.ppgPreview, s.previewFs, s.beatTimes, beatGood = s.beatGood)
             Gap(6)
             MutedText("The raw light signal from the watch's green LED, filtered. Each dot is a beat Heartline found; smooth, even waves mean a good fit and a still arm.")
         }

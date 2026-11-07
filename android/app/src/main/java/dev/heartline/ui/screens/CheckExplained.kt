@@ -154,10 +154,12 @@ fun CheckExplained(s: SessionUi, history: List<SessionUi>, resting: Double?, age
     Metric("Breathing", s.respiratoryRate?.let { "%.1f".format(it) }, "/min",
         verdict = s.respiratoryRate?.let { if (it < 9 || it > 20) Level.INFO else Level.OK },
         what = "Breaths per minute, estimated from your pulse alone.",
-        how = "Each breath nudges the pulse three ways: the baseline drifts, beats get taller and shorter, and beat gaps stretch and shrink. Heartline finds the strongest rhythm between 6 and 30 a minute in each and averages the ones that agree within 4.",
+        how = "Each breath nudges the pulse: beat gaps stretch and shrink, and beats get taller and shorter. A slower blood-pressure wave (about 6 a minute, " +
+            "the Mayer wave) moves the pulse too, and used to be mistaken for breathing, so Heartline filters it out and looks only between 9 and 30 a minute. " +
+            "When beat timing and beat height agree within 3 a minute it averages them; otherwise it takes the peak they share, and reports nothing if neither is clear.",
         yours = yours(history) { it.respiratoryRate }?.let { "Your clean checks: ${"%.1f".format(it.avg)} on average, ${"%.1f".format(it.low)}–${"%.1f".format(it.high)}." },
         typical = "12–20 breaths a minute at rest. Slow breathing on purpose (about 6 a minute) raises HRV a lot, which is why it calms people down.",
-        worth = "Only if it is fast at rest most of the time. Readings near 6 or 30 are at the edge of what can be detected, so double-check them.")
+        worth = "Only if it is fast at rest most of the time. It is an estimate, usually within 2 or 3 breaths a minute of a hand count; breathing slower than 9 a minute can't be read from the pulse.")
     Metric("LF/HF", s.lfHf?.let { "%.2f".format(it) }, null, verdict = s.lfHf?.let { Level.INFO },
         what = "The balance between slower (0.04–0.15 Hz) and faster (0.15–0.4 Hz, the breathing band) swings in your heart rate.",
         how = "A Lomb-Scargle spectrum of the beat gaps, split into the two bands. It needs at least two minutes of beats" + if (s.durationS < 120) ", so this ${s.durationS.roundToInt()} s check has none." else ".",
