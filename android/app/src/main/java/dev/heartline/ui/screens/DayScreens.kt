@@ -281,22 +281,24 @@ private fun BodyDay(d: HealthDayUi, live: Boolean, onRefresh: () -> Unit, nav: N
     val c = HL.colors
     // While today's page is open, fetch the newest temperature every minute (the service otherwise does every 5 minutes).
     if (live) LaunchedEffect(Unit) { while (true) { onRefresh(); delay(60_000) } }
-    Column(Modifier.section(nav, "spo2")) { SectionTitle("Blood oxygen (SpO2)") }; Gap(8)
+    FocusTitle(nav, "spo2", "Blood oxygen (SpO2)"); Gap(2)
     if (d.spo2.isEmpty()) MutedText("No SpO2 readings this day. The watch records SpO2 during sleep and when you measure on the watch.")
     else {
         Stats(listOf(Triple("Average", d.spo2Avg?.let { "%.1f".format(it) } ?: "–", "%"), Triple("Lowest", d.spo2Min?.roundToInt()?.toString() ?: "–", "%"), Triple("Readings", fmtInt(d.spo2.size), null)))
         Gap(14)
         ChartPanel("SpO2 (%)") {
             InteractiveChart(listOf(ChartLine(d.spo2, c.sleepDeep, "SpO2", "%", gap = 1800.0)),
-                d.dayStart.toDouble(), d.dayStart + 86_400.0, height = 170.dp, yMin = 85.0, yMax = 100.0,
-                bands = listOf(ChartBand(95.0, 100.0, c.ok.copy(alpha = 0.10f)), ChartBand(90.0, 95.0, c.warn.copy(alpha = 0.10f)), ChartBand(85.0, 90.0, c.pulse.copy(alpha = 0.10f))),
+                // Down to 85%, or lower when a reading is: nothing drawn below the axis.
+                d.dayStart.toDouble(), d.dayStart + 86_400.0, height = 170.dp, yMin = minOf(85.0, kotlin.math.floor((d.spo2Min ?: 85.0) - 1)), yMax = 100.0,
+                bands = listOf(ChartBand(95.0, 100.0, c.ok.copy(alpha = 0.10f)), ChartBand(90.0, 95.0, c.warn.copy(alpha = 0.10f)),
+                    ChartBand(minOf(85.0, kotlin.math.floor((d.spo2Min ?: 85.0) - 1)), 90.0, c.pulse.copy(alpha = 0.10f))),
                 spans = sleepAndWorkoutSpans(d, c))
         }
         Gap(14); BandBar(d.spo2Bands) { spo2Color(it, c) }
         Gap(8); MutedText("Wrist SpO2 is a wellness estimate. Brief dips during sleep are common; repeated readings under 90% are worth mentioning to a doctor.")
     }
     spo2?.let { TwoWeeks(it, nav, c.sleepDeep) }
-    Gap(28); Column(Modifier.section(nav, "temp")) { SectionTitle("Temperature") }; Gap(8)
+    Gap(18); FocusTitle(nav, "temp", "Temperature"); Gap(2)
     if (live) d.temperature.lastOrNull()?.let { p -> TemperatureNow(p, onRefresh); Gap(14) }
     if (d.temperature.isEmpty()) MutedText("No temperature readings this day.")
     else {

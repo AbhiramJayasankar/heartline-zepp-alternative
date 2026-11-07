@@ -217,3 +217,22 @@ fun Modifier.section(nav: dev.heartline.ui.Navigator, key: String): Modifier {
     return this.then(androidx.compose.ui.Modifier.onGloballyPositioned { top = it.positionInRoot().y })
         .then(if (flash) androidx.compose.ui.Modifier.border(2.dp, HL.colors.pulse, androidx.compose.foundation.shape.RoundedCornerShape(18.dp)) else androidx.compose.ui.Modifier)
 }
+
+/**
+ * A section title that links can jump to. Its outline reaches 12 dp past the text on each side (into the page gutter)
+ * with room above and below, so the highlight frames the title like a card instead of clipping the letters.
+ */
+@Composable
+fun FocusTitle(nav: dev.heartline.ui.Navigator, key: String, title: String) {
+    val bleed = 12.dp
+    androidx.compose.foundation.layout.Box(
+        Modifier.fillMaxWidth()
+            .layout { m, c ->
+                val extra = bleed.roundToPx()
+                val p = m.measure(c.copy(minWidth = c.maxWidth + 2 * extra, maxWidth = c.maxWidth + 2 * extra))
+                layout(c.maxWidth, p.height) { p.place(-extra, 0) }
+            }
+            .section(nav, key)
+            .padding(horizontal = bleed, vertical = 10.dp),
+    ) { dev.heartline.ui.components.SectionTitle(title) }
+}
