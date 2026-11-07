@@ -26,6 +26,8 @@ import org.json.JSONObject
 import java.io.File
 import java.time.*
 
+private const val GYM_LOG = "gym_log"
+
 class RealController(
     private val context: Context,
     private val scope: CoroutineScope,
@@ -77,6 +79,7 @@ class RealController(
             watchSettings.value = SETTINGS.map { s -> WatchSettingUi(s.key, s.label, s.type, (values[s.key]?.let { settingValue(s.key, it) } ?: dev.heartline.protocol.settingDefault(s.key)), s.options.map { it.value to it.label }, s.min, s.max,
                 dev.heartline.protocol.settingSection(s)) }
         } }
+        scope.launch { runCatching { importDroppedGymLogs() } }
         scope.launch { db.events.observeRecent(200).collect { list -> events.value = list.map { EventUi(it.ts.toLong(), it.level == "warn", it.level == "error", it.msg) } } }
         scope.launch { db.meta.observeAll().collect { meta -> sync.update { it.copy(lastActivity = meta["activity_last_sync"]?.toDoubleOrNull()?.toLong(), lastHealth = meta["health_last_sync"]?.toDoubleOrNull()?.toLong()) } } }
         scope.launch { db.checks.observeRange().collect { list -> checks.value = list.map { c ->
@@ -129,20 +132,23 @@ class RealController(
                     skin.map { HealthValue("temperature", it.ts, it.value) }
                 val summaries = insights.mapNotNull { i -> i.start?.let { CheckSummary(it, i.rmssd, i.hr, i.quality ?: 0.0, i.usableS ?: 0.0, i.rhythm) } }
                 val profile = Profile(p.age, p.sex?.name?.lowercase(), p.weightKg, p.heightCm, p.maxHr, p.restingHr)
-                val efforts = db.health.workouts(from).mapNotNull { w -> runCatching { org.json.JSONObject(w.data) }.getOrNull()?.let { j ->
+                val watchRows = db.health.workouts(from)
+                val log = gymLogFromJson(db.meta.get(GYM_LOG))
+                val efforts = watchRows.mapNotNull { w -> runCatching { org.json.JSONObject(w.data) }.getOrNull()?.let { j ->
                     WorkoutEffort(j.optLong("start", w.start), j.optString("type"), j.optInt("active_s", j.optInt("duration_s")),
                         j.optInt("distance_m").takeIf { it > 0 }, j.optInt("avg_hr").takeIf { it > 0 }) to (j.optLong("start", w.start) to j.optLong("end", w.start))
                 } }
-                val result = computeDaily(minutes, values, summaries, profile, 28, now, workouts = efforts.map { it.second })
+                val result = computeDaily(minutes, values, summaries, profile, 28, now, workouts = efforts.map { it.second } + loggedSpans(log))
                 // VO2max: outdoor runs and walks when there are any, else the heart-rate estimate from awake resting heart rate.
                 val awakeRest = result.days.takeLast(7).mapNotNull { it.awakeRestingHr }.takeIf { it.isNotEmpty() }?.average()
-                val vo2 = vo2max(efforts.map { it.first }, now.toEpochSecond(), awakeRest, maxHeartRate(profile), profile.sex)
+                val vo2 = vo2max(efforts.map { it.first }, now.toEpochSecond(), awakeRest, maxHeartRate(profile), profile.sex,
+                    treadmill = treadmillEfforts(log, watchRefs(watchRows), zone))
                 result.todayUi(now.toLocalDate()) to result.trendsUi(healthByDay(values, zone = zone)).copy(vo2max = vo2.value, fitnessAge = vo2.fitnessAge,
                     vo2FromWorkouts = vo2.fromWorkouts, vo2StandIn = vo2.fromHeartRates, vo2Used = vo2.used,
                     // Runs, walks and treadmill sessions that didn't qualify say why; other workouts (gym and so on) are just counted.
-                    vo2Skipped = vo2.skipped.filter { it.first.type in setOf("Outdoor running", "Walking", "Hiking", "Treadmill") }.map { (w, why) ->
+                    vo2Skipped = vo2.skipped.filter { it.first.type in setOf("Outdoor running", "Walking", "Hiking", "Treadmill", "Treadmill (logged)") }.map { (w, why) ->
                         "${w.type.lowercase()} on ${java.time.Instant.ofEpochSecond(w.start).atZone(zone).toLocalDate().format(java.time.format.DateTimeFormatter.ofPattern("d MMM"))}: $why" } +
-                        vo2.skipped.count { it.first.type !in setOf("Outdoor running", "Walking", "Hiking", "Treadmill") }.takeIf { it > 0 }
+                        vo2.skipped.count { it.first.type !in setOf("Outdoor running", "Walking", "Hiking", "Treadmill", "Treadmill (logged)") }.takeIf { it > 0 }
                             ?.let { listOf("$it gym and other workouts, which have no pace to measure") }.orEmpty())
             }
         }.collect { (t, tr) -> today.value = t; trends.value = tr }
@@ -299,6 +305,49 @@ class RealController(
         } catch (e: Exception) { e.message ?: "Unable to store the watch key" }
     }
     override fun finishOnboarding() { settings.setOnboardingDone(true); if (!suppressAutomaticConnection) connect() }
+    override val gymLog: StateFlow<List<LoggedSet>> = db.meta.observe(GYM_LOG).map { gymLogFromJson(it) }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    override val gymImport = MutableStateFlow<String?>(null)
+    override fun importGymLog(uris: List<Uri>) = launchAction {
+        withContext(Dispatchers.IO) {
+            importGymFiles(uris.map { u -> (u.lastPathSegment?.substringAfterLast('/')?.substringAfterLast(':') ?: "file") to
+                { context.contentResolver.openInputStream(u).use { checkNotNull(it).bufferedReader().readText() } } })
+        }
+    }
+    /** Reads, merges and stores gym log files; returns the names read cleanly. */
+    private suspend fun importGymFiles(files: List<Pair<String, () -> String>>): Set<String> {
+        var all = gymLogFromJson(db.meta.get(GYM_LOG)); var read = 0; var added = 0; val failed = ArrayList<String>(); val ok = HashSet<String>()
+        for ((name, text) in files) {
+            val sets = runCatching { parseGymLog(text(), settings.profile.value.weightKg) }.getOrElse { failed.add("$name (${it.message})"); continue }
+            if (sets.isEmpty()) { failed.add("$name (no sets found)"); continue }
+            val (merged, n) = mergeGymLog(all, sets); all = merged; read += sets.size; added += n; ok.add(name)
+        }
+        db.meta.set(GYM_LOG, gymLogJson(all))
+        val msg = "Read $read sets from ${ok.size} file${if (ok.size == 1) "" else "s"}: $added new, ${read - added} already here." +
+            (if (failed.isNotEmpty()) " Couldn't read ${failed.joinToString()}." else "")
+        gymImport.value = msg
+        db.events.add("info", "Gym log import: $msg")
+        return ok
+    }
+    /**
+     * Log files dropped in the app's own folder (Android/data/dev.heartline/files/import, reachable over USB) are
+     * imported at start and then removed.
+     */
+    private suspend fun importDroppedGymLogs() = withContext(Dispatchers.IO) {
+        val dir = context.getExternalFilesDir("import") ?: return@withContext
+        val found = dir.listFiles { f -> f.isFile && (f.name.endsWith(".csv", true) || f.name.endsWith(".json", true)) }.orEmpty().sortedBy { it.name }
+        if (found.isEmpty()) return@withContext
+        val ok = importGymFiles(found.map { f -> f.name to { f.readText() } })
+        found.filter { it.name in ok }.forEach { it.delete() }
+    }
+    override fun saveTreadmill(workoutStart: Long, workoutEnd: Long, speedKmh: Double, inclinePct: Double) = launchAction {
+        val all = gymLogFromJson(db.meta.get(GYM_LOG))
+        val mine = setsForWorkout(all, workoutStart, workoutEnd, "Treadmill", zone).firstOrNull { it.cardio }
+        val updated = if (mine != null) all.map { if (it.key == mine.key) it.copy(speedKmh = speedKmh, inclinePct = inclinePct) else it }
+        else all + LoggedSet(sessionDate(workoutStart, zone).toString(), "Typed in", "Treadmill", "cardio", 1, "working", "completed",
+            workoutStart, workoutEnd, speedKmh = speedKmh, inclinePct = inclinePct, durationS = (workoutEnd - workoutStart).toDouble())
+        db.meta.set(GYM_LOG, gymLogJson(updated))
+        db.events.add("info", "Treadmill settings saved: %.1f km/h, %.0f%% incline".format(speedKmh, inclinePct))
+    }
     override fun importPcData(uri: Uri) = launchAction {
         withContext(Dispatchers.IO) {
             val temp = File.createTempFile("pc-import-", ".db", context.cacheDir)

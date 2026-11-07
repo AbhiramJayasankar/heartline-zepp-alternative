@@ -156,6 +156,10 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     }
     override fun finishOnboarding() = prefs.update { it.copy(onboarded = true) }
     override fun importPcData(uri: Uri) = addEvent("Imported PC data")
+    override val gymLog = MutableStateFlow<List<LoggedSet>>(emptyList())
+    override val gymImport = MutableStateFlow<String?>(null)
+    override fun importGymLog(uris: List<Uri>) = addEvent("Imported gym log")
+    override fun saveTreadmill(workoutStart: Long, workoutEnd: Long, speedKmh: Double, inclinePct: Double) = addEvent("Saved treadmill settings")
     override fun exportData(uri: Uri) = addEvent("Exported data")
     override fun recordingAudio(file: String): Uri? = null
 

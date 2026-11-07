@@ -38,6 +38,17 @@ class Vo2maxTest {
         assertEquals(runs[0].start, r.used[0].start)
     }
 
+    @Test fun inclineWalkUsesTheGradeEquation() {
+        // 3.6 km/h = 60 m/min at 20%: VO2 = 6 + 21.6 + 3.5 = 31.1. Held 172 bpm, rest 71, max 193: 82.8% of reserve.
+        val (est, why) = vo2maxFromTreadmill(TreadmillEffort(now, 600.0, 3.6, 20.0, 172), 71.0, 193)
+        assertNull(why)
+        assertEquals(36.8, est!!.vo2max, 0.1)
+        // The logged treadmill replaces the watch's treadmill workout (no "no GPS" skip for it).
+        val watch = WorkoutEffort(now - 60, "Treadmill", 612, 683, 166)
+        val r = vo2max(listOf(watch), now + 10, 71.0, 193, "male", listOf(TreadmillEffort(now, 600.0, 3.6, 20.0, 172)))
+        assertTrue(r.fromWorkouts); assertTrue(r.skipped.isEmpty()); assertEquals(36.8, r.value!!, 0.1)
+    }
+
     @Test fun activeMinutesCountWalksAndWorkingSetsButNotSitting() {
         fun m(i: Int, steps: Int, hr: Int?, state: String = "active") = MinuteSample(now + i * 60L, 1, 50, steps, hr, 0, 0, 0, state)
         val ms = listOf(

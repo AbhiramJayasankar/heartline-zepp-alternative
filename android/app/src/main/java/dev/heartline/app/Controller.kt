@@ -62,6 +62,12 @@ interface HeartlineController {
     fun saveWatchKey(mac: String, keyHex: String): String?
     fun finishOnboarding()
     fun importPcData(uri: Uri)
+    /** Gym logs: every imported or typed-in set, and what the last import found. */
+    val gymLog: StateFlow<List<LoggedSet>>
+    val gymImport: StateFlow<String?>
+    fun importGymLog(uris: List<Uri>)
+    /** Treadmill speed and incline for a watch treadmill workout; updates the logged treadmill row for it or adds one. */
+    fun saveTreadmill(workoutStart: Long, workoutEnd: Long, speedKmh: Double, inclinePct: Double)
     fun exportData(uri: Uri)
     fun recordingAudio(file: String): Uri?
 

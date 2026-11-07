@@ -93,6 +93,7 @@ sealed interface Route {
     data object Trends : Route
     data object Insights : Route
     data object SendNotification : Route
+    data object GymLog : Route
 }
 
 class Navigator {
@@ -194,6 +195,7 @@ fun AppRoot(controller: HeartlineController) {
                         Route.CheckRun -> CheckRunScreen(controller, nav)
                         is Route.CheckResult -> CheckResultScreen(controller, target.id, nav)
                         is Route.Workout -> WorkoutScreen(controller, target, nav)
+                        Route.GymLog -> dev.heartline.ui.screens.GymLogScreen(controller, nav)
                         Route.Sensors -> SensorsScreen(controller, nav)
                         Route.WatchSettings -> WatchSettingsScreen(controller, nav)
                         Route.Notes -> dev.heartline.ui.screens.NotesScreen(controller, nav)

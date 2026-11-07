@@ -536,16 +536,24 @@ fun WorkoutScreen(controller: HeartlineController, route: Route.Workout, nav: Na
             }
         }
         Gap(20)
+        val gymLog by controller.gymLog.collectAsStateWithLifecycle()
+        // Timed sets from a gym log for this workout, shaded on the heart rate chart.
+        val setSpans = remember(gymLog, w.start) {
+            dev.heartline.app.setsForWorkout(gymLog, w.start, w.start + w.durationS, w.type, java.time.ZoneId.systemDefault())
+                .filter { it.completed && it.start != null && it.end != null }
+                .map { ChartSpan((it.start!! - w.start).toDouble(), (it.end!! - w.start).toDouble(), c.warn.copy(alpha = 0.16f)) }
+        }
         Panel(padding = PaddingValues(12.dp)) {
             Text("Heart rate", style = HL.type.label, color = c.inkSoft)
             Gap(6)
             if (w.track.size > 1) InteractiveChart(
                 listOf(ChartLine(w.track.map { dev.heartline.app.SeriesPoint((it.ts - w.start).toDouble(), it.bpm.toDouble()) }, c.pulse, "Heart rate", "bpm", fill = true, gap = 60.0)),
-                0.0, w.durationS.toDouble().coerceAtLeast(60.0), height = 210.dp,
+                0.0, w.durationS.toDouble().coerceAtLeast(60.0), height = 210.dp, spans = setSpans,
                 bands = d.zones.map { z -> ChartBand(z.lowBpm.toDouble(), (z.highBpm ?: 240).toDouble(), dev.heartline.ui.components.zoneColor(z.zone, c).copy(alpha = 0.08f)) },
                 xLabel = { clock(it) }, readoutX = { "${clock(it)} in, at " + dev.heartline.ui.components.epochClock(w.start + it, seconds = true) }, minSpan = 60.0)
             else HrTraceChart(w.track, w.durationS.toLong().coerceAtLeast(60), w.start + w.durationS)
         }
+        WorkoutLogSection(controller, w)
         if (d.zones.isNotEmpty()) { Gap(24); SectionTitle("Heart-rate zones"); Gap(12); ZoneBars(d.zones) }
         listOf(Triple("Speed", d.speedKmh, "km/h"), Triple("Cadence", d.cadence, "spm"), Triple("Altitude", d.altitude, "m")).forEach { (title, s, unit) ->
             if (s.size >= 2) {

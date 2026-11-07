@@ -228,6 +228,10 @@ fun ActivityScreen(controller: HeartlineController, nav: Navigator) {
                 }
                 HorizontalDivider(color = c.line)
             }
+            Gap(8)
+            val gym by controller.gymLog.collectAsStateWithLifecycle()
+            NavRow("Gym log", if (gym.isEmpty()) "Import workout logs for sets, loads and treadmill settings"
+                else "${dev.heartline.app.sessionsOf(gym).size} sessions, ${gym.size} sets") { nav.push(Route.GymLog) }
             Gap(16)
             Note("Steps and active minutes come from the watch's minute-by-minute history; syncing reads it without deleting anything from the watch.")
             Gap(28)

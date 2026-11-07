@@ -6,7 +6,37 @@ import kotlin.math.roundToInt
 data class WorkoutEffort(val start: Long, val type: String, val activeS: Int, val distanceM: Int?, val avgHr: Int?)
 
 /** One workout's VO2max estimate, with what went into it. */
-data class WorkoutVo2(val start: Long, val type: String, val vo2max: Double, val speedKmh: Double, val avgHr: Int, val reservePct: Int)
+data class WorkoutVo2(val start: Long, val type: String, val vo2max: Double, val speedKmh: Double, val avgHr: Int, val reservePct: Int, val inclinePct: Double? = null)
+
+/**
+ * A treadmill stretch from a gym log or typed in: belt speed and incline, how long, and the heart rate it settled at
+ * (the median over its last 5 minutes, from the watch).
+ */
+data class TreadmillEffort(val start: Long, val durationS: Double, val speedKmh: Double, val inclinePct: Double, val steadyHr: Int?)
+
+/**
+ * VO2max from a treadmill stretch: the ACSM walking or running equation with grade (walking 0.1 x speed + 1.8 x speed x
+ * grade + 3.5, running 0.2 x speed + 0.9 x speed x grade + 3.5, speed in m/min) over the share of heart rate reserve it
+ * held. Fair only without holding the handrails, which takes a large part of the load off.
+ */
+fun vo2maxFromTreadmill(t: TreadmillEffort, hrRest: Double?, hrMax: Int?): Pair<WorkoutVo2?, String?> {
+    if (hrRest == null || hrMax == null || hrMax <= hrRest) return null to "needs your max and awake resting heart rate"
+    val hr = t.steadyHr ?: return null to "no watch heart rate for it"
+    if (t.durationS < 300) return null to "shorter than 5 minutes, not long enough to settle"
+    val speed = t.speedKmh * 1000 / 60
+    val grade = t.inclinePct / 100
+    val vo2 = when {
+        t.speedKmh <= 6.5 -> 0.1 * speed + 1.8 * speed * grade + 3.5
+        t.speedKmh >= 7.5 -> 0.2 * speed + 0.9 * speed * grade + 3.5
+        else -> return null to "speed between a walk and a run"
+    }
+    val reserve = (hr - hrRest) / (hrMax - hrRest)
+    if (reserve < 0.4) return null to "too easy (${(reserve * 100).roundToInt()}% of heart rate reserve, needs 40%)"
+    if (reserve > 0.92) return null to "too close to max to be steady"
+    val vo2max = 3.5 + (vo2 - 3.5) / reserve
+    if (vo2max !in 20.0..90.0) return null to "estimate outside a believable range"
+    return WorkoutVo2(t.start, "Treadmill", rounded(vo2max, 1), t.speedKmh, hr, (reserve * 100).roundToInt(), t.inclinePct) to null
+}
 
 /** VO2max from workouts when any qualify, else [fromHeartRates] as a stand-in. */
 data class Vo2maxResult(
@@ -52,14 +82,22 @@ fun vo2maxFromWorkout(w: WorkoutEffort, hrRest: Double?, hrMax: Int?): Pair<Work
  * VO2max for the Trends page: the median of up to the five newest qualifying runs and walks in the last 90 days,
  * else the heart-rate estimate (Uth: 15.3 x max / resting heart rate) as a stand-in.
  */
-fun vo2max(workouts: List<WorkoutEffort>, nowS: Long, hrRest: Double?, hrMax: Int?, sex: String?): Vo2maxResult {
+fun vo2max(workouts: List<WorkoutEffort>, nowS: Long, hrRest: Double?, hrMax: Int?, sex: String?, treadmill: List<TreadmillEffort> = emptyList()): Vo2maxResult {
     val stand = vo2maxUth(hrMax, hrRest, sex)
-    val used = ArrayList<WorkoutVo2>()
+    val found = ArrayList<WorkoutVo2>()
     val skipped = ArrayList<Pair<WorkoutEffort, String>>()
-    for (w in workouts.filter { it.start >= nowS - 90 * 86_400L }.sortedByDescending { it.start }) {
+    // A treadmill workout with speed and incline known is judged by those, not left out for lacking GPS distance.
+    val covered = treadmill.map { it.start }
+    for (w in workouts.filter { it.start >= nowS - 90 * 86_400L }) {
+        if (w.type == "Treadmill" && covered.any { kotlin.math.abs(it - w.start) < 3 * 3600 }) continue
         val (est, why) = vo2maxFromWorkout(w, hrRest, hrMax)
-        if (est != null) { if (used.size < 5) used.add(est) } else skipped.add(w to why!!)
+        if (est != null) found.add(est) else skipped.add(w to why!!)
     }
+    for (t in treadmill.filter { it.start >= nowS - 90 * 86_400L }) {
+        val (est, why) = vo2maxFromTreadmill(t, hrRest, hrMax)
+        if (est != null) found.add(est) else skipped.add(WorkoutEffort(t.start, "Treadmill (logged)", t.durationS.toInt(), null, t.steadyHr) to why!!)
+    }
+    val used = found.sortedByDescending { it.start }.take(5)
     val value = if (used.isNotEmpty()) rounded(median(used.map { it.vo2max }.toDoubleArray()), 1) else stand
     return Vo2maxResult(value, fitnessAge(value, sex), used.isNotEmpty(), stand, used, skipped)
 }
