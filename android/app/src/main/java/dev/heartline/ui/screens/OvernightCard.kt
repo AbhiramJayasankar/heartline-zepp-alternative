@@ -122,12 +122,12 @@ fun DayHrvCard(controller: HeartlineController, date: LocalDate) {
             Switch(o.allDay, { controller.setAllDayHrv(it) },
                 colors = SwitchDefaults.colors(checkedTrackColor = c.ok, checkedThumbColor = c.surface, uncheckedTrackColor = c.gridMajor, uncheckedThumbColor = c.surface, uncheckedBorderColor = c.gridMajor))
         }
-        if (o.allDay) Schedule(o.dayEvery, o.dayLen, OvernightSettings.DAY_EVERY) { e, l -> controller.setHrvSchedule(false, e, l) }
+        if (o.allDay) Schedule(o.dayEvery, o.dayLen, OvernightSettings.DAY_EVERY, day = true) { e, l -> controller.setHrvSchedule(false, e, l) }
         if (samples.isEmpty()) {
             Gap(8)
-            MutedText(if (o.allDay) "No samples this day yet. After 10 minutes awake and still (no steps, little movement), a ${o.dayLen}-minute heart check runs, at most every ${o.dayEvery} minutes. " +
-                "One that isn't clean is retried twice, 2 minutes apart, if you're still still." else
-                "When on, Heartline takes short heart checks (2 minutes every 30, adjustable), only after you've been still and awake for 10 minutes, so you can see how HRV moves through the day. " +
+            MutedText(if (o.allDay) "No samples this day yet. Once the watch has counted no steps for a minute, a ${o.dayLen}-minute heart check runs, and checks keep going back to back until one is clean. " +
+                "Then it waits ${o.dayEvery} minutes. A check you walk during waits 2, 4, 8, then 16 minutes before the next try." else
+                "When on, Heartline takes a short heart check whenever you've stopped walking for a minute, trying until it gets a clean one, then waits (30 minutes by default), so you can see how HRV moves through the day. " +
                     "Daytime HRV changes a lot with posture, food, caffeine and stress, so it doesn't feed readiness. It costs some battery.")
             return@Card
         }
@@ -136,7 +136,7 @@ fun DayHrvCard(controller: HeartlineController, date: LocalDate) {
         Row(Modifier.fillMaxWidth()) {
             Fact("HRV, median", v.takeIf { it.isNotEmpty() }?.let { it[it.size / 2].roundToInt().toString() } ?: "–", Modifier.weight(1f), unit = "ms")
             Fact("Range", if (v.size >= 2) "${v.first().roundToInt()}–${v.last().roundToInt()}" else "–", Modifier.weight(1f), unit = "ms")
-            Fact("Samples", "${clean.size} of ${samples.size}", Modifier.weight(1f), unit = "clean")
+            Fact("Clean", "${clean.size}", Modifier.weight(1f), unit = "of ${samples.size} tries")
         }
         if (clean.isNotEmpty()) {
             Gap(10)
@@ -157,10 +157,10 @@ fun DayHrvCard(controller: HeartlineController, date: LocalDate) {
 
 /** How often and how long the automatic samples run. Longer and more often gives steadier numbers at more battery. */
 @Composable
-private fun Schedule(every: Int, length: Int, everyOptions: List<Int>, onChange: (Int, Int) -> Unit) {
+private fun Schedule(every: Int, length: Int, everyOptions: List<Int>, day: Boolean = false, onChange: (Int, Int) -> Unit) {
     val c = HL.colors
     Gap(10)
-    Text("Every", style = HL.type.label, color = c.inkSoft)
+    Text(if (day) "After a clean reading, wait" else "Every", style = HL.type.label, color = c.inkSoft)
     Gap(4)
     Segmented(everyOptions.map { it to if (it == 60) "1 h" else "$it min" }, every, { onChange(it, length) }, Modifier.fillMaxWidth())
     Gap(8)
@@ -168,6 +168,7 @@ private fun Schedule(every: Int, length: Int, everyOptions: List<Int>, onChange:
     Gap(4)
     Segmented(OvernightSettings.LENGTHS.map { it to "$it min" }, length, { onChange(every, it) }, Modifier.fillMaxWidth())
     Gap(4)
-    Text("Recording ${length} of every ${every} minutes (${(100.0 * length / every).roundToInt()}% of the time). Longer samples give steadier HRV; more often costs more battery.",
+    Text(if (day) "Checks of $length minutes run back to back until one is clean, then wait $every minutes. Longer checks give steadier HRV but are harder to get clean." else
+        "Recording ${length} of every ${every} minutes (${(100.0 * length / every).roundToInt()}% of the time). Longer samples give steadier HRV; more often costs more battery.",
         style = HL.type.small.copy(fontSize = 12.sp), color = c.inkSoft)
 }

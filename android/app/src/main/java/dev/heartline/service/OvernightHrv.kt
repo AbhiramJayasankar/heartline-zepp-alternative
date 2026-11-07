@@ -10,6 +10,7 @@ import dev.heartline.protocol.RawSensor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
@@ -56,7 +57,7 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         const val KEY = "overnight_hrv"
         const val SAMPLE = "hrv_sleep_sample"
         const val NIGHT = "hrv_sleep"
-        /** Daytime samples, taken only after 10 still, awake minutes. */
+        /** Daytime samples, tried whenever the watch has counted no steps for a minute (see [DayHrvPlan]). */
         const val DAY_SAMPLE = "hrv_day_sample"
         /** After a sample that isn't clean: try again this many times, this far apart. */
         const val RETRIES = 2
@@ -94,14 +95,24 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
     /** A pending retry after a sample that wasn't clean: when, and how many have been used in this slot. */
     private var retryAt = 0L
     private var retriesUsed = 0
-    private var dayRetryAt = 0L
-    private var dayRetriesUsed = 0
+    /** Daytime: when the next check may run and how many in a row have failed. Null until first read from the database. */
+    private var dayPlan: DayHrvPlan? = null
+    /** When the watch's live step count last changed (epoch seconds). */
+    @Volatile private var lastStepChange = 0L
     private var asleepNoted: LocalDate? = null
     private var nightStartedBattery: LocalDate? = null
 
     private var lastPrune = 0L
 
-    suspend fun run() {
+    /** What one automatic check found: clean or not, and the share of it the wrist was moving. */
+    private data class Outcome(val clean: Boolean, val movingShare: Double)
+
+    suspend fun run(): Unit = kotlinx.coroutines.coroutineScope {
+        // The watch pushes its step count as it changes; a check waits for a minute with no new steps.
+        launch {
+            var last: Int? = null
+            watch.steps.collect { st -> st?.steps?.let { n -> if (last != null && n != last) lastStepChange = System.currentTimeMillis() / 1000; last = n } }
+        }
         while (true) {
             try { tick() } catch (e: CancellationException) { throw e } catch (e: Exception) { status.value = "Error: ${e.message}" }
             val now = System.currentTimeMillis() / 1000
@@ -109,7 +120,7 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
                 lastPrune = now
                 try { prune(now) } catch (e: CancellationException) { throw e } catch (e: Exception) { app.db.events.add("error", "Pruning HRV sample recordings failed: ${e.message}") }
             }
-            delay(60_000)
+            delay(30_000)
         }
     }
 
@@ -150,7 +161,7 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         if (!s.enabled) status.value = "Off" else if (night == null) status.value = "Waiting for the night window (${clock(w.first)}–${clock(w.second)})"
         // Asleep in the night window: overnight samples. Otherwise (awake, or outside it): daytime samples when still.
         if (night != null && nightTick(now, night, s, w)) { dayStatus.value = if (s.allDay) "Paused while you're asleep" else "Off"; return }
-        if (s.allDay) dayTick(now, s) else dayStatus.value = "Off"
+        if (s.allDay) dayTick(now, s, inNightWindow = night != null) else dayStatus.value = "Off"
     }
 
     /** Inside the night window. Returns false when you're not asleep by the watch's labels, so daytime sampling can run. */
@@ -189,7 +200,7 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         if (busy()) { status.value = "Asleep; waiting for another recording to finish"; return true }
         if (!retry) { lastSample = now; retriesUsed = 0 }
         retryAt = 0L
-        val clean = sample(night, SAMPLE, s.nightLen * 60, status, retriesUsed)
+        val clean = sample(night, SAMPLE, s.nightLen * 60, status, retriesUsed).clean
         if (!clean && retriesUsed < RETRIES) {
             retriesUsed++
             retryAt = System.currentTimeMillis() / 1000 + RETRY_S
@@ -198,63 +209,72 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         return true
     }
 
-    /** Daytime: after 10 still, awake minutes (worn, no steps, movement intensity 30 or less), a sample at most every [OvernightSettings.dayEvery] minutes. */
-    private suspend fun dayTick(now: Long, s: OvernightSettings) {
+    /**
+     * Daytime: checks run whenever the watch has counted no steps for a minute, back to back until one is clean, then
+     * not again for [OvernightSettings.dayEvery] minutes. Only checks you walked during back off; see [DayHrvPlan].
+     */
+    private suspend fun dayTick(now: Long, s: OvernightSettings, inNightWindow: Boolean) {
         val every = s.dayEvery * 60L
-        val retry = dayRetryAt != 0L && now >= dayRetryAt
-        // A retry wants to know you're still still, so it syncs the watch's minutes first.
-        if (now - lastSync >= 600 || retry) { lastSync = now; runCatching { watch.syncActivity() } }
-        if (now - lastDaySample < every && !retry) {
-            dayStatus.value = if (dayRetryAt != 0L) "Last sample wasn't clean, retrying at ${clock(dayRetryAt)} if you're still"
-                else "Next sample after ${clock(lastDaySample + every)}, once you've been still for 10 minutes"
+        if (now - lastSync >= 600) { lastSync = now; runCatching { watch.syncActivity() } }
+        val plan = dayPlan ?: DayHrvPlan(nextAt = app.db.health.series(DAY_SAMPLE, now - 86_400.0, now.toDouble())
+            .filter { it.value != null }.maxOfOrNull { it.ts }?.let { it + every } ?: 0L).also { dayPlan = it }
+        if (now < plan.nextAt) {
+            dayStatus.value = if (plan.backingOff) "You were walking during the last check; next try at ${clock(plan.nextAt)}"
+                else "Clean reading taken; next checks from ${clock(plan.nextAt)}"
             return
         }
+        if (watch.battery.value?.charging == true) { dayStatus.value = "Waiting: the watch is charging"; return }
         val minutes = analyticsMinutes(app.db.activity.range(now - 6 * 3600.0, now.toDouble()))
-        val newest = minutes.lastOrNull()
-        if (newest == null || now - newest.ts > 25 * 60) { dayStatus.value = "Waiting for fresh minute data from the watch"; return }
-        val recent = minutes.filter { it.ts > newest.ts - 10 * 60 }
-        val still = recent.size >= 8 && recent.all { it.state != "not_worn" && it.state != "charging" && !it.state.startsWith("sleep_") && it.steps == 0 && it.intensity <= 30 }
-        if (!still) {
-            // A retry needs you still; if you've moved, give it up and wait for the next slot.
-            if (retry) { dayRetryAt = 0L; dayRetriesUsed = 0 }
-            dayStatus.value = "Waiting for 10 still minutes (latest minute ${clock(newest.ts)})"; return
-        }
+        val newest = minutes.lastOrNull()?.takeIf { now - it.ts <= 25 * 60 }
+        if (newest?.state == "not_worn") { dayStatus.value = "Waiting: the watch looks off your wrist (minute ${clock(newest.ts)})"; return }
+        // In the night window the watch's sleep labels tell daytime checks from overnight ones.
+        if (inNightWindow && (newest == null || newest.state.startsWith("sleep_"))) { dayStatus.value = "Waiting for the watch to show you're awake"; return }
+        if (now - lastStepChange < DayHrvPlan.STEP_QUIET_S) { dayStatus.value = "Waiting for a minute without steps"; return }
         if (busy()) { dayStatus.value = "Waiting for another recording to finish"; return }
-        if (!retry) { lastDaySample = now; dayRetriesUsed = 0 }
-        dayRetryAt = 0L
-        val clean = sample(Instant.ofEpochSecond(now).atZone(zone).toLocalDate(), DAY_SAMPLE, s.dayLen * 60, dayStatus, dayRetriesUsed)
-        if (!clean && dayRetriesUsed < RETRIES) {
-            dayRetriesUsed++
-            dayRetryAt = System.currentTimeMillis() / 1000 + RETRY_S
-            dayStatus.value = "Sample wasn't clean, retry $dayRetriesUsed of $RETRIES at ${clock(dayRetryAt)}"
+        val out = sample(Instant.ofEpochSecond(now).atZone(zone).toLocalDate(), DAY_SAMPLE, s.dayLen * 60, dayStatus, plan.tries)
+        val end = System.currentTimeMillis() / 1000
+        // Steps during the check mean you were walking: back off. Wrist movement alone just gets another try.
+        val walked = lastStepChange >= now
+        val next = if (out.clean) plan.afterClean(end, every) else plan.afterFail(end, walked)
+        dayPlan = next
+        dayStatus.value = when {
+            out.clean -> "Clean reading at ${clock(end)}; next checks from ${clock(next.nextAt)}"
+            next.nextAt > end -> "You walked during that check; next try at ${clock(next.nextAt)}"
+            else -> "That check wasn't clean; trying again after a minute without steps"
         }
     }
 
     /** Records and analyses one sample; true when it was clean. [attempt] is 0 for a slot's first try, then 1, 2 for retries. */
-    private suspend fun sample(night: LocalDate, type: String, seconds: Int, state: MutableStateFlow<String>, attempt: Int): Boolean {
-        state.value = "Recording a ${seconds / 60}-minute sample" + if (attempt > 0) " (retry $attempt of $RETRIES)" else ""
+    private suspend fun sample(night: LocalDate, type: String, seconds: Int, state: MutableStateFlow<String>, attempt: Int): Outcome {
+        state.value = "Recording a ${seconds / 60}-minute sample" + when {
+            attempt == 0 -> ""; type == SAMPLE -> " (retry $attempt of $RETRIES)"; else -> " (try ${attempt + 1} since the last clean one)"
+        }
         var file: java.io.File? = null
         try {
             file = watch.startRaw(setOf(RawSensor.PPG, RawSensor.ACCEL))
             delay(seconds * 1000L)
         } finally { withContext(NonCancellable) { runCatching { watch.stopRaw() } } }
-        val f = file ?: return false
+        val f = file ?: return Outcome(false, 0.0)
         val result = withContext(Dispatchers.Default) { analyzeSession(readRecording(f), f.name) }
+        // The share of the check the wrist was moving, by the same 0.05 g limit beat detection uses.
+        val moving = result.motion.takeIf { it.isNotEmpty() }?.let { m -> m.count { it.g > 0.05 }.toDouble() / m.size } ?: 0.0
         val ts = result.start.toLong()
         val need = seconds / 2
         val clean = result.hrv.rmssdMs != null && result.signalQuality >= 0.7 && result.usableS >= need
+        val movingNote = if (moving >= 0.25) "wrist moving ${(moving * 100).roundToInt()}% of the time, " else ""
         val reason = when {
-            result.hrv.rmssdMs == null -> "too few clean beats"
-            result.signalQuality < 0.7 -> "signal ${(result.signalQuality * 100).roundToInt()}% (needs 70%)"
-            result.usableS < need -> "only ${result.usableS.roundToInt()} s of clean beats (needs $need)"
+            result.hrv.rmssdMs == null -> "${movingNote}too few clean beats"
+            result.signalQuality < 0.7 -> "${movingNote}signal ${(result.signalQuality * 100).roundToInt()}% (needs 70%)"
+            result.usableS < need -> "${movingNote}only ${result.usableS.roundToInt()} s of clean beats (needs $need)"
             else -> null
         }
         val extra = extract(result, JSONObject().put("file", f.name))
-            .put("night", night.toString()).put("reason", reason ?: JSONObject.NULL).put("attempt", attempt).put("length_s", seconds).toString()
+            .put("night", night.toString()).put("reason", reason ?: JSONObject.NULL).put("attempt", attempt).put("length_s", seconds)
+            .put("moving_share", Math.round(moving * 1000) / 1000.0).toString()
         app.db.health.upsert(listOf(HealthPoint(type, ts, if (clean) result.hrv.rmssdMs else null, extra)))
         app.db.events.add("info", (if (type == SAMPLE) "Overnight" else "Daytime") + " HRV sample at ${clock(ts)}${if (attempt > 0) " (retry $attempt)" else ""}: " + if (clean) "RMSSD ${result.hrv.rmssdMs?.roundToInt()} ms, " +
             "${result.hrBpm?.roundToInt()} bpm, breathing ${result.respiratoryRate ?: "–"}/min" else "set aside, $reason")
-        if (type != SAMPLE) { state.value = "Sample taken at ${clock(ts)}"; return clean }
+        if (type != SAMPLE) return Outcome(clean, moving)
         // The night's value: the median of its clean samples, stamped at the latest one.
         val samples = app.db.health.series(SAMPLE, night.minusDays(1).atStartOfDay(zone).toEpochSecond().toDouble(), night.plusDays(1).atStartOfDay(zone).toEpochSecond().toDouble())
             .filter { p -> p.value != null && runCatching { JSONObject(p.extra ?: "{}").optString("night") }.getOrNull() == night.toString() }
@@ -265,7 +285,7 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
             app.db.health.upsert(listOf(HealthPoint(NIGHT, samples.maxOf { it.ts }, median, JSONObject().put("night", night.toString()).put("samples", samples.size).toString())))
         }
         status.value = "Asleep; sample taken at ${clock(ts)}"
-        return clean
+        return Outcome(clean, moving)
     }
 
     /**
