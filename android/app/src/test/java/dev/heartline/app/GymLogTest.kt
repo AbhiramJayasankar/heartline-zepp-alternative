@@ -28,6 +28,7 @@ class GymLogTest {
         val tread = sets[1]
         assertTrue(tread.cardio)
         assertEquals(3.7, tread.speedKmh!!, 0.0); assertEquals(20.0, tread.inclinePct!!, 0.0); assertEquals(603.0, tread.durationS!!, 0.0)
+        assertEquals(935, tread.steps); assertEquals(44.0, tread.caloriesKcal!!, 0.0)
         assertEquals("Display final 10:03, \"Hr\" not shown", tread.notes)
     }
 
@@ -78,17 +79,20 @@ class GymLogTest {
     }
 
     @Test fun heartlineFormatReadsTreadmillAndLoadTypes() {
-        val csv = """session_id,session_name,exercise,exercise_type,set_number,set_type,status,start_datetime_ist,end_datetime_ist,weight_kg,weight_type,reps_reported,reached_failure,reps_in_reserve,difficulty_out_of_10,rest_before_seconds,speed_kmh,incline_pct,distance_km,handrails,notes
-2026-11-09_pull,Pull day,Assisted pull-up,bodyweight,1,working,completed,2026-11-09T22:15:00+05:30,2026-11-09T22:15:48+05:30,55,assistance,8,False,2,7,,,,,,
-2026-11-09_pull,Pull day,Leg press,strength,1,working,completed,2026-11-09T22:30:00+05:30,2026-11-09T22:31:00+05:30,40,per_side,10,False,,,120,,,,,
-2026-11-09_pull,Pull day,Treadmill incline walk,cardio,1,working,completed,2026-11-09T23:00:00+05:30,2026-11-09T23:10:00+05:30,,,,,,,,3.6,20,0.6,none,
-2026-11-09_pull,Pull day,Treadmill incline walk,cardio,2,working,completed,2026-11-09T23:12:00+05:30,2026-11-09T23:17:00+05:30,,,,,,,,4.0,15,,held,
+        val csv = """session_id,session_name,exercise,exercise_type,set_number,set_type,status,start_datetime_ist,end_datetime_ist,weight_kg,weight_type,reps_reported,reached_failure,reps_in_reserve,difficulty_out_of_10,rest_before_seconds,speed_kmh,incline_pct,distance_km,duration_seconds,steps,calories_kcal,handrails,notes
+2026-11-09_pull,Pull day,Assisted pull-up,bodyweight,1,working,completed,2026-11-09T22:15:00+05:30,2026-11-09T22:15:48+05:30,55,assistance,8,False,2,7,,,,,,,,,
+2026-11-09_pull,Pull day,Leg press,strength,1,working,completed,2026-11-09T22:30:00+05:30,2026-11-09T22:31:00+05:30,40,per_side,10,False,,,120,,,,,,,,
+2026-11-09_pull,Pull day,Treadmill incline walk,cardio,1,working,completed,2026-11-09T23:00:00+05:30,2026-11-09T23:10:00+05:30,,,,,,,,3.6,20,0.6,595,986,45,none,
+2026-11-09_pull,Pull day,Treadmill incline walk,cardio,2,working,completed,2026-11-09T23:12:00+05:30,2026-11-09T23:17:00+05:30,,,,,,,,4.0,15,,,,,held,
 """
         val sets = parseGymLog(csv, 79.0)
         assertEquals("Pull day", sets[0].session)
         assertEquals(24.0, sets[0].loadKg!!, 0.0)
         assertEquals(80.0, sets[1].loadKg!!, 0.0)
-        assertTrue(sets[2].cardio); assertEquals(3.6, sets[2].speedKmh!!, 0.0); assertEquals(600.0, sets[2].durationS!!, 0.0)
+        assertTrue(sets[2].cardio); assertEquals(3.6, sets[2].speedKmh!!, 0.0)
+        // The display's time wins over the start and end times; steps and calories are the display's too.
+        assertEquals(595.0, sets[2].durationS!!, 0.0); assertEquals(986, sets[2].steps); assertEquals(45.0, sets[2].caloriesKcal!!, 0.0)
+        assertEquals(300.0, sets[3].durationS!!, 0.0); assertEquals(null, sets[3].steps)
         assertEquals("held", sets[3].handrails)
         assertEquals(sets, gymLogFromJson(gymLogJson(sets)))
         // A held-rail walk gives no VO2max.

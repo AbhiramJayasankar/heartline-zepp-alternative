@@ -723,7 +723,7 @@ private fun Recovery(a: CaptureAnalysisUi, medianRest: Double?, compare: List<de
  * What a cardio block was set to and how far it went. Each figure comes from the most accurate source that has it: the
  * gym log (what the treadmill was set to), then the raw sensors, then the watch's workout. [src] names each figure's source.
  */
-private data class CardioFacts(val speedKmh: Double?, val inclinePct: Double?, val durationS: Double, val steps: Int?, val km: Double?, val src: Map<String, String>)
+private data class CardioFacts(val speedKmh: Double?, val inclinePct: Double?, val durationS: Double, val steps: Int?, val km: Double?, val kcal: Double?, val src: Map<String, String>)
 
 private fun cardioFacts(a: CaptureAnalysisUi, k: dev.heartline.app.CardioUi, log: List<dev.heartline.app.LoggedSet>): CardioFacts {
     val zone = java.time.ZoneId.systemDefault()
@@ -740,11 +740,13 @@ private fun cardioFacts(a: CaptureAnalysisUi, k: dev.heartline.app.CardioUi, log
     val sensorS = k.end - k.start
     val durationS = pick("time", "gym log" to row?.durationS?.takeIf { it > 0 }, "sensors" to sensorS)!!
     // The sensors' cadence over the block they saw walking; the watch's count only without it.
-    val steps = pick("steps", "sensors" to k.cadenceSpm?.let { (it * sensorS / 60.0).roundToInt() }, "watch" to w?.steps?.takeIf { it > 0 })
+    val steps = pick("steps", "gym log" to row?.steps, "sensors" to k.cadenceSpm?.let { (it * sensorS / 60.0).roundToInt() }, "watch" to w?.steps?.takeIf { it > 0 })
     val speed = pick("speed", "gym log" to row?.speedKmh, "watch" to k.speedKmh)
     val incline = pick("incline", "gym log" to row?.inclinePct)
     val km = pick("distance", "gym log" to (row?.distanceKm ?: row?.speedKmh?.let { v -> v * durationS / 3600.0 }), "watch" to k.distanceM?.takeIf { it > 0 }?.div(1000.0))
-    return CardioFacts(speed, incline, durationS, steps, km, src)
+    // The watch's calories are for its whole workout, so only when that workout is this block.
+    val kcal = pick("calories", "gym log" to row?.caloriesKcal, "watch" to w?.takeIf { it.start >= k.start - 120 && it.end <= k.end + 120 }?.calories?.toDouble())
+    return CardioFacts(speed, incline, durationS, steps, km, kcal, src)
 }
 
 @Composable
@@ -765,7 +767,7 @@ private fun CardioBlock(
         Triple("Drop 1 min", fmtInt(k.drop60), "bpm"), Triple("Drop 2 min", fmtInt(k.drop120), "bpm"), Triple("Recovery", fmtInt(k.recoveryTauS), "s"),
         Triple("Time", clock(f.durationS), null), Triple("Steps", f.steps?.let { "%,d".format(it) } ?: "–", null),
         Triple("Distance", f.km?.let { "%.2f".format(it) } ?: "–", "km"), Triple("Speed", f.speedKmh?.let { "%.1f".format(it) } ?: "–", "km/h"),
-    ) + listOfNotNull(f.inclinePct?.let { Triple("Incline", num1(it), "%") }))
+    ) + listOfNotNull(f.inclinePct?.let { Triple("Incline", num1(it), "%") }, f.kcal?.let { Triple("Calories", it.roundToInt().toString(), "kcal") }))
     Gap(10)
     val notes = listOfNotNull(
         k.riseTauS?.let { "Rise time is how quickly heart rate settled towards its plateau (a time constant). Fitter hearts settle in under a minute; $it s is where regular cardio shows up first." },
@@ -814,6 +816,8 @@ private fun CardioCompare(
             Triple("Incline", pct(f.inclinePct), pct(pf.inclinePct)),
             Triple("Time", clock(f.durationS), clock(pf.durationS)),
             Triple("Steps", f.steps?.let { "%,d".format(it) }, pf.steps?.let { "%,d".format(it) }),
+            Triple("Distance", f.km?.let { "%.2f km".format(it) }, pf.km?.let { "%.2f km".format(it) }),
+            Triple("Calories", f.kcal?.let { "${it.roundToInt()} kcal" }, pf.kcal?.let { "${it.roundToInt()} kcal" }),
             Triple("Cadence", k.cadenceSpm?.let { "$it spm" }, pk.cadenceSpm?.let { "$it spm" }),
             Triple("Steady", bpm(k.steadyHr), bpm(pk.steadyHr)),
             Triple("Peak", bpm(k.peakHr), bpm(pk.peakHr)),

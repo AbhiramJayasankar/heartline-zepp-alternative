@@ -11,7 +11,7 @@ const val GYM_LOG_KEY = "gym_log"
 /**
  * One set from a gym log, whatever format it came in. Times are epoch seconds when the log had them. [loadKg] is the
  * weight moved: for an assisted pull-up, body weight minus the assistance. Treadmill and other cardio rows carry
- * [speedKmh], [inclinePct], [distanceKm] and [durationS].
+ * [speedKmh], [inclinePct], [distanceKm], [durationS], and the machine display's [steps] and [caloriesKcal].
  */
 data class LoggedSet(
     val date: String, val session: String, val exercise: String, val kind: String,
@@ -23,6 +23,7 @@ data class LoggedSet(
     val hrMin: Int? = null, val hrMax: Int? = null, val notes: String = "",
     /** Treadmill only: "none", "some" or "held". Held rows are left out of VO2max. */
     val handrails: String? = null,
+    val steps: Int? = null, val caloriesKcal: Double? = null,
 ) {
     /** Same set in another export of the same session: date, exercise, set number and warm-up or not. */
     val key: String get() = "$date|${exercise.lowercase().replace(Regex("[^a-z0-9]+"), " ").trim()}|$setNumber|${if (setType.startsWith("warm")) "w" else "s"}"
@@ -35,7 +36,7 @@ data class LoggedSet(
         fun opt(k: String, v: Any?) { if (v != null) put(k, v) }
         opt("start", start); opt("end", end); opt("rest_s", restBeforeS); opt("load_kg", loadKg); opt("assist_kg", assistKg); opt("reps", reps)
         opt("rir", rir); opt("difficulty", difficulty); opt("speed_kmh", speedKmh); opt("incline_pct", inclinePct); opt("distance_km", distanceKm)
-        opt("duration_s", durationS); opt("hr_min", hrMin); opt("hr_max", hrMax); opt("handrails", handrails)
+        opt("duration_s", durationS); opt("hr_min", hrMin); opt("hr_max", hrMax); opt("handrails", handrails); opt("steps", steps); opt("calories_kcal", caloriesKcal)
     }
 
     companion object {
@@ -46,7 +47,8 @@ data class LoggedSet(
             return LoggedSet(j.optString("date"), j.optString("session"), j.optString("exercise"), j.optString("kind"), j.optInt("set"),
                 j.optString("set_type"), j.optString("status", "completed"), l("start"), l("end"), d("rest_s"), d("load_kg"), d("assist_kg"),
                 d("reps"), j.optBoolean("failure"), d("rir"), d("difficulty"), d("speed_kmh"), d("incline_pct"), d("distance_km"), d("duration_s"),
-                i("hr_min"), i("hr_max"), j.optString("notes"), j.optString("handrails").takeIf { it.isNotEmpty() })
+                i("hr_min"), i("hr_max"), j.optString("notes"), j.optString("handrails").takeIf { it.isNotEmpty() },
+                i("steps"), d("calories_kcal"))
         }
     }
 }
@@ -101,7 +103,8 @@ private fun parseCsvLog(text: String, weight: Double?): List<LoggedSet> {
                 num(col(r, "reps_reported")) ?: num(col(r, "reps")), col(r, "reached_failure").equals("true", ignoreCase = true), num(col(r, "reps_in_reserve")),
                 num(col(r, "difficulty_out_of_10")), num(col(r, "speed_kmh")), num(col(r, "incline_pct")), num(col(r, "distance_km")),
                 num(col(r, "duration_seconds")) ?: if (start != null && end != null) (end - start).toDouble() else null,
-                notes = col(r, "notes").orEmpty(), handrails = col(r, "handrails")?.lowercase())
+                notes = col(r, "notes").orEmpty(), handrails = col(r, "handrails")?.lowercase(),
+                steps = num(col(r, "steps"))?.toInt(), caloriesKcal = num(col(r, "calories_kcal")))
         } else {
             // Older format: many sessions per file, load_basis tells assistance apart, cardio columns on treadmill rows.
             val load = num(col(r, "load_kg"))
@@ -112,7 +115,8 @@ private fun parseCsvLog(text: String, weight: Double?): List<LoggedSet> {
                 if (assisted) num(col(r, "effective_load_kg")) ?: weight?.let { b -> load?.let { b - it } } else num(col(r, "effective_load_kg")) ?: load,
                 if (assisted) load else null, num(col(r, "reps")), false, null, num(col(r, "difficulty_0_10")),
                 num(col(r, "speed_kmh")), num(col(r, "incline_pct")), num(col(r, "distance_km")), num(col(r, "duration_sec")),
-                num(col(r, "hr_bpm_min"))?.toInt(), num(col(r, "hr_bpm_max"))?.toInt(), col(r, "notes").orEmpty())
+                num(col(r, "hr_bpm_min"))?.toInt(), num(col(r, "hr_bpm_max"))?.toInt(), col(r, "notes").orEmpty(),
+                steps = num(col(r, "steps"))?.toInt(), caloriesKcal = num(col(r, "calories_kcal")))
         }
     }
 }
@@ -138,7 +142,8 @@ private fun parseJsonLog(root: JSONObject, weight: Double?): List<LoggedSet> {
                     "completed", time(str("start_time")), time(str("end_time")), d("rest_before_sec"),
                     if (assisted) d("effective_load_kg") ?: weight?.let { b -> load?.let { b - it } } else d("effective_load_kg") ?: load,
                     if (assisted) load else null, d("reps"), false, null, d("difficulty_0_10"), d("speed_kmh"), d("incline_pct"), d("distance_km"),
-                    d("duration_sec"), d("hr_bpm_min")?.toInt(), d("hr_bpm_max")?.toInt(), str("notes").orEmpty()))
+                    d("duration_sec"), d("hr_bpm_min")?.toInt(), d("hr_bpm_max")?.toInt(), str("notes").orEmpty(),
+                    steps = d("steps")?.toInt(), caloriesKcal = d("calories_kcal")))
             }
         }
     }
