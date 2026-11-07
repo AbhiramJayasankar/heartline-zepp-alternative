@@ -298,7 +298,7 @@ data class SyncUi(val running: Boolean = false, val lastActivity: Long? = null, 
 enum class Impact { POSITIVE, NEUTRAL, NEGATIVE }
 data class Factor(val name: String, val impact: Impact, val detail: String)
 data class AlertUi(val warn: Boolean, val title: String, val detail: String)
-data class SleepNightUi(val start: Long, val end: Long, val deepMin: Int, val lightMin: Int, val remMin: Int, val awakeMin: Int)
+data class SleepNightUi(val start: Long, val end: Long, val deepMin: Int, val lightMin: Int, val remMin: Int, val awakeMin: Int, val ongoing: Boolean = false)
 
 data class TodayUi(
     val readiness: Int?,

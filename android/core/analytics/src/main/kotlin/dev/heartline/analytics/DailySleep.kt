@@ -50,17 +50,21 @@ internal fun sleepBlocks(minutes: List<MinuteSample>): List<SleepBlock> {
     return blocks
 }
 
-internal fun nightFor(blocks: List<SleepBlock>, d: LocalDate, lastTs: Long?, zone: ZoneId): Pair<SleepBlock?, Int> {
+/** The night ending on [d]: its main block, minutes asleep across all blocks, and whether it may still be going on. */
+internal data class Night(val main: SleepBlock?, val asleep: Int, val ongoing: Boolean = false)
+
+internal fun nightFor(blocks: List<SleepBlock>, d: LocalDate, lastTs: Long?, zone: ZoneId): Night {
     // daily.night_for uses midnight + 18 hours and a fixed 86400-second window, even across DST.
     val lo = d.minusDays(1).atStartOfDay(zone).toEpochSecond() + 18 * 3600
     val hi = lo + 86400
     val inside = blocks.filter { it.end >= lo && it.end < hi }
-    val main = inside.maxByOrNull { it.asleep } ?: return null to 0
-    if (main.asleep < 60) return null to 0
-    if (lastTs != null && lastTs >= lo && lastTs < hi && Instant.ofEpochSecond(lastTs).atZone(zone).hour < 12) {
-        if (main.asleep < 180 || lastTs - main.end < 1800) return null to 0
-    }
-    return main to inside.sumOf { it.asleep }
+    val main = inside.maxByOrNull { it.asleep } ?: return Night(null, 0)
+    if (main.asleep < 60) return Night(null, 0)
+    // daily.night_for held a night back until 30 min after the last sleep minute (or 3 h asleep) before noon. Heartline
+    // shows it straight away instead, flagged as still going on, and the next sync updates it.
+    val ongoing = lastTs != null && lastTs >= lo && lastTs < hi && Instant.ofEpochSecond(lastTs).atZone(zone).hour < 12 &&
+        (main.asleep < 180 || lastTs - main.end < 1800)
+    return Night(main, inside.sumOf { it.asleep }, ongoing)
 }
 
 internal fun sleepScore(asleep: Int, efficiency: Double, deep: Int, rem: Int): Int {

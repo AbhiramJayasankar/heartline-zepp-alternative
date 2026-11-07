@@ -73,6 +73,8 @@ data class DayResult(
     val wornMinutes: Int?, val strain: Double?, val trimp: Double?, val hrZones: HrZones?,
     val spo2Avg: Double?, val stressAvg: Double?, val readiness: Int?, val caloriesActive: Int?,
     val sleepStart: Long? = null, val sleepEnd: Long? = null,
+    /** The night may still be going on: it ended under 30 min before the latest data, before noon. */
+    val sleepOngoing: Boolean = false,
 )
 data class ReadinessFactor(val name: String, val impact: String, val detail: String)
 data class LastReadiness(val date: String, val value: Int)

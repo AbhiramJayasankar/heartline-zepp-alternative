@@ -129,7 +129,9 @@ fun OverviewScreen(controller: HeartlineController, nav: Navigator, onTab: (Tab)
             val sleepScore = t?.sleepScore?.toDouble()?.let { it to date } ?: trends.latestOf("sleep_score")
             val strain = t?.strain?.let { it to date } ?: trends.latestOf("strain")
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Driver("Sleep", sleepScore?.first?.roundToInt()?.toString() ?: "–", "/100", (sleepScore?.first ?: 0.0) / 100, c.hue(Area.SLEEP), sleepScore?.second?.takeIf { it != date }, Modifier.weight(1f))
+                // A night that may still be going on shows straight away, marked "so far" until it is settled.
+                val sleepSoFar = t?.lastNight?.ongoing == true && sleepScore?.second == date
+                Driver("Sleep", sleepScore?.first?.roundToInt()?.toString() ?: "–", "/100", (sleepScore?.first ?: 0.0) / 100, c.hue(Area.SLEEP), sleepScore?.second?.takeIf { it != date }, Modifier.weight(1f), if (sleepSoFar) "so far" else null)
                 Driver("Strain", strain?.first?.let { "%.1f".format(it) } ?: "–", "/21", (strain?.first ?: 0.0) / 21, c.pulse, strain?.second?.takeIf { it != date }, Modifier.weight(1f))
                 Driver("Battery", t?.bodyBattery?.toString() ?: "–", "/100", (t?.bodyBattery ?: 0) / 100.0, c.ok, null, Modifier.weight(1f), if (t?.bodyBattery == null) "after a night's sleep" else null)
             }
@@ -170,7 +172,7 @@ fun OverviewScreen(controller: HeartlineController, nav: Navigator, onTab: (Tab)
                     BigValue(night?.let { hm(it.deepMin + it.lightMin + it.remMin) } ?: "–", size = 28)
                     if (night != null) {
                         val ended = java.time.Instant.ofEpochSecond(night.end).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
-                        Text("${timeOf(night.start)} – ${timeOf(night.end)}" + if (ended != date) ", ${shortDate(ended)}" else "", style = HL.type.small, color = c.inkSoft)
+                        Text("${timeOf(night.start)} – ${timeOf(night.end)}" + (if (ended != date) ", ${shortDate(ended)}" else "") + (if (night.ongoing) ", so far" else ""), style = HL.type.small, color = c.inkSoft)
                         Gap(8); StagesBar(night)
                     } else MutedText("No night synced yet")
                 }

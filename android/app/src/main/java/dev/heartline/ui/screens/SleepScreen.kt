@@ -65,7 +65,7 @@ fun SleepScreen(controller: HeartlineController, nav: Navigator) {
     val c = HL.colors
     val today = remember { LocalDate.now() }
     val todayUi by controller.today.collectAsStateWithLifecycle()
-    // Open on the latest night that has sleep (tonight's appears only after the morning sync).
+    // Open on the latest night that has sleep (last night's appears with the first sync after you wake).
     val latestNight = todayUi?.lastNight?.end?.let { java.time.Instant.ofEpochSecond(it).atZone(java.time.ZoneId.systemDefault()).toLocalDate() }
     var picked by rememberSaveable { mutableStateOf<Long?>(null) }
     val epochDay = picked ?: (latestNight ?: today).toEpochDay()
@@ -154,6 +154,7 @@ private fun NightDetail(n: SleepNightUi, minutes: List<dev.heartline.app.MinuteU
                 BigValue(hm(asleep), size = 40)
                 Text("${timeOf(n.start)} → ${timeOf(n.end)}", style = HL.type.bodyStrong, color = c.ink)
                 Text("${hm(inBed)} in bed · ${if (inBed > 0) 100 * asleep / inBed else 0}% asleep", style = HL.type.small, color = c.inkSoft)
+                if (n.ongoing) { Gap(4); Text("So far. This night updates with the next sync if you're still asleep or doze off again.", style = HL.type.small, color = c.inkSoft) }
                 usualMin?.let { u ->
                     val diff = asleep - u
                     Gap(6)

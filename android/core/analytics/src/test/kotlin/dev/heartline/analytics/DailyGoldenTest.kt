@@ -37,7 +37,8 @@ class DailyGoldenTest(private val name: String) {
             minutes = minutes.filter { it.ts < cut }; health = emptyList(); checks = emptyList()
         }
         if (name == "empty") { minutes = emptyList(); health = emptyList(); checks = emptyList() }
-        val actual = computeDaily(minutes, health, checks, profile, source["days"].number().toInt(), now)
+        // The goldens come from Python, which held back a night that might still be going on.
+        val actual = computeDaily(minutes, health, checks, profile, source["days"].number().toInt(), now, holdOngoingNights = true)
         val expected = fixture("goldens/daily_$name.json")
         var numericCount = 0
         var maxDelta = 0.0

@@ -27,7 +27,7 @@ fun rhythmStatus(value: String?): RhythmStatus = when (value) {
     else -> RhythmStatus.INSUFFICIENT
 }
 fun DayResult.sleepUi(): SleepNightUi? = sleepStart?.let { start -> sleepEnd?.let { end ->
-    SleepNightUi(start, end, deepMin ?: 0, lightMin ?: 0, remMin ?: 0, awakeMin ?: 0)
+    SleepNightUi(start, end, deepMin ?: 0, lightMin ?: 0, remMin ?: 0, awakeMin ?: 0, sleepOngoing)
 } }
 fun DailyResult.todayUi(date: LocalDate): TodayUi {
     val day = days.lastOrNull { it.date == date.toString() }

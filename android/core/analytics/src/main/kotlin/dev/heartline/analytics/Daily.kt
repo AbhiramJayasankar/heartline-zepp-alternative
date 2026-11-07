@@ -36,6 +36,8 @@ private fun zScore(value: Double?, base: List<Double>, floor: Double): Double? {
 fun computeDaily(
     minutes: List<MinuteSample>, health: List<HealthValue>, checks: List<CheckSummary>,
     profile: Profile, days: Int, now: ZonedDateTime,
+    /** Python's daily.night_for left out a night that may still be going on; Heartline shows it, flagged [DayResult.sleepOngoing]. */
+    holdOngoingNights: Boolean = false,
 ): DailyResult {
     require(days > 0)
     val today = now.toLocalDate()
@@ -52,7 +54,7 @@ fun computeDaily(
         val d = today.minusDays(i.toLong())
         if (d < first.minusDays(1)) continue
         val ms = byDay[d].orEmpty()
-        val (main, asleep) = nightFor(blocks, d, minutes.lastOrNull()?.ts, zone)
+        val (main, asleep, ongoing) = nightFor(blocks, d, minutes.lastOrNull()?.ts, zone).let { if (holdOngoingNights && it.ongoing) Night(null, 0) else it }
         val eff = main?.let { rounded(100 * it.asleep / ((it.end - it.start) / 60.0 + 1), 1) }
         val resting = ownHealth["resting_hr"]?.get(d) ?: main?.let { restingHrFrom(it.rows) }
         val awakeHr = ms.filter { it.hr != null && it.hr != 0 && it.state !in sleepStates }.map { it.hr!! }
@@ -66,7 +68,7 @@ fun computeDaily(
             wornMinutes = ms.takeIf { it.isNotEmpty() }?.count { it.state !in noDataStates },
             strain = null, trimp = null, hrZones = hrMax?.takeIf { it != 0 && awakeHr.isNotEmpty() }?.let { zoneMinutes(awakeHr, it) },
             spo2Avg = ownHealth["spo2"]?.get(d), stressAvg = ownHealth["stress"]?.get(d),
-            readiness = null, caloriesActive = null, sleepStart = main?.start, sleepEnd = main?.end,
+            readiness = null, caloriesActive = null, sleepStart = main?.start, sleepEnd = main?.end, sleepOngoing = ongoing,
         ), awakeHr)
     }
     val restingValues = rows.values.mapNotNull { it.row.restingHr?.takeIf { v -> v != 0.0 } }
