@@ -24,6 +24,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.offset
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
@@ -311,8 +313,14 @@ fun stressWord(v: Double): String = when { v < 40 -> "Relaxed"; v < 60 -> "Norma
 @Composable
 private fun Driver(label: String, value: String, unit: String, fraction: Double, color: Color, from: LocalDate?, modifier: Modifier, note: String? = null, onClick: () -> Unit) {
     val c = HL.colors
-    Column(modifier.clip(RoundedCornerShape(10.dp)).clickable(onClickLabel = "How $label is worked out", role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
-        .semantics(mergeDescendants = true) {}) {
+    // The rounded touch area reaches 6 dp past the content on every side, so its corners clip empty space, not the meter
+    // or the date under it; the content itself stays where it was.
+    Column(modifier.layout { m, cs ->
+        val p = 6.dp.roundToPx()
+        val pl = m.measure(cs.offset(2 * p, 2 * p))
+        layout(pl.width - 2 * p, pl.height - 2 * p) { pl.place(-p, -p) }
+    }.clip(RoundedCornerShape(12.dp)).clickable(onClickLabel = "How $label is worked out", role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
+        .padding(6.dp).semantics(mergeDescendants = true) {}) {
         Text(label, style = HL.type.label, color = c.inkSoft)
         BigValue(value, unit, size = 26)
         Gap(6)
