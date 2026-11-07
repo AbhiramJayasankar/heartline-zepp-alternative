@@ -38,6 +38,10 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.border
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -172,4 +176,30 @@ fun agoOf(ts: Long): String {
         s < 86400 -> "${s / 3600} h ago"
         else -> "${s / 86400} d ago"
     }
+}
+
+/**
+ * Marks a card as a section links can jump to: when [nav]'s focus is [key], the tab scrolls it near the top and outlines
+ * it for a moment. Only works on tab pages (they share [LocalTabScroll]).
+ */
+@Composable
+fun Modifier.section(nav: dev.heartline.ui.Navigator, key: String): Modifier {
+    val scroll = LocalTabScroll.current ?: return this
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    var top by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<Float?>(null) }
+    var flash by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val focused = nav.focus == key
+    // Keyed on the position becoming known, not on its value, which changes while scrolling.
+    androidx.compose.runtime.LaunchedEffect(focused, top != null) {
+        if (!focused || top == null) return@LaunchedEffect
+        kotlinx.coroutines.delay(150)
+        val y = top ?: return@LaunchedEffect
+        scroll.animateScrollTo((scroll.value + y - with(density) { 96.dp.toPx() }).toInt().coerceAtLeast(0))
+        flash = true
+        kotlinx.coroutines.delay(1800)
+        flash = false
+        nav.focus = null
+    }
+    return this.then(androidx.compose.ui.Modifier.onGloballyPositioned { top = it.positionInRoot().y })
+        .then(if (flash) androidx.compose.ui.Modifier.border(2.dp, HL.colors.pulse, androidx.compose.foundation.shape.RoundedCornerShape(18.dp)) else androidx.compose.ui.Modifier)
 }

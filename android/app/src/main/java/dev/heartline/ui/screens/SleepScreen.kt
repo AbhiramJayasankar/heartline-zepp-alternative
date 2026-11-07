@@ -103,7 +103,7 @@ fun SleepScreen(controller: HeartlineController, nav: Navigator) {
             // ---- Two weeks ----
             sleepSeries?.let { s ->
                 Heading("Last ${s.points.size} nights")
-                Card(padding = 14.dp) {
+                Card(Modifier.section(nav, "sleep"), padding = 14.dp) {
                     val avg = s.points.mapNotNull { it.value }.takeIf { it.isNotEmpty() }?.average()
                     val nights = trends?.nights.orEmpty().takeLast(s.points.size)
                     val usual = dev.heartline.ui.components.usualWindow(nights)
@@ -122,7 +122,7 @@ fun SleepScreen(controller: HeartlineController, nav: Navigator) {
             }
             scoreSeries?.takeIf { it.points.any { p -> p.value != null } }?.let { s ->
                 Gap(10)
-                Card(padding = 14.dp) {
+                Card(Modifier.section(nav, "sleep_score"), padding = 14.dp) {
                     AreaLabel("Sleep score", c.hue(Area.SLEEP), dot = false)
                     Gap(4)
                     DayBars(s.points, c.hue(Area.SLEEP), line = true, height = 110.dp, unit = "", format = { "%.0f".format(it) })

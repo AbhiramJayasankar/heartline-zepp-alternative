@@ -167,7 +167,7 @@ fun ActivityScreen(controller: HeartlineController, nav: Navigator) {
             // ---- Two weeks ----
             trends.seriesOf("steps")?.let { s ->
                 Heading("Last ${s.points.size} days")
-                Card(padding = 14.dp) {
+                Card(Modifier.section(nav, "steps"), padding = 14.dp) {
                     val vals = s.points.mapNotNull { it.value }
                     Row(Modifier.fillMaxWidth()) {
                         Fact("Average", fmtInt(vals.takeIf { it.isNotEmpty() }?.average()?.roundToInt()), Modifier.weight(1f), unit = "steps")
@@ -181,7 +181,7 @@ fun ActivityScreen(controller: HeartlineController, nav: Navigator) {
             }
             trends.seriesOf("active")?.let { s ->
                 Gap(10)
-                Card(padding = 14.dp) {
+                Card(Modifier.section(nav, "active"), padding = 14.dp) {
                     AreaLabel("Active time", c.pulse, dot = false)
                     Gap(4)
                     DayBars(s.points, c.pulse, height = 110.dp, unit = "min", reference = 30.0, referenceLabel = "30 min a day")
@@ -192,7 +192,7 @@ fun ActivityScreen(controller: HeartlineController, nav: Navigator) {
             }
             trends.seriesOf("strain")?.takeIf { s -> s.points.any { it.value != null } }?.let { s ->
                 Gap(10)
-                Card(padding = 14.dp, onClick = { nav.push(Route.Readiness("strain")) }, onClickLabel = "How strain is worked out") {
+                Card(Modifier.section(nav, "strain"), padding = 14.dp, onClick = { nav.push(Route.Readiness("strain")) }, onClickLabel = "How strain is worked out") {
                     AreaLabel("Strain", c.pulse, dot = false)
                     Gap(4)
                     DayBars(s.points, c.pulse, height = 110.dp, unit = "", reference = 14.0, referenceLabel = "14, a hard day", format = { "%.1f".format(it) })
@@ -201,7 +201,7 @@ fun ActivityScreen(controller: HeartlineController, nav: Navigator) {
             }
             trends.seriesOf("pai")?.takeIf { s -> s.points.any { it.value != null } }?.let { s ->
                 Gap(10)
-                Card(padding = 14.dp) {
+                Card(Modifier.section(nav, "pai"), padding = 14.dp) {
                     AreaLabel("PAI", move, dot = false)
                     Gap(4)
                     DayBars(s.points, move, height = 110.dp, unit = "")

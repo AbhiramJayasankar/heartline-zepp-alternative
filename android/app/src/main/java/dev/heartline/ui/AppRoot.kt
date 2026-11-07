@@ -102,8 +102,10 @@ class Navigator {
     fun replace(r: Route) { pop(); push(r) }
     /** Set by [AppRoot]: switches the bottom tab. */
     internal var tabSwitch: (Tab) -> Unit = {}
-    /** Closes any pushed screens and shows [t], for links from a detail page to a whole tab. */
-    fun toTab(t: Tab) { stack.clear(); tabSwitch(t) }
+    /** A section the shown tab should scroll to and outline (see [dev.heartline.ui.screens.section]); cleared once done. */
+    var focus by androidx.compose.runtime.mutableStateOf<String?>(null)
+    /** Closes any pushed screens and shows [t], for links from a detail page to a whole tab, scrolled to [focus] if given. */
+    fun toTab(t: Tab, focus: String? = null) { stack.clear(); this.focus = focus; tabSwitch(t) }
 }
 
 @Composable

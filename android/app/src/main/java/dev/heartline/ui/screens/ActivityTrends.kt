@@ -61,7 +61,7 @@ fun TrendsScreen(controller: HeartlineController, nav: Navigator, onBack: (() ->
     val c = HL.colors
     val trends by controller.trends.collectAsStateWithLifecycle()
     val t = trends
-    Screen("Trends", onBack = onBack, subtitle = "Two weeks of the numbers without a page of their own, against your 28-day usual level. Tap a card for every day.") {
+    Screen("Trends", onBack = onBack, subtitle = "Two weeks of everything, against your 28-day usual level. Tap a card to open it on its page.") {
         if (t == null) { MutedText("Trends appear after the first sync."); return@Screen }
         dev.heartline.ui.components.Card(padding = 14.dp) {
             dev.heartline.ui.components.FactGrid(listOf(
@@ -73,32 +73,38 @@ fun TrendsScreen(controller: HeartlineController, nav: Navigator, onBack: (() ->
             ))
         }
         Gap(14)
-        // Sleep, heart, activity and readiness trends live on their own tabs and pages now.
-        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("Sleep" to "sleep", "Heart" to "rhr", "Activity" to "steps", "Readiness" to "readiness").forEach { (label, key) ->
-                dev.heartline.ui.components.PillButton(label, { openTrend(nav, key) }, style = dev.heartline.ui.components.ButtonStyle.QUIET)
+        // Every trend, grouped by the page it lives on. A card opens that page scrolled to its section.
+        val byKey = t.series.associateBy { it.key }
+        val groups = listOf(
+            Triple("Sleep", dev.heartline.ui.Tab.SLEEP, listOf("sleep", "sleep_score", "hrv_sleep", "spo2")),
+            Triple("Heart", dev.heartline.ui.Tab.HEART, listOf("rhr", "awake_rhr", "hrv", "stress")),
+            Triple("Activity", dev.heartline.ui.Tab.ACTIVITY, listOf("steps", "active", "strain", "pai")),
+            Triple("Recovery and body", null, listOf("readiness", "temp")),
+        )
+        val placed = groups.flatMap { it.third }.toSet()
+        val rest = t.series.filter { it.key !in placed }.map { it.key }
+        (groups + listOfNotNull(rest.takeIf { it.isNotEmpty() }?.let { Triple("Other", null, it) })).forEach { (title, tab, keys) ->
+            val items = keys.mapNotNull { byKey[it] }.filter { s -> s.points.any { it.value != null } }
+            if (items.isEmpty()) return@forEach
+            dev.heartline.ui.components.Heading(title, action = tab?.let { "$title page" }, onAction = tab?.let { { nav.toTab(it) } })
+            items.chunked(2).forEach { pair ->
+                Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    pair.forEach { s -> TrendCard(s, Modifier.weight(1f).fillMaxHeight()) { openTrend(nav, s.key) } }
+                    if (pair.size == 1) Spacer(Modifier.weight(1f))
+                }
+                Gap(10)
             }
-        }
-        Gap(6)
-        MutedText("Sleep, heart, activity and readiness trends are on their own pages. Below: everything that doesn't have one.")
-        Gap(12)
-        t.series.filter { it.key !in setOf("sleep", "sleep_score", "hrv_sleep", "rhr", "awake_rhr", "hrv", "steps", "strain", "active", "pai", "readiness") }.chunked(2).forEach { pair ->
-            Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                pair.forEach { s -> TrendCard(s, Modifier.weight(1f).fillMaxHeight()) { nav.push(Route.Trend(s.key)) } }
-                if (pair.size == 1) Spacer(Modifier.weight(1f))
-            }
-            Gap(10)
         }
     }
 }
 
 /** Lower is better for these, higher for [HIGHER_BETTER]; the rest are shown without a judgement. */
-private val LOWER_BETTER = setOf("rhr", "stress")
-private val HIGHER_BETTER = setOf("readiness", "hrv", "sleep", "sleep_score")
+private val LOWER_BETTER = setOf("rhr", "awake_rhr", "stress")
+private val HIGHER_BETTER = setOf("readiness", "hrv", "hrv_sleep", "sleep", "sleep_score")
 /** Totals that build up through the day: today's partial value isn't compared, the last whole day is. */
 private val DAY_TOTALS = setOf("steps", "active", "strain", "pai")
 /** Shown as a difference in their own unit rather than a percentage. */
-private val ABSOLUTE = setOf("temp", "spo2", "rhr")
+private val ABSOLUTE = setOf("temp", "spo2", "rhr", "awake_rhr")
 
 @Composable
 private fun TrendCard(s: dev.heartline.app.TrendSeries, modifier: Modifier, onClick: () -> Unit) {

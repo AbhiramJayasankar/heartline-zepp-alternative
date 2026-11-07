@@ -170,9 +170,9 @@ fun TrendExtras(s: dev.heartline.app.TrendSeries, showAbout: Boolean = true) {
 
 /** Trends that live on their own tab now; the rest keep a trend page. */
 fun openTrend(nav: dev.heartline.ui.Navigator, key: String) = when (key) {
-    "sleep", "sleep_score", "hrv_sleep" -> nav.toTab(dev.heartline.ui.Tab.SLEEP)
-    "rhr", "awake_rhr", "hrv" -> nav.toTab(dev.heartline.ui.Tab.HEART)
-    "steps", "strain", "active", "pai" -> nav.toTab(dev.heartline.ui.Tab.ACTIVITY)
+    "sleep", "sleep_score", "hrv_sleep" -> nav.toTab(dev.heartline.ui.Tab.SLEEP, key)
+    "rhr", "awake_rhr", "hrv" -> nav.toTab(dev.heartline.ui.Tab.HEART, key)
+    "steps", "strain", "active", "pai" -> nav.toTab(dev.heartline.ui.Tab.ACTIVITY, key)
     "readiness" -> nav.push(dev.heartline.ui.Route.Readiness())
     else -> nav.push(dev.heartline.ui.Route.Trend(key))
 }

@@ -127,7 +127,7 @@ fun HeartScreen(controller: HeartlineController, nav: Navigator) {
             val hrv = trends.seriesOf("hrv")
             if (rhr != null) {
                 Heading("Sleeping heart rate, 2 weeks")
-                Card(padding = 14.dp) {
+                Card(Modifier.section(nav, "rhr"), padding = 14.dp) {
                     val latest = rhr.points.lastOrNull { it.value != null }?.value
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         dev.heartline.ui.components.BigValue(latest?.roundToInt()?.toString() ?: "–", "bpm", size = 30, modifier = Modifier.weight(1f))
@@ -145,7 +145,7 @@ fun HeartScreen(controller: HeartlineController, nav: Navigator) {
             }
             trends.seriesOf("awake_rhr")?.takeIf { s -> s.points.any { it.value != null } }?.let { awake ->
                 Gap(10)
-                Card(padding = 14.dp) {
+                Card(Modifier.section(nav, "awake_rhr"), padding = 14.dp) {
                     AreaLabel("Awake resting heart rate", c.pulse, dot = false)
                     Gap(4)
                     DayBars(awake.points, c.pulse.copy(alpha = 0.7f), line = true, height = 110.dp, reference = awake.baseline,
@@ -157,7 +157,7 @@ fun HeartScreen(controller: HeartlineController, nav: Navigator) {
             }
             if (hrv != null && hrv.points.any { it.value != null }) {
                 Gap(10)
-                Card(padding = 14.dp) {
+                Card(Modifier.section(nav, "hrv"), padding = 14.dp) {
                     AreaLabel("Heart rate variability (from heart checks)", c.ok, dot = false)
                     Gap(4)
                     DayBars(hrv.points, c.ok, line = true, height = 110.dp, reference = hrv.baseline, referenceLabel = hrv.baseline?.let { "your usual, ${it.roundToInt()} ms" }, unit = "ms")

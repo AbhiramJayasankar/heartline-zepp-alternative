@@ -46,7 +46,7 @@ fun OvernightCard(controller: HeartlineController, date: LocalDate, night: Sleep
     val clean = samples.filter { it.rmssd != null }
     fun med(v: List<Double>) = v.sorted().let { if (it.isEmpty()) null else if (it.size % 2 == 1) it[it.size / 2] else (it[it.size / 2 - 1] + it[it.size / 2]) / 2 }
     Heading("Overnight HRV")
-    Card(padding = 16.dp) {
+    Card(Modifier.section(nav, "hrv_sleep"), padding = 16.dp) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 AreaLabel("Automatic heart checks while you sleep", c.hue(Area.SLEEP), dot = false)
