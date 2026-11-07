@@ -63,6 +63,7 @@ sealed interface Route {
     data class Workout(val start: Long, val epochDay: Long) : Route
     data object Sensors : Route
     data object WatchSettings : Route
+    data object Notes : Route
     /** How readiness and the other Today scores are worked out; [focus] scrolls to one factor or score. */
     data class Readiness(val focus: String? = null) : Route
     data object WatchMenu : Route
@@ -172,6 +173,7 @@ fun AppRoot(controller: HeartlineController) {
                         is Route.Workout -> WorkoutScreen(controller, target, nav)
                         Route.Sensors -> SensorsScreen(controller, nav)
                         Route.WatchSettings -> WatchSettingsScreen(controller, nav)
+                        Route.Notes -> dev.heartline.ui.screens.NotesScreen(controller, nav)
                         is Route.Readiness -> dev.heartline.ui.screens.ReadinessScreen(controller, target.focus, nav)
                         Route.WatchMenu -> WatchMenuScreen(controller, nav)
                         Route.Vibration -> VibrationScreen(controller, nav)

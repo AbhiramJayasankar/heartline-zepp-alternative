@@ -122,7 +122,7 @@ fun CheckExplained(s: SessionUi, history: List<SessionUi>, resting: Double?, age
             ?: resting?.let { "Your awake resting rate lately: ${it.roundToInt()} bpm." },
         typical = "60–100 bpm is the usual adult range at rest; fit people often sit in the 50s or lower. During a check it is normally close to your awake resting rate and a few beats above your sleeping one.",
         worth = "Only if it is below 40 or above 100 while you are truly at rest, or far from your usual without a reason.",
-        link = "Awake resting heart rate trend" to { nav.push(Route.Trend("awake_rhr")) })
+        link = "Awake resting heart rate, Heart tab" to { openTrend(nav, "awake_rhr") })
     Metric("HRV (RMSSD)", s.rmssd?.roundToInt()?.toString(), "ms",
         verdict = s.rmssd?.let { v -> hrvUsual?.takeIf { it.n >= 3 }?.let { if (v < it.avg * 0.75) Level.LOOK else Level.OK } ?: Level.INFO },
         what = "Heart rate variability: how much the gap between one beat and the next changes. It mostly reflects the vagus nerve, your " +
@@ -131,7 +131,7 @@ fun CheckExplained(s: SessionUi, history: List<SessionUi>, resting: Double?, age
         yours = hrvUsual?.let { "Your clean checks: ${it.avg.roundToInt()} ms on average, ${it.low.roundToInt()}–${it.high.roundToInt()} (${it.n} checks)." },
         typical = "About 19–75 ms in short resting readings from healthy adults (Nunan et al., 2010). It falls with age${age?.let { a -> if (a < 30) ", and people in their 20s usually sit in the upper half" else "" } ?: ""}. Genes make a big difference, so your own trend matters far more than anyone else's number.",
         worth = "When it stays well below your usual for several days, especially with a raised resting heart rate. That combination feeds straight into readiness.",
-        link = "HRV trend" to { nav.push(Route.Trend("hrv")) })
+        link = "HRV, Heart tab" to { openTrend(nav, "hrv") })
     Metric("SDNN", s.sdnn?.roundToInt()?.toString(), "ms", verdict = s.sdnn?.let { Level.OK },
         what = "The overall spread of your beat gaps: both quick beat-to-beat changes and slower swings with breathing and posture.",
         how = "The standard deviation of every clean beat gap in the check.",

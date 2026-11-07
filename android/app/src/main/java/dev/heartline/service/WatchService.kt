@@ -78,6 +78,8 @@ class WatchService : Service() {
                     launch { periodic(60 * 60_000L, "health_last_sync") { watch.syncHealth() } }
                     launch { periodic(5 * 60_000L, "quick_last_sync") { watch.syncQuick(); app.db.meta.set("quick_last_sync", (System.currentTimeMillis() / 1000).toString()) } }
                     launch { periodic(30 * 60_000L, "battery_last_read") { watch.readBattery(); app.db.meta.set("battery_last_read", (System.currentTimeMillis() / 1000).toString()) } }
+                    // Short heart checks while asleep, when turned on (Sleep page).
+                    launch { OvernightHrv(app, watch, { watch.raw.value.streaming || captureRunner.active }, java.io.File(filesDir, "raw")).run() }
                 }
             }
         }

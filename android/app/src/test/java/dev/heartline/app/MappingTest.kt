@@ -13,8 +13,8 @@ class MappingTest {
     private fun daily() = computeDaily(emptyList(), emptyList(), emptyList(), Profile(), 28, now)
     @Test fun trendKeysTitlesAndUnitsMatchDemo() {
         val series = daily().trendsUi(emptyMap()).series
-        assertEquals(listOf("readiness", "rhr", "awake_rhr", "hrv", "sleep", "sleep_score", "steps", "strain", "active", "spo2", "stress", "pai", "temp"), series.map { it.key })
-        assertEquals(listOf("Readiness", "Sleeping heart rate", "Awake resting heart rate", "HRV", "Sleep", "Sleep score", "Steps", "Strain", "Active time", "Blood oxygen", "Stress", "PAI", "Skin temperature"), series.map { it.title })
+        assertEquals(listOf("readiness", "rhr", "awake_rhr", "hrv", "hrv_sleep", "sleep", "sleep_score", "steps", "strain", "active", "spo2", "stress", "pai", "temp"), series.map { it.key })
+        assertEquals(listOf("Readiness", "Sleeping heart rate", "Awake resting heart rate", "HRV", "Overnight HRV", "Sleep", "Sleep score", "Steps", "Strain", "Active time", "Blood oxygen", "Stress", "PAI", "Skin temperature"), series.map { it.title })
         assertEquals("h", series.single { it.key == "sleep" }.unit)
     }
     @Test fun sleepMinutesBecomeHoursAndAbsentValuesStayNull() {

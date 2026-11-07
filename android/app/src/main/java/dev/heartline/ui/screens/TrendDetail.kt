@@ -12,6 +12,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
@@ -130,4 +131,48 @@ private fun trendAbout(key: String): About? = when (key) {
     "temp" -> About("Skin temperature at the wrist.", "The watch's skin sensor, averaged over the day.",
         "Wrist skin runs a few degrees below core temperature and moves with the room. A night well above your usual can come with illness.")
     else -> null
+}
+
+/**
+ * What a trend page adds to a chart, for pages that already show the chart: latest, average and range, what the number
+ * is, and (on request) every day's value against the usual level.
+ */
+@Composable
+fun TrendExtras(s: dev.heartline.app.TrendSeries, showAbout: Boolean = true) {
+    val c = HL.colors
+    val vals = s.points.mapNotNull { it.value }
+    if (vals.isEmpty()) return
+    var open by androidx.compose.runtime.saveable.rememberSaveable(s.key) { androidx.compose.runtime.mutableStateOf(false) }
+    Gap(10)
+    Row(Modifier.fillMaxWidth()) {
+        Stat("Latest", fmt(vals.last()), Modifier.weight(1f), unit = s.unit)
+        Stat("Average", fmt(vals.average()), Modifier.weight(1f), unit = s.unit)
+        Stat("Range", "${fmt(vals.min())}–${fmt(vals.max())}", Modifier.weight(1f))
+    }
+    if (showAbout) trendAbout(s.key)?.let { a ->
+        Gap(10)
+        Text(a.what, style = HL.type.small, color = c.ink)
+        Gap(4); Text("How it's worked out", style = HL.type.label, color = c.ink); MutedText(a.how)
+        Gap(4); Text("Typical", style = HL.type.label, color = c.ink); MutedText(a.typical)
+    }
+    Gap(8)
+    Text(if (open) "Hide every day ▴" else "Every day ▾", style = HL.type.label, color = c.pulse,
+        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(role = androidx.compose.ui.semantics.Role.Button) { open = !open }.padding(vertical = 6.dp))
+    if (open) s.points.reversed().forEach { p ->
+        Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+            Text(p.date.format(longDay), style = HL.type.small, color = c.ink, modifier = Modifier.weight(1f))
+            Text(p.value?.let { fmt(it) + if (s.unit.isNotEmpty()) " ${s.unit}" else "" } ?: "no reading", style = HL.type.bodyStrong.copy(fontSize = 14.sp), color = if (p.value == null) c.inkSoft else c.ink)
+            s.baseline?.let { b -> p.value?.let { v -> Spacer(Modifier.padding(start = 10.dp)); Text("%+.0f%%".format((v - b) / b * 100), style = HL.type.small, color = c.inkSoft) } }
+        }
+        HorizontalDivider(color = c.line)
+    }
+}
+
+/** Trends that live on their own tab now; the rest keep a trend page. */
+fun openTrend(nav: dev.heartline.ui.Navigator, key: String) = when (key) {
+    "sleep", "sleep_score", "hrv_sleep" -> nav.toTab(dev.heartline.ui.Tab.SLEEP)
+    "rhr", "awake_rhr", "hrv" -> nav.toTab(dev.heartline.ui.Tab.HEART)
+    "steps", "strain", "active", "pai" -> nav.toTab(dev.heartline.ui.Tab.ACTIVITY)
+    "readiness" -> nav.push(dev.heartline.ui.Route.Readiness())
+    else -> nav.push(dev.heartline.ui.Route.Trend(key))
 }

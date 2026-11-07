@@ -561,6 +561,41 @@ class RealController(
 
     override val probe = MutableStateFlow<List<String>>(emptyList())
     override val watchReadback = MutableStateFlow<List<Pair<String, String>>>(emptyList())
+    private fun sampleUi(p: dev.heartline.data.model.HealthPoint): OvernightSampleUi {
+        val j = runCatching { org.json.JSONObject(p.extra ?: "{}") }.getOrDefault(org.json.JSONObject())
+        fun num(k: String) = if (j.isNull(k)) null else j.optDouble(k).takeIf { it.isFinite() }
+        return OvernightSampleUi(p.ts, j.optString("night").takeIf { it.isNotEmpty() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
+            p.value, num("hr"), num("resp"), j.optDouble("quality", 0.0), j.optDouble("usable_s", 0.0), j.optString("reason").takeIf { it.isNotEmpty() && it != "null" },
+            j.optInt("attempt", 0), j.optInt("length_s", 0))
+    }
+    override val overnight: StateFlow<OvernightUi> = combine(db.meta.observe(dev.heartline.service.OvernightHrv.KEY), dev.heartline.service.OvernightHrv.status,
+        dev.heartline.service.OvernightHrv.dayStatus,
+        db.health.observeSeries(dev.heartline.service.OvernightHrv.SAMPLE, System.currentTimeMillis() / 1000.0 - 40 * 86_400),
+        db.health.observeSeries(dev.heartline.service.OvernightHrv.DAY_SAMPLE, System.currentTimeMillis() / 1000.0 - 40 * 86_400)) { cfg, status, dayStatus, rows, dayRows ->
+        val s = dev.heartline.service.OvernightSettings.parse(cfg)
+        OvernightUi(s.enabled, status, rows.map(::sampleUi), s.allDay, dayStatus, dayRows.map(::sampleUi), s.nightEvery, s.nightLen, s.dayEvery, s.dayLen)
+    }.stateIn(scope, SharingStarted.Eagerly, OvernightUi())
+    override val notes: StateFlow<String> = db.meta.observe("notes").map { it.orEmpty() }.stateIn(scope, SharingStarted.Eagerly, "")
+    override fun saveNotes(text: String) { scope.launch { db.meta.set("notes", text) } }
+    override fun setHrvSchedule(night: Boolean, everyMin: Int, lengthMin: Int) {
+        scope.launch {
+            val s = dev.heartline.service.OvernightSettings.parse(db.meta.get(dev.heartline.service.OvernightHrv.KEY))
+            db.meta.set(dev.heartline.service.OvernightHrv.KEY, (if (night) s.copy(nightEvery = everyMin, nightLen = lengthMin) else s.copy(dayEvery = everyMin, dayLen = lengthMin)).json())
+            db.events.add("info", "${if (night) "Overnight" else "Daytime"} HRV: $lengthMin-minute samples every $everyMin minutes")
+        }
+    }
+    override fun setAllDayHrv(enabled: Boolean) {
+        scope.launch {
+            db.meta.set(dev.heartline.service.OvernightHrv.KEY, dev.heartline.service.OvernightSettings.parse(db.meta.get(dev.heartline.service.OvernightHrv.KEY)).copy(allDay = enabled).json())
+            db.events.add("info", "Daytime HRV turned ${if (enabled) "on" else "off"}")
+        }
+    }
+    override fun setOvernight(enabled: Boolean) {
+        scope.launch {
+            db.meta.set(dev.heartline.service.OvernightHrv.KEY, dev.heartline.service.OvernightSettings.parse(db.meta.get(dev.heartline.service.OvernightHrv.KEY)).copy(enabled = enabled).json())
+            db.events.add("info", "Overnight HRV turned ${if (enabled) "on" else "off"}")
+        }
+    }
     override fun readWatchHealth() = action { w ->
         // Zepp 6.3 two-way reads (`FE id 01`, answer `10 FE id 01 01 value`). The GTR 2e answers only Pressure (stress, id 6);
         // HrInterval 1, HighHrReminder 3, Osa 5, Rem 8, AtrialFib 10 and RelaxationPromptSwitch 35 come back `10 FE 05`, unsupported.

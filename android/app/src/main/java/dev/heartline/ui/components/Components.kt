@@ -91,7 +91,7 @@ fun PillButton(
         modifier = modifier,
     ) {
         Box(Modifier.padding(horizontal = if (style == ButtonStyle.QUIET) 14.dp else 20.dp, vertical = if (style == ButtonStyle.QUIET) 8.dp else 12.dp), contentAlignment = Alignment.Center) {
-            Text(text, style = HL.type.button, color = if (enabled) fg else fg.copy(alpha = 0.4f))
+            Text(text, style = HL.type.button, color = if (enabled) fg else fg.copy(alpha = 0.4f), maxLines = 1, softWrap = false)
         }
     }
 }

@@ -61,7 +61,7 @@ fun TrendsScreen(controller: HeartlineController, nav: Navigator, onBack: (() ->
     val c = HL.colors
     val trends by controller.trends.collectAsStateWithLifecycle()
     val t = trends
-    Screen("Trends", onBack = onBack, subtitle = "Two weeks of every number, against your 28-day usual level. Tap a card for every day.") {
+    Screen("Trends", onBack = onBack, subtitle = "Two weeks of the numbers without a page of their own, against your 28-day usual level. Tap a card for every day.") {
         if (t == null) { MutedText("Trends appear after the first sync."); return@Screen }
         dev.heartline.ui.components.Card(padding = 14.dp) {
             dev.heartline.ui.components.FactGrid(listOf(
@@ -73,7 +73,16 @@ fun TrendsScreen(controller: HeartlineController, nav: Navigator, onBack: (() ->
             ))
         }
         Gap(14)
-        t.series.chunked(2).forEach { pair ->
+        // Sleep, heart, activity and readiness trends live on their own tabs and pages now.
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("Sleep" to "sleep", "Heart" to "rhr", "Activity" to "steps", "Readiness" to "readiness").forEach { (label, key) ->
+                dev.heartline.ui.components.PillButton(label, { openTrend(nav, key) }, style = dev.heartline.ui.components.ButtonStyle.QUIET)
+            }
+        }
+        Gap(6)
+        MutedText("Sleep, heart, activity and readiness trends are on their own pages. Below: everything that doesn't have one.")
+        Gap(12)
+        t.series.filter { it.key !in setOf("sleep", "sleep_score", "hrv_sleep", "rhr", "awake_rhr", "hrv", "steps", "strain", "active", "pai", "readiness") }.chunked(2).forEach { pair ->
             Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 pair.forEach { s -> TrendCard(s, Modifier.weight(1f).fillMaxHeight()) { nav.push(Route.Trend(s.key)) } }
                 if (pair.size == 1) Spacer(Modifier.weight(1f))

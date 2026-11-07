@@ -143,9 +143,17 @@ fun MiniTrend(series: TrendSeries, modifier: Modifier = Modifier) {
             val bw = max(3f, stepX * 0.6f)
             pts.forEach { (i, v) -> drawRoundRect(color.copy(alpha = 0.8f), Offset(x(i) - bw / 2, y(v)), Size(bw, max(1f, y(lo) - y(v))), CornerRadius(2f)) }
         } else {
-            val path = Path()
-            pts.forEachIndexed { k, (i, v) -> if (k == 0 || i - pts[k - 1].first > 1) path.moveTo(x(i), y(v)) else path.lineTo(x(i), y(v)) }
+            // Measured days solid; days with no reading bridged with a faded dotted line.
+            val path = Path(); val bridge = Path()
+            pts.forEachIndexed { k, (i, v) ->
+                when {
+                    k == 0 -> path.moveTo(x(i), y(v))
+                    i - pts[k - 1].first > 1 -> { bridge.moveTo(x(pts[k - 1].first), y(pts[k - 1].second)); bridge.lineTo(x(i), y(v)); path.moveTo(x(i), y(v)) }
+                    else -> path.lineTo(x(i), y(v))
+                }
+            }
             drawPath(path, color, style = Stroke(1.8.dp.toPx(), join = StrokeJoin.Round))
+            drawPath(bridge, color.copy(alpha = 0.45f), style = Stroke(1.3.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(2f, 5f)), cap = StrokeCap.Round))
             pts.forEach { (i, v) -> drawCircle(color, 2.4.dp.toPx(), Offset(x(i), y(v))) }
         }
     }

@@ -26,6 +26,15 @@ interface HeartlineController {
     val watchSettings: StateFlow<List<WatchSettingUi>>
     val events: StateFlow<List<EventUi>>
     val prefs: StateFlow<PrefsUi>
+    /** Overnight HRV: settings, what it is doing now, and recent samples. */
+    val overnight: StateFlow<OvernightUi>
+    fun setOvernight(enabled: Boolean)
+    /** One free-text note, kept on the phone (meta "notes"). */
+    val notes: StateFlow<String>
+    fun saveNotes(text: String)
+    fun setAllDayHrv(enabled: Boolean)
+    /** How often and how long automatic samples run, at night ([night] true) or by day, in minutes. */
+    fun setHrvSchedule(night: Boolean, everyMin: Int, lengthMin: Int)
 
     fun activityDay(date: LocalDate): Flow<ActivityDayUi>
     /** Everything recorded for one local day, for the day detail pages (heart rate, stress, body, steps). */
@@ -398,3 +407,10 @@ data class PrefsUi(
 val SAMPLE_APPS = listOf("" to "Heartline", "com.whatsapp" to "WhatsApp", "org.telegram.messenger" to "Telegram",
     "com.instagram.android" to "Instagram", "com.google.android.gm" to "Gmail", "com.samsung.android.messaging" to "Messages",
     "com.google.android.calendar" to "Calendar", "com.discord" to "Discord")
+
+/** One automatic overnight sample: RMSSD when clean, else why it was set aside. [night] is the morning it belongs to. */
+data class OvernightSampleUi(val ts: Long, val night: java.time.LocalDate?, val rmssd: Double?, val hr: Double?, val breathing: Double?, val quality: Double, val usableS: Double, val reason: String?,
+    val attempt: Int = 0, val lengthS: Int = 0)
+data class OvernightUi(val enabled: Boolean = false, val status: String = "Off", val samples: List<OvernightSampleUi> = emptyList(),
+    val allDay: Boolean = false, val dayStatus: String = "Off", val daySamples: List<OvernightSampleUi> = emptyList(),
+    val nightEvery: Int = 15, val nightLen: Int = 3, val dayEvery: Int = 30, val dayLen: Int = 2)

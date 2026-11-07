@@ -77,6 +77,8 @@ data class DayResult(
     val sleepOngoing: Boolean = false,
     /** Lowest 10-minute median while awake and still ([restingHr] is the sleeping value). */
     val awakeRestingHr: Double? = null,
+    /** Overnight HRV: the median RMSSD of the night's clean automatic samples (health type hrv_sleep). */
+    val hrvSleep: Double? = null,
 )
 data class ReadinessFactor(
     val name: String, val impact: String, val detail: String,

@@ -150,7 +150,7 @@ fun ReadinessScreen(controller: HeartlineController, focus: String?, nav: Naviga
             val f = factors.firstOrNull { it.name == s.name }
             val focused = focus == s.name
             Card(Modifier.padding(bottom = 10.dp).anchor(s.name).then(if (focused) Modifier.border(2.dp, c.pulse, RoundedCornerShape(18.dp)) else Modifier),
-                onClick = { nav.push(Route.Trend(s.trend)) }, onClickLabel = "Open the ${s.name} trend") {
+                onClick = { openTrend(nav, s.trend) }, onClickLabel = "Open ${s.name}") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     AreaLabel(s.name, c.hue(s.area), Modifier.weight(1f))
                     if (f != null) Delta(when (f.impact) { Impact.POSITIVE -> "Helping ${signed(f.points)}"; Impact.NEGATIVE -> "Holding back ${signed(f.points)}"; Impact.NEUTRAL -> "About usual ${signed(f.points)}" },
@@ -180,7 +180,7 @@ fun ReadinessScreen(controller: HeartlineController, focus: String?, nav: Naviga
                     DayBars(pts, c.hue(s.area), height = 90.dp, reference = series(s.trend)?.baseline, referenceLabel = "usual", line = s.key == "rhr" || s.key == "hrv")
                 }
                 Gap(6)
-                Text("Open the trend ›", style = HL.type.label, color = c.pulse)
+                Text(when (s.trend) { "sleep_score" -> "Open Sleep ›"; "strain" -> "Open Activity ›"; else -> "Open Heart ›" }, style = HL.type.label, color = c.pulse)
             }
         }
 
@@ -203,11 +203,12 @@ fun ReadinessScreen(controller: HeartlineController, focus: String?, nav: Naviga
         }
 
         series("readiness")?.points?.takeIf { p -> p.count { it.value != null } >= 2 }?.let { pts ->
-            Heading("Last ${min(pts.size, 14)} days", action = "Trend", onAction = { nav.push(Route.Trend("readiness")) })
+            Heading("Last ${min(pts.size, 14)} days")
             Card(padding = 14.dp) {
                 DayBars(pts.takeLast(14), c.ink, height = 130.dp, reference = 70.0, referenceLabel = "ordinary day")
                 Gap(6)
                 MutedText("Touch a day for its value. A run of days below 70 is worth more attention than any single low one.")
+                series("readiness")?.let { TrendExtras(it, showAbout = false) }
             }
         }
 

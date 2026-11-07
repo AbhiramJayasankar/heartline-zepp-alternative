@@ -11,6 +11,9 @@ class HealthRepository(private val db: HeartlineDatabase) {
         points.count { p -> sql.upsert("health", values("type" to p.type, "ts" to p.ts, "value" to p.value, "extra" to p.extra)) }
     }
     suspend fun deleteType(type: String) = db.write(setOf("health")) { it.delete("health", "type = ?", arrayOf(type)); Unit }
+    suspend fun deleteTypeRange(type: String, from: Long, to: Long) = db.write(setOf("health")) {
+        it.delete("health", "type = ? AND ts >= ? AND ts < ?", arrayOf(type, from.toString(), to.toString())); Unit
+    }
     suspend fun series(type: String, from: Double, to: Double = Double.MAX_VALUE): List<HealthPoint> = db.read {
         it.select("SELECT type,ts,value,extra FROM health WHERE type = ? AND ts >= ? AND ts <= ? ORDER BY ts",
             listOf(type, from, to)) { c -> HealthPoint(c.getString(0), c.getLong(1), c.doubleOrNull(2), c.getString(3)) }

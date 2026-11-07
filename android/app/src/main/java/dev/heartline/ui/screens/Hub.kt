@@ -174,7 +174,7 @@ fun WatchHubScreen(controller: HeartlineController, nav: Navigator) {
             )
             TileRow(
                 { HubTile(Icons.list, "Activity log", "Connections, syncs, errors", c.ink, it) { nav.push(Route.Events) } },
-                null,
+                { HubTile(Icons.send, "Notes", "Ideas and things to fix", c.ink, it) { nav.push(Route.Notes) } },
             )
             Gap(28)
         }

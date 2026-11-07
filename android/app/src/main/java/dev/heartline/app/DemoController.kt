@@ -241,6 +241,14 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override fun deleteCapture(id: String) = captures.update { l -> l.filter { it.id != id } }
     override val probe = MutableStateFlow<List<String>>(emptyList())
     override val watchReadback = MutableStateFlow<List<Pair<String, String>>>(emptyList())
+    override val overnight = MutableStateFlow(OvernightUi())
+    override val notes = MutableStateFlow("")
+    override fun saveNotes(text: String) { notes.value = text }
+    override fun setHrvSchedule(night: Boolean, everyMin: Int, lengthMin: Int) {
+        overnight.value = if (night) overnight.value.copy(nightEvery = everyMin, nightLen = lengthMin) else overnight.value.copy(dayEvery = everyMin, dayLen = lengthMin)
+    }
+    override fun setAllDayHrv(enabled: Boolean) { overnight.value = overnight.value.copy(allDay = enabled, dayStatus = if (enabled) "Waiting for 10 still minutes" else "Off") }
+    override fun setOvernight(enabled: Boolean) { overnight.value = overnight.value.copy(enabled = enabled, status = if (enabled) "Waiting for the night window" else "Off") }
     override fun readWatchHealth() { watchReadback.value = listOf("All-day stress" to "on") }
     override fun probeUnknownSensors() { probe.value = listOf("mask 0x04: nothing", "mask 0x80: nothing") }
 

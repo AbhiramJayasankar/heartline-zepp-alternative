@@ -166,7 +166,7 @@ fun ActivityScreen(controller: HeartlineController, nav: Navigator) {
 
             // ---- Two weeks ----
             trends.seriesOf("steps")?.let { s ->
-                Heading("Last ${s.points.size} days", action = "Trend", onAction = { nav.push(Route.Trend("steps")) })
+                Heading("Last ${s.points.size} days")
                 Card(padding = 14.dp) {
                     val vals = s.points.mapNotNull { it.value }
                     Row(Modifier.fillMaxWidth()) {
@@ -176,6 +176,7 @@ fun ActivityScreen(controller: HeartlineController, nav: Navigator) {
                     }
                     Gap(10)
                     DayBars(s.points, move, reference = goal.toDouble(), referenceLabel = "goal, ${fmtInt(goal)} steps", unit = "steps")
+                    TrendExtras(s, showAbout = false)
                 }
             }
             trends.seriesOf("active")?.let { s ->
@@ -186,6 +187,25 @@ fun ActivityScreen(controller: HeartlineController, nav: Navigator) {
                     DayBars(s.points, c.pulse, height = 110.dp, unit = "min", reference = 30.0, referenceLabel = "30 min a day")
                     Gap(6)
                     MutedText("Health guidelines suggest at least 150 minutes of moderate activity a week, about 30 minutes on most days.")
+                    TrendExtras(s, showAbout = false)
+                }
+            }
+            trends.seriesOf("strain")?.takeIf { s -> s.points.any { it.value != null } }?.let { s ->
+                Gap(10)
+                Card(padding = 14.dp, onClick = { nav.push(Route.Readiness("strain")) }, onClickLabel = "How strain is worked out") {
+                    AreaLabel("Strain", c.pulse, dot = false)
+                    Gap(4)
+                    DayBars(s.points, c.pulse, height = 110.dp, unit = "", reference = 14.0, referenceLabel = "14, a hard day", format = { "%.1f".format(it) })
+                    TrendExtras(s)
+                }
+            }
+            trends.seriesOf("pai")?.takeIf { s -> s.points.any { it.value != null } }?.let { s ->
+                Gap(10)
+                Card(padding = 14.dp) {
+                    AreaLabel("PAI", move, dot = false)
+                    Gap(4)
+                    DayBars(s.points, move, height = 110.dp, unit = "")
+                    TrendExtras(s)
                 }
             }
 

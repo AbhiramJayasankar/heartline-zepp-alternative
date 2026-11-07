@@ -69,7 +69,7 @@ fun computeDaily(
             strain = null, trimp = null, hrZones = hrMax?.takeIf { it != 0 && awakeHr.isNotEmpty() }?.let { zoneMinutes(awakeHr, it) },
             spo2Avg = ownHealth["spo2"]?.get(d), stressAvg = ownHealth["stress"]?.get(d),
             readiness = null, caloriesActive = null, sleepStart = main?.start, sleepEnd = main?.end, sleepOngoing = ongoing,
-            awakeRestingHr = awakeRestingHrFrom(ms),
+            awakeRestingHr = awakeRestingHrFrom(ms), hrvSleep = ownHealth["hrv_sleep"]?.get(d),
         ), awakeHr)
     }
     val restingValues = rows.values.mapNotNull { it.row.restingHr?.takeIf { v -> v != 0.0 } }
@@ -93,8 +93,14 @@ fun computeDaily(
         val rhrText = row.restingHr?.let { if (ownHealth["resting_hr"]?.containsKey(d) == true) it.toString() else it.toLong().toString() }
         zScore(row.restingHr, baseRest, 2.0)?.let { z -> factor("Resting heart rate", -z, 0.30,
             "$rhrText bpm vs your usual ${rounded(average(baseRest)).toLong()}", row.restingHr, average(baseRest), "bpm") }
+        // Overnight HRV, once three earlier nights have it, replaces heart checks: asleep HRV runs higher than awake,
+        // so each is only ever compared with itself.
+        val sleepBase = (1..28).mapNotNull { ownHealth["hrv_sleep"]?.get(d.minusDays(it.toLong())) }
+        val sleepZ = row.hrvSleep?.takeIf { sleepBase.size >= 3 }?.let { zScore(it, sleepBase, 0.1 * average(sleepBase)) }
+        if (sleepZ != null) factor("HRV", sleepZ, 0.35, "Overnight RMSSD ${rounded(row.hrvSleep!!).toLong()} ms vs your usual ${rounded(average(sleepBase)).toLong()}",
+            row.hrvSleep, average(sleepBase), "ms")
         val baseHrv = prev.mapNotNull { it.hrvRmssd?.takeIf { v -> v != 0.0 } }
-        zScore(row.hrvRmssd, baseHrv, if (baseHrv.isNotEmpty()) 0.1 * average(baseHrv) else 1.0)?.let { z ->
+        if (sleepZ == null) zScore(row.hrvRmssd, baseHrv, if (baseHrv.isNotEmpty()) 0.1 * average(baseHrv) else 1.0)?.let { z ->
             factor("HRV", z, 0.35, "RMSSD ${rounded(row.hrvRmssd!!).toLong()} ms vs your usual ${rounded(average(baseHrv)).toLong()}", row.hrvRmssd, average(baseHrv), "ms")
         }
         row.sleepScore?.let { score -> factor("Sleep", (score - 70) / 15.0, 0.25,
