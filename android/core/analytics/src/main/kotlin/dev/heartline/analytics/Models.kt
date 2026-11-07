@@ -93,7 +93,8 @@ data class ReadinessFactor(
     /** Today's value, the 28-day usual it was compared with, and its unit, when the factor has them. */
     val value: Double? = null, val usual: Double? = null, val unit: String = "",
 )
-data class LastReadiness(val date: String, val value: Int)
+/** The last day readiness could be worked out, with that day's factors, so its number and breakdown go together. */
+data class LastReadiness(val date: String, val value: Int, val factors: List<ReadinessFactor> = emptyList())
 data class TodayResult(
     val readiness: Int?, val readinessFactors: List<ReadinessFactor>, val strain: Double?,
     val sleepScore: Int?, val bodyBattery: Int?, val recommendation: String?, val note: String?,

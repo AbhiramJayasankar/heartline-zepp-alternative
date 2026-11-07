@@ -29,8 +29,11 @@ class MappingTest {
         assertEquals(58.0, trends.series.single { it.key == "pai" }.points.last().value!!, 0.0)
     }
     @Test fun previousReadinessHasDatedLabel() {
-        val d = daily(); val t = d.copy(today = d.today.copy(readiness = null, lastReadiness = LastReadiness("2026-10-31", 72))).todayUi(now.toLocalDate())
+        val sleep = dev.heartline.analytics.ReadinessFactor("Sleep", "neutral", "sleep score 76", 0.4, 0.25, 2.0)
+        val d = daily(); val t = d.copy(today = d.today.copy(readiness = null, lastReadiness = LastReadiness("2026-10-31", 72, listOf(sleep)))).todayUi(now.toLocalDate())
         assertEquals(72, t.readiness); assertEquals("Readiness, 31 Oct", t.readinessLabel)
+        // The breakdown is that day's too, so it adds up to the number shown.
+        assertEquals(listOf("Sleep"), t.factors.map { it.name }); assertEquals(2.0, t.factors.single().points, 0.0)
     }
     @Test fun invalidHeartRateIsRemovedButRawActivityIsPreserved() {
         val row = ActivityRow(1, 0, 0, 3, 255, 0, 0, 0, 0)

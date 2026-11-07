@@ -111,12 +111,16 @@ fun ReadinessScreen(controller: HeartlineController, focus: String?, nav: Naviga
                 }
             }
             Gap(8)
-            Text(today?.recommendation ?: "Readiness appears after a night with the watch on, once Heartline has three days to compare with.",
+            // An earlier day's number (the label carries its date) says so, instead of claiming there is none.
+            val earlier = today?.readinessLabel?.removePrefix("Readiness")?.removePrefix(", ")?.takeIf { it.isNotEmpty() }
+            Text(today?.recommendation ?: if (ready != null && earlier != null) "This is $earlier's readiness, the last day it could be worked out. Today's appears once last night's sleep syncs."
+                else "Readiness appears after a night with the watch on, once Heartline has three days to compare with.",
                 style = HL.type.body, color = c.ink)
         }
 
         // ---- The sum ----
-        Heading("How today's number adds up")
+        val dayWord = today?.readinessLabel?.removePrefix("Readiness")?.removePrefix(", ")?.takeIf { it.isNotEmpty() }?.let { "$it's" } ?: "today's"
+        Heading("How $dayWord number adds up")
         val factors = today?.factors.orEmpty()
         if (factors.isEmpty()) {
             Note(if (ready != null) "This is the last day readiness could be worked out (${today.readinessLabel.removePrefix("Readiness, ")}). " +

@@ -140,12 +140,13 @@ fun computeDaily(
         rounded(average(acute) / average(chronic), 2) else null
     val twork = rows[today]
     val trow = twork?.row
-    val done = rows.values.lastOrNull { it.row.readiness != null }?.row
+    val doneWork = rows.values.lastOrNull { it.row.readiness != null }
+    val done = doneWork?.row
     val todayOut = TodayResult(trow?.readiness, twork?.factors.orEmpty(), trow?.strain, trow?.sleepScore,
         trow?.let { bodyBattery(byDay[today].orEmpty(), it, hrMax) }, trow?.let { recommendation(it.readiness) },
         if (trow != null && trow.sleepScore == null) "No finished night yet today. Readiness, sleep score and body battery appear " +
             "after you wake up with the watch on." else null,
-        done?.let { LastReadiness(it.date, it.readiness!!) })
+        done?.let { LastReadiness(it.date, it.readiness!!, doneWork.factors.toList()) })
     val latestRhythm = checks.filter { it.signalQuality >= 0.5 }.maxByOrNull { it.start }?.rhythmStatus
     val alerts = makeAlerts(rows.mapValues { it.value.row }, today, profile, hrMax, acwr, latestRhythm, ownHealth)
     return DailyResult(rows.filterKeys { it > today.minusDays(days.toLong()) }.values.map { it.row }, todayOut,

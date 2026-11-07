@@ -37,7 +37,8 @@ fun DailyResult.todayUi(date: LocalDate): TodayUi {
         if (today.readiness == null && readiness != null) "Readiness, ${LocalDate.parse(readiness.date).format(DateTimeFormatter.ofPattern("d MMM"))}" else "Readiness",
         today.recommendation, today.strain, today.sleepScore, today.bodyBattery, day?.restingHr?.roundToInt(),
         // The analytics call it resting heart rate; it is measured asleep, so the app says so.
-        today.readinessFactors.map { Factor(if (it.name == "Resting heart rate") "Sleeping heart rate" else it.name, when (it.impact) { "positive" -> Impact.POSITIVE; "negative" -> Impact.NEGATIVE; else -> Impact.NEUTRAL }, it.detail,
+        // Until today's readiness is in, the number shown is an earlier day's, and so are the factors that add up to it.
+        (if (today.readiness == null && readiness != null) readiness.factors else today.readinessFactors).map { Factor(if (it.name == "Resting heart rate") "Sleeping heart rate" else it.name, when (it.impact) { "positive" -> Impact.POSITIVE; "negative" -> Impact.NEGATIVE; else -> Impact.NEUTRAL }, it.detail,
             it.z, it.weight, it.points, it.value, it.usual, it.unit) },
         alerts.map { AlertUi(it.level == "warn" || it.level == "warning", it.title, it.detail) }, last?.sleepUi(), day?.steps, day?.activeMinutes,
         day?.awakeRestingHr?.roundToInt(), day?.naps.orEmpty())
