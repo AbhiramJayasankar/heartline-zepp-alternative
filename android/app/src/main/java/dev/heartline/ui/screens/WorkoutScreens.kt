@@ -317,7 +317,7 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
                 bands = a.zones.filter { it.zone >= 3 }.map { z -> ChartBand(z.lowBpm.toDouble(), (z.highBpm ?: 240).toDouble(), dev.heartline.ui.components.zoneColor(z.zone, c).copy(alpha = 0.06f)) },
                 xLabel = { clock(it) }, readoutX = { t -> "${clock(t)} in, at " + dev.heartline.ui.components.epochClock(a.start + t, seconds = true) +
                     (energy?.let { e -> ", ${e.at(t).roundToInt()} kcal so far" } ?: "") }, minSpan = 60.0,
-                idleHint = "Touch for heart rate and the set at that moment. Pinch to zoom into a set.", lanes = lanes)
+                idleHint = "Touch for heart rate and the set at that moment. Pinch to zoom into a set.", lanes = lanes, axisInside = true)
             Gap(8)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 a.segments.map { it.kind }.distinct().forEach { k -> LegendDot(segmentColor(k, c), k.replaceFirstChar { it.uppercase() }) }

@@ -110,6 +110,8 @@ data class ChartLane(
     val readout: ((Double) -> String?)? = null, val inReadout: Boolean = true,
 )
 private val LANE_GAP = 5.dp
+/** With the axis inside the plot, each lane's name sits on a caption line above it instead of in a right gutter. */
+private val LANE_CAPTION = 13.dp
 
 /** A shaded stretch of x (sleep, workout, set), optionally labelled in the readout when touched. */
 data class ChartSpan(val start: Double, val end: Double, val color: Color, val label: String? = null)
@@ -138,20 +140,23 @@ fun InteractiveChart(
     fullscreen: Boolean = false,
     ranges: List<ChartRange> = emptyList(),
     lanes: List<ChartLane> = emptyList(),
+    /** A slim right gutter with the numbers only (the unit once, under the lowest) and lane names above the lanes, so the
+     * plot runs nearly the full width without anything drawn over it. */
+    axisInside: Boolean = false,
 ) {
     val c = HL.colors
     val tm = rememberTextMeasurer()
     var expanded by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
-    val lanesH = lanes.fold(0.dp) { acc, l -> acc + l.height + LANE_GAP }
+    val lanesH = lanes.fold(0.dp) { acc, l -> acc + l.height + LANE_GAP + if (axisInside) LANE_CAPTION else 0.dp }
     if (expanded) FullscreenChart(title ?: "Chart", { expanded = false }) { h ->
         InteractiveChart(lines, xStart, xEnd, Modifier, (h - lanesH).coerceAtLeast(160.dp), yMin, yMax, bars, bands, spans, xLabel, readoutX, minSpan,
-            "Touch or drag for exact values. Pinch to zoom, double-tap to zoom out.", null, title, fullscreen = true, ranges = ranges, lanes = lanes)
+            "Touch or drag for exact values. Pinch to zoom, double-tap to zoom out.", null, title, fullscreen = true, ranges = ranges, lanes = lanes, axisInside = axisInside)
     }
     var view by remember(xStart, xEnd) { mutableStateOf(xStart to xEnd) }
     var selected by remember(xStart, xEnd) { mutableStateOf<Double?>(null) }
     var widthPx by remember { mutableStateOf(1f) }
-    val rightPad = with(androidx.compose.ui.platform.LocalDensity.current) { 42.dp.toPx() }
-    val leftPad = with(androidx.compose.ui.platform.LocalDensity.current) { 6.dp.toPx() }
+    val rightPad = with(androidx.compose.ui.platform.LocalDensity.current) { (if (axisInside) 24.dp else 42.dp).toPx() }
+    val leftPad = with(androidx.compose.ui.platform.LocalDensity.current) { (if (axisInside) 1.dp else 6.dp).toPx() }
     fun toX(px: Float): Double { val (a, b) = view; return a + ((px - leftPad) / (widthPx - rightPad - leftPad)).coerceIn(0f, 1f) * (b - a) }
 
     Column(modifier.fillMaxWidth()) {
@@ -285,7 +290,11 @@ fun InteractiveChart(
             val unit = lines.firstOrNull { it.axis && it.unit.isNotEmpty() }?.unit ?: bars.firstOrNull { it.unit.isNotEmpty() }?.unit
             yTicks.forEachIndexed { i, v ->
                 drawLine(c.line, Offset(leftPad, y(v)), Offset(right, y(v)), 1f)
-                label(tm, formatTick(v) + if (i == yTicks.lastIndex && unit != null && unit.length <= 4) " $unit" else "", right + 4.dp.toPx(), y(v).coerceAtLeast(7.dp.toPx()), c.inkSoft)
+                val text = formatTick(v) + if (i == yTicks.lastIndex && unit != null && unit.length <= 4) " $unit" else ""
+                if (axisInside) {
+                    label(tm, formatTick(v), right + 4.dp.toPx(), y(v).coerceAtLeast(7.dp.toPx()), c.inkSoft)
+                    if (i == 0 && unit != null && unit.length <= 4 && y(v) + 20.dp.toPx() < bottom) label(tm, unit, right + 4.dp.toPx(), y(v) + 12.dp.toPx(), c.inkSoft)
+                } else label(tm, text, right + 4.dp.toPx(), y(v).coerceAtLeast(7.dp.toPx()), c.inkSoft)
             }
             bars.forEach { s ->
                 s.points.forEach { p ->
@@ -366,6 +375,10 @@ fun InteractiveChart(
             // Lanes: each a track the plot's width, under it, on the same x.
             var laneTop = bottom + LANE_GAP.toPx()
             lanes.forEach { lane ->
+                if (axisInside) {
+                    label(tm, lane.label, leftPad, laneTop + LANE_CAPTION.toPx() / 2, c.inkSoft)
+                    laneTop += LANE_CAPTION.toPx()
+                }
                 val lh = lane.height.toPx()
                 drawRect(c.line.copy(alpha = 0.45f), Offset(leftPad, laneTop), Size(right - leftPad, lh))
                 if (lane.bars.isNotEmpty()) {
@@ -392,7 +405,7 @@ fun InteractiveChart(
                     }
                 }
                 val lr = tm.measure(lane.label, axisStyle)
-                if (lr.size.width <= rightPad - 4.dp.toPx()) label(tm, lane.label, right + 4.dp.toPx(), laneTop + lh / 2, c.inkSoft)
+                if (!axisInside && lr.size.width <= rightPad - 4.dp.toPx()) label(tm, lane.label, right + 4.dp.toPx(), laneTop + lh / 2, c.inkSoft)
                 laneTop += lh + LANE_GAP.toPx()
             }
             // X labels at a round step for the visible span. Times of day round to the clock; a relative axis (seconds
@@ -442,11 +455,15 @@ fun InteractiveChart(
 
 @Composable
 private fun ReadoutValue(color: Color, label: String, value: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(9.dp).clip(RoundedCornerShape(2.dp)).let { it }) { Canvas(Modifier.size(9.dp)) { drawRect(color) } }
-        Spacer(Modifier.width(5.dp))
-        Text(label + if (value.isEmpty()) "" else " ", style = HL.type.small, color = HL.colors.inkSoft)
-        if (value.isNotEmpty()) Text(value, style = HL.type.bodyStrong, color = HL.colors.ink)
+    // Every item is as tall as one with a value and sits on the same baseline, so items with and without a value line
+    // up in a row; the swatch is centred on its label.
+    Row {
+        Row(Modifier.alignByBaseline(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(9.dp).clip(RoundedCornerShape(2.dp))) { Canvas(Modifier.size(9.dp)) { drawRect(color) } }
+            Spacer(Modifier.width(5.dp))
+            Text(label + if (value.isEmpty()) "" else " ", style = HL.type.small, color = HL.colors.inkSoft)
+        }
+        Text(value.ifEmpty { " " }, style = HL.type.bodyStrong, color = HL.colors.ink, modifier = Modifier.alignByBaseline())
     }
 }
 
