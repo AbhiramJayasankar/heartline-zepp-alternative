@@ -26,8 +26,6 @@ import org.json.JSONObject
 import java.io.File
 import java.time.*
 
-private const val GYM_LOG = "gym_log"
-
 class RealController(
     private val context: Context,
     private val scope: CoroutineScope,
@@ -133,7 +131,7 @@ class RealController(
                 val summaries = insights.mapNotNull { i -> i.start?.let { CheckSummary(it, i.rmssd, i.hr, i.quality ?: 0.0, i.usableS ?: 0.0, i.rhythm) } }
                 val profile = Profile(p.age, p.sex?.name?.lowercase(), p.weightKg, p.heightCm, p.maxHr, p.restingHr)
                 val watchRows = db.health.workouts(from)
-                val log = gymLogFromJson(db.meta.get(GYM_LOG))
+                val log = gymLogFromJson(db.meta.get(GYM_LOG_KEY))
                 val efforts = watchRows.mapNotNull { w -> runCatching { org.json.JSONObject(w.data) }.getOrNull()?.let { j ->
                     WorkoutEffort(j.optLong("start", w.start), j.optString("type"), j.optInt("active_s", j.optInt("duration_s")),
                         j.optInt("distance_m").takeIf { it > 0 }, j.optInt("avg_hr").takeIf { it > 0 }) to (j.optLong("start", w.start) to j.optLong("end", w.start))
@@ -305,7 +303,7 @@ class RealController(
         } catch (e: Exception) { e.message ?: "Unable to store the watch key" }
     }
     override fun finishOnboarding() { settings.setOnboardingDone(true); if (!suppressAutomaticConnection) connect() }
-    override val gymLog: StateFlow<List<LoggedSet>> = db.meta.observe(GYM_LOG).map { gymLogFromJson(it) }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    override val gymLog: StateFlow<List<LoggedSet>> = db.meta.observe(GYM_LOG_KEY).map { gymLogFromJson(it) }.stateIn(scope, SharingStarted.Eagerly, emptyList())
     override val gymImport = MutableStateFlow<String?>(null)
     override fun importGymLog(uris: List<Uri>) = launchAction {
         withContext(Dispatchers.IO) {
@@ -315,13 +313,13 @@ class RealController(
     }
     /** Reads, merges and stores gym log files; returns the names read cleanly. */
     private suspend fun importGymFiles(files: List<Pair<String, () -> String>>): Set<String> {
-        var all = gymLogFromJson(db.meta.get(GYM_LOG)); var read = 0; var added = 0; val failed = ArrayList<String>(); val ok = HashSet<String>()
+        var all = gymLogFromJson(db.meta.get(GYM_LOG_KEY)); var read = 0; var added = 0; val failed = ArrayList<String>(); val ok = HashSet<String>()
         for ((name, text) in files) {
             val sets = runCatching { parseGymLog(text(), settings.profile.value.weightKg) }.getOrElse { failed.add("$name (${it.message})"); continue }
             if (sets.isEmpty()) { failed.add("$name (no sets found)"); continue }
             val (merged, n) = mergeGymLog(all, sets); all = merged; read += sets.size; added += n; ok.add(name)
         }
-        db.meta.set(GYM_LOG, gymLogJson(all))
+        db.meta.set(GYM_LOG_KEY, gymLogJson(all))
         val msg = "Read $read sets from ${ok.size} file${if (ok.size == 1) "" else "s"}: $added new, ${read - added} already here." +
             (if (failed.isNotEmpty()) " Couldn't read ${failed.joinToString()}." else "")
         gymImport.value = msg
@@ -340,12 +338,12 @@ class RealController(
         found.filter { it.name in ok }.forEach { it.delete() }
     }
     override fun saveTreadmill(workoutStart: Long, workoutEnd: Long, speedKmh: Double, inclinePct: Double) = launchAction {
-        val all = gymLogFromJson(db.meta.get(GYM_LOG))
+        val all = gymLogFromJson(db.meta.get(GYM_LOG_KEY))
         val mine = setsForWorkout(all, workoutStart, workoutEnd, "Treadmill", zone).firstOrNull { it.cardio }
         val updated = if (mine != null) all.map { if (it.key == mine.key) it.copy(speedKmh = speedKmh, inclinePct = inclinePct) else it }
         else all + LoggedSet(sessionDate(workoutStart, zone).toString(), "Typed in", "Treadmill", "cardio", 1, "working", "completed",
             workoutStart, workoutEnd, speedKmh = speedKmh, inclinePct = inclinePct, durationS = (workoutEnd - workoutStart).toDouble())
-        db.meta.set(GYM_LOG, gymLogJson(updated))
+        db.meta.set(GYM_LOG_KEY, gymLogJson(updated))
         db.events.add("info", "Treadmill settings saved: %.1f km/h, %.0f%% incline".format(speedKmh, inclinePct))
     }
     override fun importPcData(uri: Uri) = launchAction {

@@ -39,16 +39,7 @@ internal fun captureRhythm(rec: Recording, gait: List<CaptureSegment>, duration:
         val gravity = axes.map { zeroPhase(it, butterworth(RHYTHM_FS, 1.5)) }
         for ((a, b) in rhythmRuns(scores, excluded)) {
             val peaks = rhythmReps(filtered, a, b)
-            val detail = peaks.peaks.toList().zipWithNext().map { (p0, p1) ->
-                val trough = (p0 until p1).minBy { peaks.sign * peaks.signal[it] }
-                val phaseA = (trough - p0) / RHYTHM_FS
-                val phaseB = (p1 - trough) / RHYTHM_FS
-                val g0 = DoubleArray(3) { gravity[it][peaks.offset + p0] }
-                val gt = DoubleArray(3) { gravity[it][peaks.offset + trough] }
-                CaptureRep(origin + (peaks.offset + p0) / RHYTHM_FS, (p1 - p0) / RHYTHM_FS,
-                    max(phaseA, phaseB), min(phaseA, phaseB), vectorAngle(g0, gt))
-            }
-            out += RhythmSet(origin + a, origin + b, peaks.reps, peaks.tempoS, detail,
+            out += RhythmSet(origin + a, origin + b, peaks.reps, peaks.tempoS, rhythmRepDetail(peaks, gravity, origin),
                 DoubleArray(3) { mean(gravity[it].copyOfRange(a * 25, b * 25)) }, peaks.axis)
         }
     }
@@ -62,6 +53,18 @@ internal fun captureRhythm(rec: Recording, gait: List<CaptureSegment>, duration:
     process(rec.acc.size)
     return out
 }
+
+/** One block per rep: each peak-to-peak cycle's length, its slower and faster halves, and the wrist's arc to the trough. */
+internal fun rhythmRepDetail(peaks: RhythmRepPeaks, gravity: List<DoubleArray>, origin: Double): List<CaptureRep> =
+    peaks.peaks.toList().zipWithNext().map { (p0, p1) ->
+        val trough = (p0 until p1).minBy { peaks.sign * peaks.signal[it] }
+        val phaseA = (trough - p0) / RHYTHM_FS
+        val phaseB = (p1 - trough) / RHYTHM_FS
+        val g0 = DoubleArray(3) { gravity[it][peaks.offset + p0] }
+        val gt = DoubleArray(3) { gravity[it][peaks.offset + trough] }
+        CaptureRep(origin + (peaks.offset + p0) / RHYTHM_FS, (p1 - p0) / RHYTHM_FS,
+            max(phaseA, phaseB), min(phaseA, phaseB), vectorAngle(g0, gt))
+    }
 
 /** Rhythm bands as (low Hz, high Hz, shortest lag in samples). The second scores slow heavy reps (4-5 s each, e.g.
  * 50 kg bench on 2026-11-03) whose rep motion is about as small as the shake under load in the wider band. */
@@ -129,7 +132,7 @@ internal fun rhythmRuns(scores: DoubleArray, excluded: BooleanArray = BooleanArr
 }
 
 /** Core PCA == first right singular vector of centered XYZ. Count both signs so eigenvector sign is immaterial. */
-internal fun rhythmReps(filtered: List<DoubleArray>, start: Int, end: Int): RhythmRepPeaks {
+internal fun rhythmReps(filtered: List<DoubleArray>, start: Int, end: Int, pad: Int = 200): RhythmRepPeaks {
     val a = start * 25; val b = end * 25
     val mu = DoubleArray(3) { k -> mean(filtered[k].copyOfRange(a, b)) }
     val cov = Array(3) { DoubleArray(3) }
@@ -141,8 +144,8 @@ internal fun rhythmReps(filtered: List<DoubleArray>, start: Int, end: Int): Rhyt
     fun project(from: Int, to: Int) = DoubleArray(to - from) { i -> (0..2).sumOf { k -> (filtered[k][from + i] - mu[k]) * v[k] } }
     val core = project(a, b)
     // Detected runs end a rep or two inside the set, so peaks are counted over 8 s either side.
-    val offset = max(0, a - 200)
-    val window = project(offset, min(filtered.first().size, b + 200))
+    val offset = max(0, a - pad)
+    val window = project(offset, min(filtered.first().size, b + pad))
     val period = acfMaximum(core, 30, 200).first / RHYTHM_FS
     val amplitude = percentile(DoubleArray(core.size) { abs(core[it]) }, 90.0)
     if (amplitude < 1e-6) return RhythmRepPeaks(0, period, intArrayOf(), 1, window, offset, v)

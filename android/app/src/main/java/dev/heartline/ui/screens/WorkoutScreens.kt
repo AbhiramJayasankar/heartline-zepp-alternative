@@ -210,7 +210,9 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
         StatGrid(listOf(
             Triple("Average", fmtInt(a.avgHr), "bpm"), Triple("Max", fmtInt(a.maxHr), "bpm"), Triple("Lowest", fmtInt(a.minHr), "bpm"),
             Triple("Load", a.load?.roundToInt()?.toString() ?: "–", null), Triple("Calories", fmtInt(a.calories), "kcal"), Triple("Steps", fmtInt(a.steps), null),
-            Triple("Sets", if (a.sets.isEmpty()) "–" else a.sets.size.toString(), null), Triple("Reps", if (a.sets.isEmpty()) "–" else a.sets.sumOf { it.reps }.toString(), null),
+            Triple("Sets", if (a.sets.isEmpty()) "–" else a.sets.size.toString(), null),
+            // With a log, its reps are the true count; the watch's own count is compared set by set below.
+            Triple("Reps", if (a.sets.isEmpty()) "–" else a.sets.sumOf { s -> s.loggedReps ?: s.reps.toDouble() }.let { if (it % 1.0 == 0.0) it.toInt().toString() else "%.1f".format(it) }, null),
             Triple("Median rest", medianRest?.let { clock(it) } ?: "–", null),
             Triple("Under load", a.workS?.let { fmtHm(((it + 30) / 60)) } ?: "–", null),
             Triple("Work share", a.workS?.let { w -> a.restS?.takeIf { w + it > 0 }?.let { "${100 * w / (w + it)}" } } ?: "–", "%"),
@@ -220,7 +222,8 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
         Panel(padding = PaddingValues(12.dp)) {
             Text(if (a.floor.size > 1) "Heart rate, sets shaded by exercise, dashed line is your lowest per 5 min" else "Heart rate, sets shaded", style = HL.type.label, color = c.inkSoft)
             Gap(6)
-            val setLabels = a.sets.mapIndexed { i, s -> ChartSpan(s.start, s.end, dev.heartline.ui.components.groupColor(s.group, c).copy(alpha = 0.25f), "Set ${i + 1}, ${s.reps} reps") }
+            val setLabels = a.sets.mapIndexed { i, s -> ChartSpan(s.start, s.end, dev.heartline.ui.components.groupColor(s.group, c).copy(alpha = 0.25f),
+                if (s.exercise != null) "${s.exercise}, ${s.setLabel?.lowercase()}" + (loadReps(s)?.let { ", $it" } ?: "") else "Set ${i + 1}, ${s.reps} reps") }
             val cardioSpans = a.cardio.map { k -> ChartSpan(k.start, k.end, c.warn.copy(alpha = 0.15f), k.name ?: k.kind.replaceFirstChar { it.uppercase() }) }
             InteractiveChart(
                 listOf(ChartLine(a.hr, c.pulse, "Heart rate", "bpm", gap = 30.0)) +
@@ -241,6 +244,7 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
         }
         BaselineNote(a)
         if (a.activities.isNotEmpty()) WatchWorkouts(a)
+        if (a.logTotal != null) LogAndWatch(a)
         if (a.sets.isNotEmpty()) Exercises(a)
         if (a.recovery.size >= 2) Recovery(a, medianRest)
         a.cardio.forEach { CardioBlock(a, it) }
@@ -350,8 +354,10 @@ private fun WatchWorkouts(a: CaptureAnalysisUi) {
 @Composable
 private fun Exercises(a: CaptureAnalysisUi) {
     val c = HL.colors
+    val logged = a.logTotal != null
     Gap(24); SectionTitle("Exercises and sets"); Gap(4)
-    MutedText("Back-to-back sets that move the wrist the same way are grouped as one exercise. Each block is one rep: its width is how long the rep took, the solid part is the slower half, and its height is how far the wrist turned.")
+    MutedText(if (logged) "Sets, names and times from your gym log. Each block is one rep the watch counted: its width is how long the rep took, the solid part is the slower half, and its height is how far the wrist turned."
+        else "Back-to-back sets that move the wrist the same way are grouped as one exercise. Each block is one rep: its width is how long the rep took, the solid part is the slower half, and its height is how far the wrist turned.")
     val groups = ArrayList<MutableList<dev.heartline.app.SetUi>>()
     a.sets.forEach { s -> if (groups.lastOrNull()?.last()?.group == s.group) groups.last().add(s) else groups.add(mutableListOf(s)) }
     val maxDur = a.sets.maxOfOrNull { s -> s.repDetail.sumOf { it.durationS } }?.coerceAtLeast(1.0) ?: 1.0
@@ -362,9 +368,10 @@ private fun Exercises(a: CaptureAnalysisUi) {
         Gap(18)
         Row(verticalAlignment = Alignment.CenterVertically) {
             dev.heartline.ui.components.Dot(color, 10.dp); Spacer(Modifier.width(8.dp))
-            Text("Exercise ${exerciseLetter(gi)}", style = HL.type.section.copy(fontSize = 20.sp), color = c.ink)
+            Text(sets.first().exercise ?: "Exercise ${exerciseLetter(gi)}", style = HL.type.section.copy(fontSize = 20.sp), color = c.ink)
         }
-        MutedText(listOfNotNull(if (sets.size == 1) "1 set" else "${sets.size} sets", "${sets.sumOf { it.reps }} reps",
+        MutedText(listOfNotNull(if (sets.size == 1) "1 set" else "${sets.size} sets",
+            if (logged) null else "${sets.sumOf { it.reps }} reps",
             sets.mapNotNull { it.tempoS }.takeIf { it.isNotEmpty() }?.let { "about %.1f s per rep".format(it.average()) },
             sets.mapNotNull { s -> s.repDetail.map { it.arcDeg }.sorted().let { r -> r.getOrNull(r.size / 2) } }.takeIf { it.isNotEmpty() }?.let { "wrist turns about ${it.average().roundToInt()}°" },
             sets.first().activity).joinToString(", "))
@@ -373,14 +380,15 @@ private fun Exercises(a: CaptureAnalysisUi) {
             val rest = a.rests.firstOrNull { it.start >= s.end - 1 && it.start <= s.end + 5 }
             Gap(10)
             Row(verticalAlignment = Alignment.Bottom) {
-                Column(Modifier.width(70.dp)) {
-                    Text("Set $setNo", style = HL.type.label, color = c.inkSoft)
-                    Text("${s.reps} reps", style = HL.type.bodyStrong, color = c.ink)
+                Column(Modifier.width(if (logged) 108.dp else 70.dp)) {
+                    Text(s.setLabel ?: "Set $setNo", style = HL.type.label, color = c.inkSoft)
+                    Text(loadReps(s) ?: "${s.reps} reps", style = HL.type.bodyStrong, color = c.ink)
                 }
                 if (s.repDetail.isNotEmpty()) dev.heartline.ui.components.RepStrip(s.repDetail, maxDur, arcMax, color, Modifier.weight(1f))
                 else Spacer(Modifier.weight(1f))
             }
             MutedText(listOfNotNull(
+                watchCount(s),
                 "${clock(s.start)}, lasted ${clock(s.end - s.start)}",
                 if (s.startHr != null && s.peakHr != null) "HR ${s.startHr} to ${s.peakHr}" + (s.hrRise?.let { " (+$it)" } ?: "") else s.peakHr?.let { "peak $it bpm" },
                 s.slowdownS?.takeIf { it >= 0.1 }?.let { "slowed %.2f s per rep".format(it) },
@@ -388,6 +396,41 @@ private fun Exercises(a: CaptureAnalysisUi) {
                 rest?.let { "then ${clock(it.end - it.start)} rest" + (it.drop60?.let { d -> ", HR down $d in 1 min" } ?: "") },
             ).joinToString(", "))
         }
+    }
+}
+
+private fun num(v: Double): String = if (v % 1.0 == 0.0) v.toInt().toString() else "%.2f".format(v).trimEnd('0').trimEnd('.')
+
+/** "45 kg × 8" from the log, or null without one. */
+private fun loadReps(s: dev.heartline.app.SetUi): String? = s.loggedReps?.let { r ->
+    (s.loadKg?.takeIf { it > 0 }?.let { "${num(it)} kg × " } ?: "") + num(r) + if (s.loadKg == null || s.loadKg == 0.0) " reps" else ""
+}
+
+/** What the watch made of a logged set. */
+private fun watchCount(s: dev.heartline.app.SetUi): String? = when {
+    s.loggedReps == null -> null
+    s.source == "log" && s.reps == 0 -> "the watch didn't see a rep rhythm here, so it couldn't count this set"
+    s.source == "log" -> "missed by the watch on its own; it counted ${s.reps} reps in your logged time"
+    kotlin.math.abs(s.reps - s.loggedReps) < 0.5 -> "watch counted ${s.reps}, same as your log"
+    else -> "watch counted ${s.reps}"
+}
+
+/** How the gym log and the watch's own set finding line up for this capture. */
+@Composable
+private fun LogAndWatch(a: CaptureAnalysisUi) {
+    val total = a.logTotal ?: return
+    val found = a.logMatched ?: 0
+    val counted = a.sets.filter { it.loggedReps != null && it.reps > 0 }
+    val close = counted.count { kotlin.math.abs(it.reps - it.loggedReps!!) <= 2 }
+    Gap(24); SectionTitle("Your log and the watch"); Gap(4)
+    MutedText("Your gym log has $total timed sets in this recording, and they set the sets, names and rest times on this page. " +
+        "The watch found $found of them from wrist motion alone" + (if (found < total) "; for the other ${total - found}, it had only your logged times." else ".") +
+        (if (counted.isNotEmpty()) " Where it counted reps, it was within 2 of your log on $close of ${counted.size} sets." else ""))
+    if (a.unlogged.isNotEmpty()) {
+        Gap(6)
+        MutedText("It also found ${a.unlogged.size} rep-like stretch${if (a.unlogged.size == 1) "" else "es"} that ${if (a.unlogged.size == 1) "isn't" else "aren't"} in your log: " +
+            a.unlogged.joinToString { "${clock(it.start)} (${it.reps} reps, ${clock(it.end - it.start)})" } +
+            ". If you didn't do a set then, it was other movement, and it is left out of rests and recovery.")
     }
 }
 

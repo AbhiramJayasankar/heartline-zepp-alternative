@@ -46,7 +46,7 @@ class CaptureRunner(
                     if (it.due(now())) finish("The service restarted after the planned end; recording may be incomplete.", it.start + it.plannedS)
                     else { save(); if (watch.ready.value) resumeStreams() }
                 }
-                for (s in stored.filter { it.end != null && (db.meta.get(CAPTURE_RESULT + it.id) == null || db.meta.get(CAPTURE_ENGINE + it.id) != CAPTURE_ENGINE_VERSION) }) {
+                for (s in stored.filter { it.end != null && (db.meta.get(CAPTURE_RESULT + it.id) == null || db.meta.get(CAPTURE_ENGINE + it.id) != captureEngineKey(db, it).first) }) {
                     try { analyze(s) } catch (e: CancellationException) { throw e }
                     catch (e: Exception) { db.events.add("warn", "Capture ${s.id} needs analysis retry: ${e.message}") }
                 }
@@ -155,25 +155,24 @@ class CaptureRunner(
             captureActivity(it, s.start.toDouble(), (s.end ?: now()).toDouble())
         }
         val p = settings.profile.value
+        val (key, logged) = captureEngineKey(db, s)
         val result = withContext(Dispatchers.Default) {
             val parts = readCaptureFiles(folder, s)
             val analysis = analyzeCapture(mergeCapture(s, parts), hr,
-                Profile(p.age, p.sex?.name?.lowercase(), p.weightKg, p.heightCm, p.maxHr, p.restingHr), s.label, activities)
+                Profile(p.age, p.sex?.name?.lowercase(), p.weightKg, p.heightCm, p.maxHr, p.restingHr), s.label, activities, logged)
             val notes = analysis.notes + s.gaps.filter { (it.end ?: s.end ?: s.start) > it.start }.map {
                 "Raw stream gap from ${it.start - s.start} to ${(it.end ?: s.end ?: it.start) - s.start} seconds after capture start."
             } + listOfNotNull(s.error) + if (parts.size < s.files.size) listOf("Some recording files are missing; analysis uses the remaining data.") else emptyList()
             analysis.copy(notes = notes).captureUi(s.id).captureJson()
         }
         db.meta.set(CAPTURE_RESULT + s.id, result)
-        db.meta.set(CAPTURE_ENGINE + s.id, CAPTURE_ENGINE_VERSION)
+        db.meta.set(CAPTURE_ENGINE + s.id, key)
     }
 
     suspend fun detail(id: String): CaptureAnalysisUi? = lock.withLock {
-        db.meta.get(CAPTURE_RESULT + id)?.takeIf { db.meta.get(CAPTURE_ENGINE + id) == CAPTURE_ENGINE_VERSION }
-            ?.let(::captureFromJson) ?: db.meta.get(CAPTURE_SESSION + id)?.let {
-            val s = captureSession(it)
-            if (s.end == null) null else { analyze(s); db.meta.get(CAPTURE_RESULT + id)?.let(::captureFromJson) }
-        }
+        val s = db.meta.get(CAPTURE_SESSION + id)?.let(::captureSession)
+        db.meta.get(CAPTURE_RESULT + id)?.takeIf { s != null && db.meta.get(CAPTURE_ENGINE + id) == captureEngineKey(db, s).first }
+            ?.let(::captureFromJson) ?: s?.let { if (it.end == null) null else { analyze(it); db.meta.get(CAPTURE_RESULT + id)?.let(::captureFromJson) } }
     }
 
     fun delete(id: String) { scope.launch { try { lock.withLock {

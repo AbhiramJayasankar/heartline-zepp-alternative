@@ -8,7 +8,12 @@ data class CaptureSegment(val start: Double, val end: Double, val kind: String, 
 data class CaptureRep(val t: Double, val durationS: Double, val slowS: Double, val fastS: Double, val arcDeg: Double)
 data class CaptureSet(val start: Double, val end: Double, val reps: Int, val avgHr: Int?, val peakHr: Int?, val tempoS: Double?,
     val repDetail: List<CaptureRep> = emptyList(), val group: Int = 0, val activity: String? = null,
-    val slowdownS: Double? = null, val partialLast: Boolean = false, val startHr: Int? = null, val hrRise: Int? = null)
+    val slowdownS: Double? = null, val partialLast: Boolean = false, val startHr: Int? = null, val hrRise: Int? = null,
+    /** From the gym log when one covers this set: exercise name, "Set 2" or "Warm-up", load and the reps you logged. */
+    val exercise: String? = null, val setLabel: String? = null, val loadKg: Double? = null, val loggedReps: Double? = null,
+    val warmUp: Boolean = false,
+    /** "watch": found by the watch alone; "both": logged and found; "log": logged, missed by the detector (reps counted inside the logged time). */
+    val source: String = "watch")
 
 data class CaptureActivity(val start: Double, val end: Double, val type: String, val activeS: Int?, val distanceM: Int?,
     val steps: Int?, val calories: Int?, val avgHr: Int?, val maxHr: Int?)
@@ -31,11 +36,13 @@ data class CaptureResult(
     val activities: List<CaptureActivity> = emptyList(), val recovery: List<CaptureRecoveryPoint> = emptyList(),
     val floor: List<CapturePoint> = emptyList(), val workS: Int? = null, val restS: Int? = null,
     val cardio: List<CaptureCardio> = emptyList(), val pulse: CapturePulse? = null,
+    /** With a gym log: how many logged sets the watch found by itself, of how many, and what it found that isn't logged. */
+    val logMatched: Int? = null, val logTotal: Int? = null, val unlogged: List<CaptureSet> = emptyList(),
 )
 
 /** HR_MEASURE is authoritative. No PPG substitution and no interpolation across a missing HR interval. */
 fun analyzeCapture(rec: Recording, hr: List<Pair<Double, Int>>, profile: Profile, label: String,
-    activities: List<CaptureActivity> = emptyList()): CaptureResult {
+    activities: List<CaptureActivity> = emptyList(), logged: List<LoggedCaptureSet> = emptyList()): CaptureResult {
     val samples = hr.filter { it.first.isFinite() && it.second in 25..240 && it.first >= rec.start }
         .sortedBy { it.first }.distinctBy { it.first }
     val duration = rec.captureDurationS ?: maxOf(rec.durationS, rec.accArrivalT.maxOrNull() ?: 0.0,
@@ -68,8 +75,13 @@ fun analyzeCapture(rec: Recording, hr: List<Pair<Double, Int>>, profile: Profile
     val motion = captureMotion(rec, duration)
     val segments = motion.segments.map { it.copy(avgHr = avg(it.start, it.end)) }
     val cardio = captureCardio(segments, activities, seconds)
-    val groups = exerciseGroups(motion.sets, cardio)
-    val sets = motion.sets.mapIndexed { i, s ->
+    // With a gym log the logged sets are the sets: their times and names from the log, reps and tempo from the wrist.
+    val inLog = logged.filter { it.end > 0 && it.start < duration && it.end > it.start }
+    val merge = if (inLog.isEmpty()) null else mergeLoggedSets(rec, motion.sets, inLog)
+    val main = merge?.first?.map { it.set } ?: motion.sets
+    val names = merge?.first?.map { it.log!!.exercise }?.distinct()
+    val groups = if (merge == null) exerciseGroups(motion.sets, cardio) else IntArray(main.size) { names!!.indexOf(merge.first[it].log!!.exercise) }
+    fun captureSet(s: RhythmSet, group: Int, m: MergedSet?): CaptureSet {
         val startHr = liveAt(s.start)
         var peak = startHr
         val found = samples.binarySearch { it.first.compareTo(rec.start + s.start) }
@@ -78,12 +90,16 @@ fun analyzeCapture(rec: Recording, hr: List<Pair<Double, Int>>, profile: Profile
             peak = max(peak ?: 0, samples[j].second); j++
         }
         val detail = s.repDetail
-        CaptureSet(s.start, s.end, s.reps, avg(s.start, s.end), hrs(s.start, s.end).maxOrNull(), s.tempoS,
-            detail, groups[i], activities.firstOrNull { w -> val mid = (s.start + s.end) / 2; mid >= w.start && mid < w.labelEnd() }?.type,
+        return CaptureSet(s.start, s.end, s.reps, avg(s.start, s.end), hrs(s.start, s.end).maxOrNull(), s.tempoS.takeIf { it.isFinite() && s.reps > 0 },
+            detail, group, activities.firstOrNull { w -> val mid = (s.start + s.end) / 2; mid >= w.start && mid < w.labelEnd() }?.type,
             if (detail.size >= 5) captureSlope(detail.mapIndexed { k, r -> k.toDouble() to r.durationS }) else null,
             detail.size >= 4 && detail.last().arcDeg < .8 * median(detail.map { it.arcDeg }.toDoubleArray()),
-            startHr, if (peak != null && startHr != null) peak - startHr else null)
+            startHr, if (peak != null && startHr != null) peak - startHr else null,
+            m?.log?.exercise, m?.log?.label, m?.log?.loadKg, m?.log?.reps, m?.log?.warmUp ?: false,
+            when { m == null -> "watch"; m.detected != null -> "both"; else -> "log" })
     }
+    val sets = main.mapIndexed { i, s -> captureSet(s, groups[i], merge?.first?.get(i)) }
+    val unlogged = merge?.second?.map { captureSet(it, -1, null) }.orEmpty()
     val rests = sets.zipWithNext().mapNotNull { (a, b) ->
         if (b.start <= a.end) return@mapNotNull null
         val first = near(a.end); val last = near(b.start - 1)
@@ -96,6 +112,8 @@ fun analyzeCapture(rec: Recording, hr: List<Pair<Double, Int>>, profile: Profile
     if (motion.missingS > 1) notes += "Motion data is missing for approximately ${motion.missingS.roundToInt()} seconds; missing motion is labelled other."
     if (rec.mag.isNotEmpty()) notes += "Compass samples were recorded; uncalibrated magnetic values are not used to identify exercises."
     notes += "Movement labels, repetitions and steps are wrist-motion estimates; synced watch workout summaries are retained independently when available."
+    if (merge != null) notes += "Sets, exercise names and set times come from your gym log; reps, tempo and wrist arc come from the watch. " +
+        "Logged times include a few seconds of typing either side, so time under load reads a little long."
     if (calories != null) notes += "Calories are estimated from heart rate, age, sex and weight; resistance exercise and recovery can be poorly represented."
     val pulse = capturePulse(rec, seconds)
     return CaptureResult(label, rec.start, duration, valid.takeIf { it.isNotEmpty() }?.average()?.roundToInt(),
@@ -110,7 +128,8 @@ fun analyzeCapture(rec: Recording, hr: List<Pair<Double, Int>>, profile: Profile
         }, if (motion.points.isEmpty()) null else sets.sumOf { it.end - it.start }.roundToInt(),
         if (motion.points.isEmpty()) null else sets.zipWithNext().sumOf { (a, b) ->
             if (b.start - a.end <= 600 && cardio.none { it.start < b.start && it.end > a.end }) b.start - a.end else 0.0
-        }.roundToInt(), cardio, pulse)
+        }.roundToInt(), cardio, pulse,
+        merge?.first?.count { it.detected != null }, merge?.first?.size, unlogged)
 }
 
 private fun captureZone(hr: Int, max: Int): Int = when {

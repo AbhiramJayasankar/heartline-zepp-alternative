@@ -5,6 +5,9 @@ import org.json.JSONObject
 import java.time.LocalDate
 import java.time.OffsetDateTime
 
+/** Meta key holding every imported or typed-in set as JSON. */
+const val GYM_LOG_KEY = "gym_log"
+
 /**
  * One set from a gym log, whatever format it came in. Times are epoch seconds when the log had them. [loadKg] is the
  * weight moved: for an assisted pull-up, body weight minus the assistance. Treadmill and other cardio rows carry
@@ -18,6 +21,8 @@ data class LoggedSet(
     val failure: Boolean = false, val rir: Double? = null, val difficulty: Double? = null,
     val speedKmh: Double? = null, val inclinePct: Double? = null, val distanceKm: Double? = null, val durationS: Double? = null,
     val hrMin: Int? = null, val hrMax: Int? = null, val notes: String = "",
+    /** Treadmill only: "none", "some" or "held". Held rows are left out of VO2max. */
+    val handrails: String? = null,
 ) {
     /** Same set in another export of the same session: date, exercise, set number and warm-up or not. */
     val key: String get() = "$date|${exercise.lowercase().replace(Regex("[^a-z0-9]+"), " ").trim()}|$setNumber|${if (setType.startsWith("warm")) "w" else "s"}"
@@ -30,7 +35,7 @@ data class LoggedSet(
         fun opt(k: String, v: Any?) { if (v != null) put(k, v) }
         opt("start", start); opt("end", end); opt("rest_s", restBeforeS); opt("load_kg", loadKg); opt("assist_kg", assistKg); opt("reps", reps)
         opt("rir", rir); opt("difficulty", difficulty); opt("speed_kmh", speedKmh); opt("incline_pct", inclinePct); opt("distance_km", distanceKm)
-        opt("duration_s", durationS); opt("hr_min", hrMin); opt("hr_max", hrMax)
+        opt("duration_s", durationS); opt("hr_min", hrMin); opt("hr_max", hrMax); opt("handrails", handrails)
     }
 
     companion object {
@@ -41,7 +46,7 @@ data class LoggedSet(
             return LoggedSet(j.optString("date"), j.optString("session"), j.optString("exercise"), j.optString("kind"), j.optInt("set"),
                 j.optString("set_type"), j.optString("status", "completed"), l("start"), l("end"), d("rest_s"), d("load_kg"), d("assist_kg"),
                 d("reps"), j.optBoolean("failure"), d("rir"), d("difficulty"), d("speed_kmh"), d("incline_pct"), d("distance_km"), d("duration_s"),
-                i("hr_min"), i("hr_max"), j.optString("notes"))
+                i("hr_min"), i("hr_max"), j.optString("notes"), j.optString("handrails").takeIf { it.isNotEmpty() })
         }
     }
 }
@@ -80,12 +85,23 @@ private fun parseCsvLog(text: String, weight: Double?): List<LoggedSet> {
             val start = time(col(r, "start_datetime_ist")); val end = time(col(r, "end_datetime_ist"))
             val date = Regex("^\\d{4}-\\d{2}-\\d{2}").find(sid)?.value ?: start?.let { java.time.Instant.ofEpochSecond(it).atOffset(java.time.ZoneOffset.ofHoursMinutes(5, 30)).toLocalDate().toString() } ?: ""
             val w = num(col(r, "weight_kg"))
-            val assisted = col(r, "weight_type") == "assistance"
-            LoggedSet(date, sid.removePrefix(date).trim('_').replace('_', ' '), exercise, kindOf(exercise, null), num(col(r, "set_number"))?.toInt() ?: 0,
+            val type = col(r, "weight_type")?.lowercase()
+            val assisted = type == "assistance"
+            // Load moved: assistance comes off body weight, per-side plates count twice, bodyweight moves add a plate or belt.
+            val load = when (type) {
+                "assistance" -> weight?.let { b -> w?.let { b - it } }
+                "per_side" -> w?.let { it * 2 }
+                "bodyweight" -> weight?.let { b -> b + (w ?: 0.0) }
+                else -> w
+            }
+            LoggedSet(date, col(r, "session_name") ?: sid.removePrefix(date).trim('_').replace('_', ' '), exercise,
+                kindOf(exercise, col(r, "exercise_type")?.let { if (it == "bodyweight") "strength" else it }), num(col(r, "set_number"))?.toInt() ?: 0,
                 setTypeOf(col(r, "set_type")), col(r, "status") ?: "completed", start, end, num(col(r, "rest_before_seconds")),
-                if (assisted) weight?.let { b -> w?.let { b - it } } else w, if (assisted) w else null,
-                num(col(r, "reps_reported")), col(r, "reached_failure").equals("true", ignoreCase = true), num(col(r, "reps_in_reserve")),
-                num(col(r, "difficulty_out_of_10")), durationS = num(col(r, "duration_seconds")), notes = col(r, "notes").orEmpty())
+                load, if (assisted) w else null,
+                num(col(r, "reps_reported")) ?: num(col(r, "reps")), col(r, "reached_failure").equals("true", ignoreCase = true), num(col(r, "reps_in_reserve")),
+                num(col(r, "difficulty_out_of_10")), num(col(r, "speed_kmh")), num(col(r, "incline_pct")), num(col(r, "distance_km")),
+                num(col(r, "duration_seconds")) ?: if (start != null && end != null) (end - start).toDouble() else null,
+                notes = col(r, "notes").orEmpty(), handrails = col(r, "handrails")?.lowercase())
         } else {
             // Older format: many sessions per file, load_basis tells assistance apart, cardio columns on treadmill rows.
             val load = num(col(r, "load_kg"))
@@ -214,7 +230,7 @@ fun setsForWorkout(log: List<LoggedSet>, start: Long, end: Long, type: String, z
  */
 fun treadmillEfforts(log: List<LoggedSet>, watch: List<WatchWorkoutRef>, zone: java.time.ZoneId): List<dev.heartline.analytics.TreadmillEffort> {
     val allHr = watch.flatMap { it.track }
-    return log.filter { it.cardio && it.completed && it.speedKmh != null && it.inclinePct != null }.map { s ->
+    return log.filter { it.cardio && it.completed && it.speedKmh != null && it.inclinePct != null && it.handrails != "held" }.map { s ->
         val length = s.durationS ?: s.start?.let { a -> s.end?.let { (it - a).toDouble() } } ?: 600.0
         val window: Pair<Long, Long>? = if (s.start != null) s.start to (s.end ?: (s.start + length.toLong())) else
             watch.filter { it.type == "Treadmill" && sessionDate(it.start, zone).toString() == s.date }.maxByOrNull { it.end - it.start }?.let { w ->

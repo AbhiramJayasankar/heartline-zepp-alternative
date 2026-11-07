@@ -228,6 +228,11 @@ data class SetUi(
     val start: Double, val end: Double, val reps: Int, val avgHr: Int?, val peakHr: Int?, val tempoS: Double?,
     val repDetail: List<RepUi> = emptyList(), val group: Int = 0, val activity: String? = null,
     val slowdownS: Double? = null, val partialLast: Boolean = false, val startHr: Int? = null, val hrRise: Int? = null,
+    /** From the gym log: exercise, "Set 2" or "Warm-up", load and logged reps. */
+    val exercise: String? = null, val setLabel: String? = null, val loadKg: Double? = null, val loggedReps: Double? = null,
+    val warmUp: Boolean = false,
+    /** "watch" found by the watch alone, "both" logged and found, "log" logged but missed by the detector. */
+    val source: String = "watch",
 )
 data class RestUi(val start: Double, val end: Double, val startHr: Int?, val endHr: Int?, val drop60: Int?)
 /** kind: "lifting", "walking", "running", "rest" or "other". */
@@ -269,6 +274,8 @@ data class CaptureAnalysisUi(
     /** Lowest-decile heart rate per 5-minute window: the session's rising baseline. */
     val floor: List<SeriesPoint> = emptyList(), val workS: Int? = null, val restS: Int? = null,
     val cardio: List<CardioUi> = emptyList(), val pulse: PulseUi? = null,
+    /** With a gym log over the capture: logged sets the watch found by itself, of how many, and finds not in the log. */
+    val logMatched: Int? = null, val logTotal: Int? = null, val unlogged: List<SetUi> = emptyList(),
 )
 
 data class PlaceUi(val name: String, val region: String?, val lat: Double, val lon: Double)

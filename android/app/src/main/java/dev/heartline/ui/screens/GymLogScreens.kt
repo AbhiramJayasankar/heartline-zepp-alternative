@@ -95,6 +95,7 @@ fun GymLogScreen(controller: HeartlineController, nav: Navigator) {
     val result by controller.gymImport.collectAsStateWithLifecycle()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> if (uris.isNotEmpty()) controller.importGymLog(uris) }
     val sessions = remember(log) { sessionsOf(log) }
+    val captures by controller.captures.collectAsStateWithLifecycle()
     var open by rememberSaveable { mutableStateOf<String?>(null) }
     Screen("Gym log", onBack = { nav.pop() }, subtitle = "Sets, loads and treadmill settings from your workout logs.",
         icon = dev.heartline.ui.Icons.activity, tint = c.warn) {
@@ -122,11 +123,20 @@ fun GymLogScreen(controller: HeartlineController, nav: Navigator) {
                     }
                 }
             }
-            if (open == id) Column(Modifier.padding(start = 8.dp, bottom = 8.dp)) { ExerciseSets(s.sets) }
+            if (open == id) Column(Modifier.padding(start = 8.dp, bottom = 8.dp)) {
+                // The recording over the same time has the sets merged with heart rate and the watch's rep counts.
+                val a = s.start; val b = s.end
+                captures.filter { cap -> a != null && b != null && cap.start < b && cap.start + cap.durationS > a }.forEach { cap ->
+                    NavRow("Open the recording", "${timeOf(cap.start)}, ${cap.durationS / 60} min, sets with heart rate and the watch's rep counts") {
+                        nav.push(dev.heartline.ui.Route.CaptureResult(cap.id))
+                    }
+                }
+                ExerciseSets(s.sets)
+            }
             HorizontalDivider(color = c.line)
         }
         Gap(16)
-        Note("Timed sessions count as workout time for active minutes. Treadmill rows with speed and incline give a VO2max estimate, " +
+        Note("Timed sets merge into a Heartline recording made at the same time: your sets, names and rest times replace the watch's guesses, and the watch adds heart rate and rep counts. Timed sessions also count as workout time for active minutes. Treadmill rows with speed and incline give a VO2max estimate, " +
             "matched to the watch's heart rate for that stretch. Volume is load times reps over working and warm-up sets; for assisted moves the load is your weight minus the assistance.")
         Gap(28)
     }

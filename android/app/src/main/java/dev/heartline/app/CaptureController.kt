@@ -45,7 +45,8 @@ internal class CaptureController(
         service.value?.captureRunner?.stop()
     }
     suspend fun detail(id: String): CaptureAnalysisUi? {
-        db.meta.get(CAPTURE_RESULT + id)?.takeIf { db.meta.get(CAPTURE_ENGINE + id) == CAPTURE_ENGINE_VERSION }
+        val session = db.meta.get(CAPTURE_SESSION + id)?.let { runCatching { captureSession(it) }.getOrNull() }
+        db.meta.get(CAPTURE_RESULT + id)?.takeIf { session != null && db.meta.get(CAPTURE_ENGINE + id) == captureEngineKey(db, session).first }
             ?.let { return withContext(Dispatchers.Default) { captureFromJson(it) } }
         return ensureService().captureRunner.detail(id)
     }

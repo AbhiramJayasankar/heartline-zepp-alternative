@@ -11,9 +11,9 @@ internal fun CaptureAnalysisUi.captureJson(): String = JSONObject().apply {
     put("zones", JSONArray(zones.map { JSONArray(listOf(it.zone, it.lowBpm, it.highBpm ?: JSONObject.NULL, it.seconds)) }))
     put("hr", JSONArray(hr.map { JSONArray(listOf(it.t, it.v)) })); put("motion", JSONArray(motion.map { JSONArray(listOf(it.t, it.v)) }))
     put("segments", JSONArray(segments.map { JSONArray(listOf(it.start, it.end, it.kind, it.avgHr ?: JSONObject.NULL, it.cadenceSpm ?: JSONObject.NULL)) }))
-    put("sets", JSONArray(sets.map { JSONArray(listOf(it.start, it.end, it.reps, it.avgHr ?: JSONObject.NULL, it.peakHr ?: JSONObject.NULL, it.tempoS ?: JSONObject.NULL,
-        JSONArray(it.repDetail.map { r -> JSONArray(listOf(r.t, r.durationS, r.slowS, r.fastS, r.arcDeg)) }),
-        it.group, it.activity ?: JSONObject.NULL, it.slowdownS ?: JSONObject.NULL, it.partialLast, it.startHr ?: JSONObject.NULL, it.hrRise ?: JSONObject.NULL)) }))
+    put("sets", JSONArray(sets.map { it.json() }))
+    put("unlogged", JSONArray(unlogged.map { it.json() }))
+    put("logMatched", logMatched ?: JSONObject.NULL); put("logTotal", logTotal ?: JSONObject.NULL)
     put("rests", JSONArray(rests.map { JSONArray(listOf(it.start, it.end, it.startHr ?: JSONObject.NULL, it.endHr ?: JSONObject.NULL, it.drop60 ?: JSONObject.NULL)) }))
     put("activities", JSONArray(activities.map { JSONArray(listOf(it.start, it.end, it.type, it.activeS ?: JSONObject.NULL,
         it.distanceM ?: JSONObject.NULL, it.steps ?: JSONObject.NULL, it.calories ?: JSONObject.NULL, it.avgHr ?: JSONObject.NULL, it.maxHr ?: JSONObject.NULL)) }))
@@ -45,9 +45,7 @@ internal fun captureFromJson(json: String): CaptureAnalysisUi = JSONObject(json)
         rows("zones") { ZoneTimeUi(it.getInt(0), zoneName(it.getInt(0)), it.getInt(1), it.int(2), it.getInt(3)) }, double("load"), int("calories"), int("steps"),
         rows("hr") { SeriesPoint(it.getDouble(0), it.getDouble(1)) }, rows("motion") { SeriesPoint(it.getDouble(0), it.getDouble(1)) },
         rows("segments") { SegmentUi(it.getDouble(0), it.getDouble(1), it.getString(2), it.int(3), it.int(4)) },
-        rows("sets") { SetUi(it.getDouble(0), it.getDouble(1), it.getInt(2), it.int(3), it.int(4), it.double(5),
-            it.optJSONArray(6)?.rows { r -> RepUi(r.getDouble(0), r.getDouble(1), r.getDouble(2), r.getDouble(3), r.getDouble(4)) } ?: emptyList(),
-            it.optInt(7, 0), if (it.isNull(8)) null else it.getString(8), it.double(9), it.optBoolean(10, false), it.int(11), it.int(12)) },
+        rows("sets") { setFromJson(it) },
         rows("rests") { RestUi(it.getDouble(0), it.getDouble(1), it.int(2), it.int(3), it.int(4)) }, o.getString("source"),
         o.getJSONArray("notes").strings(),
         rows("activities") { CaptureActivityUi(it.getDouble(0), it.getDouble(1), it.getString(2), it.int(3), it.int(4), it.int(5), it.int(6), it.int(7), it.int(8)) },
@@ -59,7 +57,23 @@ internal fun captureFromJson(json: String): CaptureAnalysisUi = JSONObject(json)
             p.getJSONArray("windows").rows { PulseWindowUi(it.getDouble(0), it.getDouble(1), it.getInt(2), it.getInt(3), it.int(4), it.getDouble(5), it.getDouble(6), it.getString(7)) },
             if (p.isNull("nrmssd")) null else p.getDouble("nrmssd"), if (p.isNull("entropy")) null else p.getDouble("entropy"), p.getInt("ectopic"),
             p.getJSONArray("pairs").rows { it.getDouble(0) to it.getDouble(1) }, p.getJSONArray("excerpt").doubles(),
-            p.getDouble("excerptFs"), p.getDouble("excerptStart"), p.getJSONArray("excerptBeats").doubles(), p.getJSONArray("notes").strings()) })
+            p.getDouble("excerptFs"), p.getDouble("excerptStart"), p.getJSONArray("excerptBeats").doubles(), p.getJSONArray("notes").strings()) },
+        int("logMatched"), int("logTotal"), rows("unlogged") { setFromJson(it) })
+}
+
+private fun SetUi.json() = JSONArray(listOf(start, end, reps, avgHr ?: JSONObject.NULL, peakHr ?: JSONObject.NULL, tempoS ?: JSONObject.NULL,
+    JSONArray(repDetail.map { r -> JSONArray(listOf(r.t, r.durationS, r.slowS, r.fastS, r.arcDeg)) }),
+    group, activity ?: JSONObject.NULL, slowdownS ?: JSONObject.NULL, partialLast, startHr ?: JSONObject.NULL, hrRise ?: JSONObject.NULL,
+    exercise ?: JSONObject.NULL, setLabel ?: JSONObject.NULL, loadKg ?: JSONObject.NULL, loggedReps ?: JSONObject.NULL, warmUp, source))
+
+private fun setFromJson(it: JSONArray): SetUi {
+    fun int(i: Int): Int? = if (it.length() <= i || it.isNull(i)) null else it.getInt(i)
+    fun double(i: Int): Double? = if (it.length() <= i || it.isNull(i)) null else it.getDouble(i)
+    fun str(i: Int): String? = if (it.length() <= i || it.isNull(i)) null else it.getString(i)
+    return SetUi(it.getDouble(0), it.getDouble(1), it.getInt(2), int(3), int(4), double(5),
+        it.optJSONArray(6)?.rows { r -> RepUi(r.getDouble(0), r.getDouble(1), r.getDouble(2), r.getDouble(3), r.getDouble(4)) } ?: emptyList(),
+        it.optInt(7, 0), str(8), double(9), it.optBoolean(10, false), int(11), int(12),
+        str(13), str(14), double(15), double(16), it.optBoolean(17, false), str(18) ?: "watch")
 }
 
 private fun <T> JSONArray.rows(f: (JSONArray) -> T) = (0 until length()).map { f(getJSONArray(it)) }
