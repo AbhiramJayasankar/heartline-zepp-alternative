@@ -110,9 +110,14 @@ internal class CaptureController(
      * The coach's note for a capture, from [facts] (the page's own numbers). Kept per capture and written again only when
      * the facts change (a log corrected, say) or [refresh] asks; throws with a readable message when it can't be written.
      */
+    suspend fun savedCoach(id: String): CoachUi? = withContext(Dispatchers.IO) { coachFromJson(db.meta.get(CAPTURE_COACH + id))?.first }
+
     suspend fun coach(id: String, facts: String, refresh: Boolean): CoachUi = withContext(Dispatchers.IO) {
         val basis = Integer.toHexString(facts.hashCode())
-        if (!refresh) coachFromJson(db.meta.get(CAPTURE_COACH + id))?.takeIf { it.second == basis }?.let { return@withContext it.first }
+        // A saved note is the session's note: shown as it is, marked when the numbers have changed since, and written
+        // again only on request. (Keying it on the numbers made every open ask the AI again while the page's comparisons
+        // were still loading, which also used up the free daily quota.)
+        if (!refresh) coachFromJson(db.meta.get(CAPTURE_COACH + id))?.let { (note, b) -> return@withContext note.copy(stale = b != basis) }
         val key = SpeechConfig.parse(db.meta.get(SpeechConfig.KEY)).geminiKey
         check(key.isNotBlank()) { "Add a Gemini key under Watch, Alexa, Voice to get a coach's note." }
         val model = InsightsSettings.parse(db.meta.get(InsightsSettings.KEY)).geminiModel

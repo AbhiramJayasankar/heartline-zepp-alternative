@@ -461,10 +461,19 @@ private fun CoachNote(controller: HeartlineController, a: CaptureAnalysisUi, ins
     val facts = remember(a, ins, going) { dev.heartline.app.coachFacts(a, ins, going) }
     var refresh by remember { mutableStateOf(0) }
     val ready = trends != null
-    val state by produceState<Pair<dev.heartline.app.CoachUi?, String?>?>(null, facts, refresh, ready) {
+    // A saved note shows at once. A first note waits until the page's comparisons (the last session, skin temperature,
+    // the day's readiness) have stopped arriving, so it is written once from the settled numbers.
+    // "Write it again" is one request: [handled] is the last one answered, so later changes in the numbers don't repeat it.
+    val handled = remember { intArrayOf(0) }
+    val saved by produceState<dev.heartline.app.CoachUi?>(null, a.id) { value = controller.savedCaptureCoach(a.id) }
+    val state by produceState<Pair<dev.heartline.app.CoachUi?, String?>?>(null, facts, refresh, ready, saved) {
+        val again = refresh > handled[0]
+        if (saved != null && !again) { value = controller.captureCoach(a.id, facts, false) to null; return@produceState }
         value = null
         if (!ready) return@produceState
-        value = try { controller.captureCoach(a.id, facts, refresh > 0) to null }
+        if (!again) delay(2500)
+        handled[0] = refresh
+        value = try { controller.captureCoach(a.id, facts, again) to null }
             catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) { null to (e.message ?: "The coach couldn't write a note just now.") }
     }
@@ -488,7 +497,8 @@ private fun CoachNote(controller: HeartlineController, a: CaptureAnalysisUi, ins
                     }
                 }
                 Gap(10)
-                MutedText("Written by ${note.model.removePrefix("models/")} from the numbers on this page. If it disagrees with them, the measured numbers win.")
+                MutedText("Written by ${note.model.removePrefix("models/")} from the numbers on this page. If it disagrees with them, the measured numbers win." +
+                    if (note.stale) " This page's numbers have changed since it was written." else "")
                 TextButton({ refresh++ }, contentPadding = PaddingValues(0.dp)) { Text("Write it again", style = HL.type.label, color = c.pulse) }
             }
             else -> {

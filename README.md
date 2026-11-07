@@ -1,15 +1,15 @@
 <p align="center">
-  <img src="docs/images/screens.png" alt="Heartline app screens: readiness, live heart rate, activity and sleep, trends, watch controls" width="100%">
+  <img src="docs/images/screens.png" alt="Heartline app screens: a gym session's heart-rate chart with exercise lanes, the AI coach's note, calories by exercise, the sleep page and trends" width="100%">
 </p>
 
 <h1 align="center">Heartline: an open-source Zepp app alternative for the Amazfit GTR 2e</h1>
 
 <p align="center">
-  <b>Your watch, minus the Zepp app, plus an AI assistant on its Alexa button.</b><br>
+  <b>Your watch, minus the Zepp app, plus a gym coach and an AI assistant.</b><br>
   Heartline talks to the <b>Amazfit GTR 2e</b> directly over Bluetooth LE and keeps every reading on your phone:
-  heart rate, sleep stages, SpO2, stress, skin temperature, workouts, notifications, alarms and weather. Press the
-  watch's Alexa button and ask it anything: it reads your health data, searches the web, sets reminders and shows
-  tables on your wrist. No account, no cloud.
+  heart rate, sleep stages and naps, SpO2, stress, HRV, skin temperature, notifications, alarms and weather. It
+  records your gym sessions from the watch's raw sensors, merges them with your workout log and analyses every set,
+  rest and calorie. Press the watch's Alexa button and ask it anything. No account, no cloud.
 </p>
 
 <p align="center">
@@ -19,23 +19,53 @@
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
-> **Status: alpha.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
+> **Status: 0.3.0.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
 > Other Huami/Zepp watches of the same generation (GTR 2, GTS 2, GTS 2e) speak a similar protocol but are untested.
 
 ## Highlights
 
 | | |
 |---|---|
+| 🏋️ **A gym session analysed like a coach would** | Your log's sets and loads plus the watch's raw sensors: new bests, volume against last time, what each exercise cost your heart, recovery between sets, calories per exercise, a treadmill comparison with your last walk, and an AI coach's note with the numbers to aim for next time. |
 | 🎙️ **An Alexa button that knows you** | Ask about your sleep, stress or readiness and get an analysis of *your* data. Ask for the news and it searches the web. Set timers, alarms and reminders by voice. Free AI, your own keys. |
 | 📊 **Health scores Zepp never showed** | Readiness, strain, sleep score and body battery every day, trends against your own 28-day baseline, VO2max and fitness age. |
 | 🌙 **A page for every part of you** | Sleep with a stage-by-stage hypnogram and overnight SpO2, heart rate with resting and HRV against your usual, activity against your goal, and an overview that ties them together. |
 | ✨ **AI insights** | Gemini 3.8 Flash (or any OpenRouter model) reads two weeks of your data and writes what stands out, with the numbers and one thing to try. |
-| 🎨 **Six themes** | Paper, Night, Sage, Dusk, follow-the-phone, and a true-black OLED theme. |
+| 🎨 **Seven themes** | Paper, Night, Sage, Dusk, Lilac, Forest and a true-black OLED theme, or follow the phone. |
 | 🫀 **Heart checks from the raw pulse** | Records the optical pulse waveform and measures HRV, rhythm regularity and breathing rate beat by beat. |
-| 🏋️ **Gym capture that counts reps** | Streams motion and pulse during a session and finds your sets, reps, rest and heart-rate recovery. |
 | 🔬 **Every sensor, raw** | Live pulse, accelerometer, gyroscope, compass, GPS and microphone streams, saved to CSV. |
 | ⌚ **Everything Zepp did** | Notifications with app icons, calls, music, find phone, alarms, calendar reminders, weather, watch settings and the app list. |
 | 🔒 **No account, no cloud** | One local database on the phone. Export it, back it up, or share it through Health Connect. |
+
+## Gym sessions, analysed like a coach would
+
+<p align="center">
+  <img src="docs/images/workouts.png" alt="A gym session in Heartline: summary, exercise cards with estimated one-rep max and rep strips, heart cost per exercise, heart rate between sets against the last session, and the treadmill comparison" width="100%">
+</p>
+
+Start a capture on the phone (or ask the watch's Alexa button), train, and import your workout log afterwards.
+Heartline lines the log up with what the watch's accelerometer, gyroscope and heart-rate sensor recorded:
+
+- **One chart for the whole session**: heart rate with every set shaded by exercise, your rising heart-rate floor,
+  zones, and lanes underneath for each exercise, wrist motion, what you were doing and the watch's own workouts, all
+  on one time axis. Touch any moment for the set, the heart rate and the **calories so far**.
+- **What stood out**: new bests by estimated one-rep max, volume against the last session with the same exercises,
+  the exercise that cost your heart most, recovery against last time, sets taken to failure, skipped sets.
+- **Every exercise and set**: rest before, reps in reserve, failure and difficulty from your log; reps counted by the
+  watch, each rep's duration and wrist arc; a link to the same exercise last session.
+- **Calories every 5 seconds**: heart-rate reserve converted to oxygen use with your VO2max and weight, the ACSM
+  walking equation for a logged treadmill stretch, and the watch's own estimate met halfway. Per exercise, per part
+  of the session, and a running total.
+- **The treadmill against your last walk**: speed, incline, time, steps, distance, calories, steady heart rate,
+  rise time and recovery side by side, with a verdict ("same settings, your heart settled 5 bpm lower") and a link.
+- **An AI coach's note** (Gemini, your own free key) that reads the page's numbers and says what to aim for next
+  session, saved with the session.
+- **Around the session**: readiness and sleep going in, the day's load, the heart check after, and the watch's
+  workout beside what the sensors measured.
+
+<p align="center">
+  <img src="docs/images/around.png" alt="Workout captures list, the gym log, a treadmill block with steps and calories, the activity page and the 24-hour heart rate trace" width="100%">
+</p>
 
 ## The Alexa button, rebuilt
 
@@ -69,8 +99,11 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
 ## Everything else
 
 **Health and sleep**
-- **Readiness, strain, sleep score and body battery** each day, with a short plain-language suggestion.
-- **Heart rate** all day (per-minute history plus live readings), resting heart rate and zones.
+- **Readiness, strain, sleep score and body battery** each day, with a short plain-language suggestion, and a
+  Readiness page that shows exactly how the number was worked out.
+- **Naps** are kept apart from nights, shown on the Sleep page and Today, and recharge body battery.
+- **Automatic HRV**: samples overnight while you sleep and during still moments in the day.
+- **Heart rate** all day (per-minute history plus live readings), sleeping and awake resting heart rate, and zones.
 - **Sleep page**: a hypnogram of the night, each stage against its typical range, heart rate and SpO2 while asleep,
   two weeks of nights, sleep score and how regular your timing is.
 - **SpO2, stress, PAI and skin temperature.** Temperature is a reading every minute, synced every 5 minutes.
@@ -85,6 +118,8 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
 - Imports the watch's own workouts with per-second heart rate and GPS routes.
 - **Gym workout capture**: streams raw accelerometer, gyroscope and pulse during a session and finds your
   **sets, reps, rest times, heart-rate recovery, zones, load and calories**, tuned on real logged gym sessions.
+- **Gym log import** (CSV or JSON, [format](docs/GYM_LOG_FORMAT.md)): sets, loads, reps in reserve and treadmill
+  settings merge into the capture; treadmill walks give a VO2max estimate.
 
 **Watch control, like Zepp**
 - **Phone notifications** on your wrist (per-app icons), incoming calls, find phone, music control.

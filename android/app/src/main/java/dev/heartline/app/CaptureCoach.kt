@@ -8,7 +8,8 @@ import kotlin.math.roundToInt
 internal const val CAPTURE_COACH = "capture_coach_"
 
 /** A short coach's note on one session: [note] in 2 or 3 sentences, [next] up to 3 things to try next time. */
-data class CoachUi(val note: String, val next: List<String>, val model: String, val at: Long)
+/** [stale]: the page's numbers changed after the note was written (a log edit, say); it is still shown until rewritten. */
+data class CoachUi(val note: String, val next: List<String>, val model: String, val at: Long, val stale: Boolean = false)
 
 private fun num(v: Double): String = if (v % 1.0 == 0.0) v.toInt().toString() else "%.1f".format(v)
 

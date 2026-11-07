@@ -631,6 +631,7 @@ class RealController(
     override suspend fun captureDetail(id: String): CaptureAnalysisUi? = captureTask.detail(id)
     override fun deleteCapture(id: String) = captureTask.delete(id)
     override suspend fun captureCoach(id: String, facts: String, refresh: Boolean): CoachUi = captureTask.coach(id, facts, refresh)
+    override suspend fun savedCaptureCoach(id: String): CoachUi? = captureTask.savedCoach(id)
     // ---- end Task E ----
 
 
