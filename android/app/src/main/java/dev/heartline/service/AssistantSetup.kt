@@ -84,7 +84,7 @@ suspend fun healthSummary(controller: HeartlineController, t: ZonedDateTime): St
     controller.today.value?.let { d ->
         d.readiness?.let { lines += "${d.readinessLabel}: $it out of 100" + (d.recommendation?.let { r -> ". Suggestion: $r" } ?: "") }
         listOfNotNull(d.sleepScore?.let { "sleep score $it" }, d.strain?.let { "strain ${r(it, 1)}" }, d.bodyBattery?.let { "body battery $it" },
-            d.restingHr?.let { "resting heart rate $it bpm" }).takeIf { it.isNotEmpty() }?.let { lines += "Scores: " + it.joinToString(", ") }
+            d.restingHr?.let { "sleeping heart rate (lowest 30 min of last night) $it bpm" }, d.awakeRestingHr?.let { "awake resting heart rate $it bpm" }).takeIf { it.isNotEmpty() }?.let { lines += "Scores: " + it.joinToString(", ") }
         d.lastNight?.let { n ->
             val asleep = n.deepMin + n.lightMin + n.remMin
             lines += "Last night's sleep: ${at(n.start)} to ${at(n.end)}, ${hm(asleep)} asleep (deep ${hm(n.deepMin)}, light ${hm(n.lightMin)}, REM ${hm(n.remMin)}, awake ${hm(n.awakeMin)})"
@@ -92,7 +92,7 @@ suspend fun healthSummary(controller: HeartlineController, t: ZonedDateTime): St
         d.alerts.forEach { lines += "Heartline alert: ${it.title}. ${it.detail}" }
     }
     withTimeoutOrNull(5_000) { controller.healthDay(t.toLocalDate()).first() }?.let { h ->
-        listOfNotNull(h.restingHr?.let { "resting $it" }, h.hrMin?.let { "lowest $it" }, h.hrAvg?.let { "average $it" }, h.hrMax?.let { "highest $it" })
+        listOfNotNull(h.restingHr?.let { "sleeping $it" }, h.awakeRestingHr?.let { "awake resting $it" }, h.hrMin?.let { "lowest $it" }, h.hrAvg?.let { "average $it" }, h.hrMax?.let { "highest $it" })
             .takeIf { it.isNotEmpty() }?.let { lines += "Heart rate today (bpm): " + it.joinToString(", ") + if (h.hrHighMinutes > 0) "; ${h.hrHighMinutes} min high" else "" }
         if (h.stressAvg != null) lines += "Stress today (0 to 100): average ${h.stressAvg}, highest ${h.stressMax ?: "?"}"
         lines += "Activity today: ${h.stepsTotal} steps" + listOfNotNull(h.distanceM?.let { "${r(it / 1000.0, 1)} km" }, h.caloriesKcal?.let { "$it kcal" },

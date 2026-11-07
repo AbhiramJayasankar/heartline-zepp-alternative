@@ -36,16 +36,19 @@ fun DailyResult.todayUi(date: LocalDate): TodayUi {
     return TodayUi(today.readiness ?: readiness?.value,
         if (today.readiness == null && readiness != null) "Readiness, ${LocalDate.parse(readiness.date).format(DateTimeFormatter.ofPattern("d MMM"))}" else "Readiness",
         today.recommendation, today.strain, today.sleepScore, today.bodyBattery, day?.restingHr?.roundToInt(),
-        today.readinessFactors.map { Factor(it.name, when (it.impact) { "positive" -> Impact.POSITIVE; "negative" -> Impact.NEGATIVE; else -> Impact.NEUTRAL }, it.detail,
+        // The analytics call it resting heart rate; it is measured asleep, so the app says so.
+        today.readinessFactors.map { Factor(if (it.name == "Resting heart rate") "Sleeping heart rate" else it.name, when (it.impact) { "positive" -> Impact.POSITIVE; "negative" -> Impact.NEGATIVE; else -> Impact.NEUTRAL }, it.detail,
             it.z, it.weight, it.points, it.value, it.usual, it.unit) },
-        alerts.map { AlertUi(it.level == "warn" || it.level == "warning", it.title, it.detail) }, last?.sleepUi(), day?.steps, day?.activeMinutes)
+        alerts.map { AlertUi(it.level == "warn" || it.level == "warning", it.title, it.detail) }, last?.sleepUi(), day?.steps, day?.activeMinutes,
+        day?.awakeRestingHr?.roundToInt())
 }
 fun DailyResult.trendsUi(health: Map<String, Map<LocalDate, Double>>): TrendsUi {
     fun series(key: String, title: String, unit: String = "", baseline: Double? = null, bars: Boolean = false, accent: Boolean = false, value: (DayResult) -> Double?) =
         TrendSeries(key, title, unit, days.map { DayPoint(LocalDate.parse(it.date), value(it)) }, baseline, bars, accent)
     return TrendsUi(trends.vo2maxEstimate, trends.fitnessAge, trends.sleepRegularity?.roundToInt(), trends.cardioLoad7d, trends.acuteChronicRatio, listOf(
         series("readiness", "Readiness") { it.readiness?.toDouble() },
-        series("rhr", "Resting heart rate", "bpm", trends.restingHr28d) { it.restingHr },
+        series("rhr", "Sleeping heart rate", "bpm", trends.restingHr28d) { it.restingHr },
+        series("awake_rhr", "Awake resting heart rate", "bpm", days.takeLast(28).mapNotNull { it.awakeRestingHr }.takeIf { it.isNotEmpty() }?.average()) { it.awakeRestingHr },
         series("hrv", "HRV", "ms", trends.hrv28d) { it.hrvRmssd },
         series("sleep", "Sleep", "h", bars = true) { it.sleepMinutes?.div(60.0) },
         series("sleep_score", "Sleep score") { it.sleepScore?.toDouble() },

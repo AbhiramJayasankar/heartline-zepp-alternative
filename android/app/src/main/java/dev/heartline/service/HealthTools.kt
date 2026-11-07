@@ -74,7 +74,7 @@ class HealthTools(
     private suspend fun heartRate(d: LocalDate): String {
         val h = healthDay(d) ?: return "Heart rate for ${label(d)} isn't available."
         if (h.hr.isEmpty()) return "No heart rate recorded on ${label(d)}."
-        val lines = arrayListOf("Heart rate on ${label(d)} (bpm): resting ${h.restingHr ?: "?"}, lowest ${h.hrMin ?: "?"}, average ${h.hrAvg ?: "?"}, highest ${h.hrMax ?: "?"}" +
+        val lines = arrayListOf("Heart rate on ${label(d)} (bpm): sleeping (lowest 30 min asleep) ${h.restingHr ?: "?"}, awake resting ${h.awakeRestingHr ?: "?"}, lowest ${h.hrMin ?: "?"}, average ${h.hrAvg ?: "?"}, highest ${h.hrMax ?: "?"}" +
             if (h.hrHighMinutes > 0) "; ${h.hrHighMinutes} min above the high threshold" else "")
         h.hr.maxByOrNull { it.t }?.let { lines += "Latest reading: ${r(it.v)} bpm at ${at(it.t.toLong())}" }
         h.hrZones.filter { it.seconds >= 60 }.takeIf { it.isNotEmpty() }?.let { z ->
@@ -170,7 +170,7 @@ class HealthTools(
         lines += "${t.readinessLabel}: ${t.readiness?.let { "$it out of 100" } ?: "not available"}"
         t.recommendation?.let { lines += "Suggestion: $it" }
         lines += listOfNotNull(t.sleepScore?.let { "sleep score $it" }, t.strain?.let { "strain ${r(it, 1)}" }, t.bodyBattery?.let { "body battery $it" },
-            t.restingHr?.let { "resting heart rate $it bpm" }, t.activeMinutes?.let { "$it active minutes today" }).joinToString(", ").ifEmpty { "No other scores yet." }
+            t.restingHr?.let { "sleeping heart rate $it bpm" }, t.awakeRestingHr?.let { "awake resting heart rate $it bpm" }, t.activeMinutes?.let { "$it active minutes today" }).joinToString(", ").ifEmpty { "No other scores yet." }
         t.factors.forEach { lines += "Factor: ${it.name} (${it.impact.name.lowercase()}): ${it.detail}" }
         t.alerts.forEach { lines += "Alert: ${it.title}. ${it.detail}" }
         return lines.joinToString("\n")

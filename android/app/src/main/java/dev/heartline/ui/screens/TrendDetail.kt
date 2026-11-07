@@ -98,9 +98,12 @@ private fun trendAbout(key: String): About? = when (key) {
     "readiness" -> About("How ready your body is for effort today, from 0 to 100.",
         "70 plus or minus points from HRV, resting heart rate, last night's sleep and yesterday's strain, each compared with your own last 28 days.",
         "Around 70 is an ordinary day for you. 80 and up: go hard if you like. Under 50: rest. A run of low days matters more than one.", "")
-    "rhr" -> About("Your lowest steady heart rate each day, usually reached during sleep.",
-        "The watch's own resting value when it gives one; otherwise the lowest 30-minute median of your heart rate while asleep.",
-        "60–100 bpm for most adults; 40s–50s is common in fit people. A rise of 5 or more above your baseline for a few days often means poor recovery or a coming illness.", "Resting heart rate")
+    "rhr" -> About("Your calmest half hour of each night: the heart rate you settle to while asleep.",
+        "Heartline slides a 30-minute window across the night's sleep (needing 15 readings in it), takes each window's median, and keeps the lowest. One odd reading can't pull it down. The GTR 2e returns no resting heart rate of its own.",
+        "It sits a few beats below an awake resting heart rate, so the familiar 60–100 bpm range doesn't apply directly; 45–60 is common in healthy adults. A rise of 5 or more above your baseline for a few days often means poor recovery or a coming illness.", "Sleeping heart rate")
+    "awake_rhr" -> About("Your calmest 10 minutes each day while awake and still: the closer match to the resting heart rate a doctor measures.",
+        "Minutes where the watch says you were awake and worn it, took no steps and the watch's movement intensity stayed low (30 or less out of 100); within runs of such minutes Heartline takes 10-minute medians (at least 8 readings) and keeps the lowest. Lying awake in bed counts as still.",
+        "60–100 bpm for most adults at rest; 40s–50s is common in fit people. It moves with caffeine, heat, stress and how long you'd been still.")
     "hrv" -> About("Heart rate variability (RMSSD): how much the gap between beats changes. Higher usually means better recovered.",
         "From Heartline's heart checks with at least 70% clean signal and 45 s of beats; the median when there are several in a day. The GTR 2e answers requests for its own HRV record with no data.",
         "About 19–75 ms in short resting readings from healthy adults; it falls with age and varies hugely between people. Compare with your own baseline only.", "HRV")

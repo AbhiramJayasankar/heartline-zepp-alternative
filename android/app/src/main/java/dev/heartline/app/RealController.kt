@@ -142,7 +142,7 @@ class RealController(
                 val stride = p.heightCm?.takeIf { it > 0 }?.let { it / 100 * 0.415 } ?: 0.72
                 buildHealthDay(date, from, day, live.map { HrPoint(it.ts.toLong(), it.bpm) }, values, maxHr,
                     (d?.restingHr ?: p.restingHr?.toDouble())?.let { kotlin.math.round(it).toInt() }, d?.caloriesActive, stride,
-                    if (date == LocalDate.now(zone)) st?.distanceM else null)
+                    if (date == LocalDate.now(zone)) st?.distanceM else null).copy(awakeRestingHr = d?.awakeRestingHr?.let { kotlin.math.round(it).toInt() })
             }
         }
     }

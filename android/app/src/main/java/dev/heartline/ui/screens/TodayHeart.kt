@@ -161,7 +161,9 @@ fun CheckResultScreen(controller: HeartlineController, id: String, nav: Navigato
     val todayUi by controller.today.collectAsStateWithLifecycle()
     val trendsUi by controller.trends.collectAsStateWithLifecycle()
     val prefs by controller.prefs.collectAsStateWithLifecycle()
-    val resting = todayUi?.restingHr?.toDouble() ?: trendsUi?.series?.firstOrNull { it.key == "rhr" }?.let { s -> s.baseline ?: s.points.lastOrNull { it.value != null }?.value }
+    // Checks are taken awake and still, so they are compared with the awake resting rate (the sleeping one as a fallback).
+    val resting = todayUi?.awakeRestingHr?.toDouble() ?: trendsUi?.series?.firstOrNull { it.key == "awake_rhr" }?.baseline
+        ?: todayUi?.restingHr?.toDouble() ?: trendsUi?.series?.firstOrNull { it.key == "rhr" }?.let { s -> s.baseline ?: s.points.lastOrNull { it.value != null }?.value }
     Screen("Heart check", onBack = { nav.pop() }, subtitle = session?.let { "${dateTimeOf(it.start)}, ${it.durationS.toInt()} s" }) {
         val s = session ?: run { MutedText("Loading…"); return@Screen }
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.raised)) {

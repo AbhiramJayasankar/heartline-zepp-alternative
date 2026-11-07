@@ -96,6 +96,30 @@ internal fun restingHrFrom(rows: List<MinuteSample>): Double? {
     return best?.let { rounded(it) }
 }
 
+/**
+ * Awake resting heart rate: the lowest 10-minute median of heart rate while awake, worn and still (no steps, movement
+ * intensity 30 or less), from runs of consecutive still minutes with at least 8 readings in the window. Closer to the
+ * medical definition (awake, still) than the sleeping value, which is usually a few beats lower.
+ */
+internal fun awakeRestingHrFrom(rows: List<MinuteSample>): Double? {
+    // The watch's minute kind repeats the last code, so most awake minutes read "active" even when sitting; its movement
+    // intensity (0-100) is the reliable stillness signal.
+    val still = rows.filter { it.state !in sleepStates && it.state !in noDataStates && it.steps == 0 && it.intensity <= 30 && it.hr != null && it.hr in 30..220 }
+    var best: Double? = null
+    var runStart = 0
+    for (i in still.indices) {
+        // A run of still minutes ends at a gap of more than 2 minutes (movement, sleep or the watch off).
+        if (i > 0 && still[i].ts - still[i - 1].ts > 120) runStart = i
+        var j = i
+        while (j > runStart && still[i].ts - still[j - 1].ts < 600) j--
+        if (i - j + 1 >= 8) {
+            val v = median(DoubleArray(i - j + 1) { still[j + it].hr!!.toDouble() })
+            best = if (best == null) v else min(best, v)
+        }
+    }
+    return best?.let { rounded(it) }
+}
+
 internal fun sleepRegularity(minutes: List<MinuteSample>): Double? {
     val states = HashMap<Long, Boolean>()
     for (m in minutes) if (m.state !in noDataStates) states[Math.floorDiv(m.ts, 60)] = m.state in sleepStates

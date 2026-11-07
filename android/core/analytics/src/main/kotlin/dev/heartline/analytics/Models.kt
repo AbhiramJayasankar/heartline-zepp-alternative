@@ -75,6 +75,8 @@ data class DayResult(
     val sleepStart: Long? = null, val sleepEnd: Long? = null,
     /** The night may still be going on: it ended under 30 min before the latest data, before noon. */
     val sleepOngoing: Boolean = false,
+    /** Lowest 10-minute median while awake and still ([restingHr] is the sleeping value). */
+    val awakeRestingHr: Double? = null,
 )
 data class ReadinessFactor(
     val name: String, val impact: String, val detail: String,

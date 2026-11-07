@@ -49,11 +49,11 @@ private val SIGNALS = listOf(
             "biggest weight because it reacts first, often a day before you feel run down.",
         "Not counted today: it needs an HRV reading today and at least three earlier days with one in the last 28. A one-minute heart check " +
             "after waking, before coffee, gives the cleanest number."),
-    Signal("Resting heart rate", "rhr", "rhr", 0.30, Area.HEART,
-        "Your lowest steady heart rate of the day, usually during sleep. A fitter, rested heart pumps the same blood with fewer beats.",
-        "Today's resting rate against your last 28 days. Lower than usual helps; a few beats higher often means poor sleep, a late meal, " +
-            "alcohol, heat or the start of an illness.",
-        "Not counted today: it needs today's resting heart rate (a night with the watch on) and at least three earlier days."),
+    Signal("Sleeping heart rate", "rhr", "rhr", 0.30, Area.HEART,
+        "Your calmest half hour asleep last night (the lowest 30-minute median). A fitter, rested heart pumps the same blood with fewer beats.",
+        "Last night's value against your last 28 nights. Lower than usual helps; a few beats higher often means poor sleep, a late meal, " +
+            "alcohol, heat or the start of an illness. The awake resting rate isn't used: it depends too much on when you happened to sit still.",
+        "Not counted today: it needs a night with the watch on and at least three earlier nights."),
     Signal("Sleep", "sleep", "sleep_score", 0.25, Area.SLEEP,
         "Last night's sleep score (0 to 100), built from how long you slept, how much of your time in bed was asleep, and your share of deep and REM sleep.",
         "Compared with a fixed 70, a decent night. Every 15 points above or below moves it as much as one standard deviation does for the heart signals.",
@@ -139,7 +139,7 @@ fun ReadinessScreen(controller: HeartlineController, focus: String?, nav: Naviga
             MutedText("The maths: each signal becomes a z-score, how many standard deviations today sits from your last 28 days " +
                 "(at least 2 bpm and 10% of your HRV, so a very steady month doesn't exaggerate small changes). Readiness is " +
                 "70 + 15 × the weighted average of those z-scores, so a day one standard deviation better on everything scores 85, " +
-                "one worse scores 55. Weights: HRV 35%, resting heart rate 30%, sleep 25%, yesterday's strain 10%; signals missing " +
+                "one worse scores 55. Weights: HRV 35%, sleeping heart rate 30%, sleep 25%, yesterday's strain 10%; signals missing " +
                 "today are left out and the rest share their weight.")
         }
 

@@ -184,6 +184,8 @@ data class HealthDayUi(
     val activeMinutes: Int, val wornMinutes: Int,
     val paiToday: Double?, val paiTotal: Double?,
     val minutes: List<MinuteUi>, val sleep: SleepNightUi?, val workouts: List<WorkoutUi>,
+    /** Lowest 10-minute median while awake and still ([restingHr] is the sleeping value). */
+    val awakeRestingHr: Int? = null,
 )
 data class LapUi(val index: Int, val durationS: Int, val distanceM: Int?, val avgHr: Int?, val paceSPerKm: Double?)
 /** Everything decoded beyond the basic summary. Any decoded field without a dedicated slot goes in [extras] as label to value. */
@@ -310,12 +312,15 @@ data class TodayUi(
     val strain: Double?,
     val sleepScore: Int?,
     val bodyBattery: Int?,
+    /** Sleeping heart rate: the lowest 30-minute median of last night's sleep (shown as "sleeping"). */
     val restingHr: Int?,
     val factors: List<Factor>,
     val alerts: List<AlertUi>,
     val lastNight: SleepNightUi?,
     val stepsToday: Int?,
     val activeMinutes: Int?,
+    /** Lowest 10-minute median while awake and still, today. */
+    val awakeRestingHr: Int? = null,
 )
 
 data class DayPoint(val date: LocalDate, val value: Double?)

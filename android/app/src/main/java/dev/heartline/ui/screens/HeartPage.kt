@@ -125,7 +125,7 @@ fun HeartScreen(controller: HeartlineController, nav: Navigator) {
             val rhr = trends.seriesOf("rhr")
             val hrv = trends.seriesOf("hrv")
             if (rhr != null) {
-                Heading("Resting heart rate, 2 weeks", action = "Trend", onAction = { nav.push(Route.Trend("rhr")) })
+                Heading("Sleeping heart rate, 2 weeks", action = "Trend", onAction = { nav.push(Route.Trend("rhr")) })
                 Card(padding = 14.dp) {
                     val latest = rhr.points.lastOrNull { it.value != null }?.value
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -138,7 +138,18 @@ fun HeartScreen(controller: HeartlineController, nav: Navigator) {
                     Gap(6)
                     DayBars(rhr.points, c.pulse, line = true, height = 120.dp, reference = rhr.baseline, referenceLabel = rhr.baseline?.let { "your usual, ${it.roundToInt()} bpm" }, unit = "bpm")
                     Gap(6)
-                    MutedText("Lower than usual often means you're well recovered; a rise of 5 or more for a few days can come with illness, stress, alcohol or hard training.")
+                    MutedText("Your calmest half hour of each night (lowest 30-minute median asleep). Lower than usual often means you're well recovered; a rise of 5 or more for a few days can come with illness, stress, alcohol or hard training.")
+                }
+            }
+            trends.seriesOf("awake_rhr")?.takeIf { s -> s.points.any { it.value != null } }?.let { awake ->
+                Gap(10)
+                Card(padding = 14.dp, onClick = { nav.push(Route.Trend("awake_rhr")) }, onClickLabel = "Open the awake resting heart rate trend") {
+                    AreaLabel("Awake resting heart rate", c.pulse, dot = false)
+                    Gap(4)
+                    DayBars(awake.points, c.pulse.copy(alpha = 0.7f), line = true, height = 110.dp, reference = awake.baseline,
+                        referenceLabel = awake.baseline?.let { "your usual, ${it.roundToInt()} bpm" }, unit = "bpm")
+                    Gap(6)
+                    MutedText("Your calmest 10 minutes awake and still each day: the closer match to a doctor's resting heart rate (60–100 bpm for most adults, lower when fit).")
                 }
             }
             if (hrv != null && hrv.points.any { it.value != null }) {

@@ -65,8 +65,8 @@ fun CheckGlance(s: SessionUi, history: List<SessionUi>, resting: Double?) {
             when {
                 hr < 40 -> add(Finding(Level.LOOK, "Very low heart rate (${hr.roundToInt()} bpm)", "Below 40 at rest is unusual unless you are a trained endurance athlete. If you feel faint or tired, mention it to a doctor."))
                 hr > 100 -> add(Finding(Level.LOOK, "High heart rate for rest (${hr.roundToInt()} bpm)", "Above 100 while sitting still. Recent exercise, caffeine, heat, stress or illness raise it; if it is high at rest every time, it is worth a check-up."))
-                resting != null && hr - resting > 12 -> add(Finding(Level.INFO, "Not fully at rest", "${hr.roundToInt()} bpm is ${(hr - resting).roundToInt()} above your resting rate of ${resting.roundToInt()}. A higher heart rate lowers HRV, so this check may read low. Sit quietly for two minutes before starting next time."))
-                else -> add(Finding(Level.OK, "Heart rate ${hr.roundToInt()} bpm", if (resting != null) "Close to your resting rate of ${resting.roundToInt()} bpm: a good resting measurement." else "A normal resting rate."))
+                resting != null && hr - resting > 12 -> add(Finding(Level.INFO, "Not fully at rest", "${hr.roundToInt()} bpm is ${(hr - resting).roundToInt()} above your awake resting rate of ${resting.roundToInt()}. A higher heart rate lowers HRV, so this check may read low. Sit quietly for two minutes before starting next time."))
+                else -> add(Finding(Level.OK, "Heart rate ${hr.roundToInt()} bpm", if (resting != null) "Close to your awake resting rate of ${resting.roundToInt()} bpm: a good resting measurement." else "A normal resting rate."))
             }
         }
         if (s.rmssd != null) when {
@@ -119,10 +119,10 @@ fun CheckExplained(s: SessionUi, history: List<SessionUi>, resting: Double?, age
         what = "How many times your heart beat per minute during the check.",
         how = "60 divided by the average time between clean beats. Beats Heartline flags as early or as noise are left out.",
         yours = yours(history) { it.hr }?.let { "Your clean checks: ${it.avg.roundToInt()} bpm on average, ${it.low.roundToInt()}–${it.high.roundToInt()} (${it.n} checks)." }
-            ?: resting?.let { "Your resting rate lately: ${it.roundToInt()} bpm." },
-        typical = "60–100 bpm is the usual adult range at rest; fit people often sit in the 50s or lower. During a check it is normally a few beats above your overnight resting rate.",
+            ?: resting?.let { "Your awake resting rate lately: ${it.roundToInt()} bpm." },
+        typical = "60–100 bpm is the usual adult range at rest; fit people often sit in the 50s or lower. During a check it is normally close to your awake resting rate and a few beats above your sleeping one.",
         worth = "Only if it is below 40 or above 100 while you are truly at rest, or far from your usual without a reason.",
-        link = "Resting heart rate trend" to { nav.push(Route.Trend("rhr")) })
+        link = "Awake resting heart rate trend" to { nav.push(Route.Trend("awake_rhr")) })
     Metric("HRV (RMSSD)", s.rmssd?.roundToInt()?.toString(), "ms",
         verdict = s.rmssd?.let { v -> hrvUsual?.takeIf { it.n >= 3 }?.let { if (v < it.avg * 0.75) Level.LOOK else Level.OK } ?: Level.INFO },
         what = "Heart rate variability: how much the gap between one beat and the next changes. It mostly reflects the vagus nerve, your " +

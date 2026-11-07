@@ -181,7 +181,7 @@ fun OverviewScreen(controller: HeartlineController, nav: Navigator, onTab: (Tab)
                 }
                 Tile("Heart", c.pulse, Modifier.weight(1f).fillMaxHeight(), { onTab(Tab.HEART) }) {
                     BigValue(restingNow?.first?.roundToInt()?.toString() ?: "–", "bpm", size = 28)
-                    Text("Resting" + (restingNow?.second?.takeIf { it != date }?.let { ", ${shortDate(it)}" } ?: ""), style = HL.type.small, color = c.inkSoft)
+                    Text("Sleeping" + (restingNow?.second?.takeIf { it != date }?.let { ", ${shortDate(it)}" } ?: "") + (t?.awakeRestingHr?.let { " · awake $it" } ?: ""), style = HL.type.small, color = c.inkSoft)
                     Gap(6)
                     if (restingNow != null && rhrUsual != null) {
                         val diff = (restingNow.first - rhrUsual).roundToInt()

@@ -69,6 +69,7 @@ fun computeDaily(
             strain = null, trimp = null, hrZones = hrMax?.takeIf { it != 0 && awakeHr.isNotEmpty() }?.let { zoneMinutes(awakeHr, it) },
             spo2Avg = ownHealth["spo2"]?.get(d), stressAvg = ownHealth["stress"]?.get(d),
             readiness = null, caloriesActive = null, sleepStart = main?.start, sleepEnd = main?.end, sleepOngoing = ongoing,
+            awakeRestingHr = awakeRestingHrFrom(ms),
         ), awakeHr)
     }
     val restingValues = rows.values.mapNotNull { it.row.restingHr?.takeIf { v -> v != 0.0 } }

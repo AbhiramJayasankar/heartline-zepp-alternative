@@ -177,9 +177,12 @@ internal fun HeartDay(d: HealthDayUi, nav: Navigator) {
     val c = HL.colors
     if (d.hr.isEmpty()) { MutedText("No heart rate recorded this day."); return }
     Stats(listOf(
-        Triple("Resting", fmtInt(d.restingHr), "bpm"), Triple("Average", fmtInt(d.hrAvg), "bpm"), Triple("Range", "${fmtInt(d.hrMin)}–${fmtInt(d.hrMax)}", "bpm"),
-        Triple("Readings", fmtInt(d.hr.size), null), Triple("Live readings", fmtInt(d.hrLiveSamples), null), Triple("High HR", if (d.hrHighMinutes > 0) fmtHm(d.hrHighMinutes) else "0", "outside workouts"),
+        Triple("Sleeping", fmtInt(d.restingHr), "bpm"), Triple("Awake resting", fmtInt(d.awakeRestingHr), "bpm"), Triple("Average", fmtInt(d.hrAvg), "bpm"),
+        Triple("Range", "${fmtInt(d.hrMin)}–${fmtInt(d.hrMax)}", "bpm"), Triple("Readings", fmtInt(d.hr.size), null), Triple("High HR", if (d.hrHighMinutes > 0) fmtHm(d.hrHighMinutes) else "0", "outside workouts"),
     ))
+    Gap(6)
+    MutedText("Sleeping: your calmest half hour asleep (lowest 30-minute median). Awake resting: your calmest 10 still, awake minutes. " +
+        "Sleeping is usually a few beats lower.")
     Gap(18)
     ChartPanel("Heart rate through the day") {
         InteractiveChart(
@@ -279,12 +282,12 @@ private fun BodyDay(d: HealthDayUi, live: Boolean, onRefresh: () -> Unit) {
             Triple("Highest", d.tempMax?.let { "%.1f".format(it) } ?: "–", "°C")))
         Gap(14)
         ChartPanel("Temperature (°C), one reading a minute") {
-            val lines = listOf(ChartLine(d.temperature, c.warn, "Sensor", "°C", gap = 300.0, format = { "%.2f".format(it) })) +
-                if (d.temperature2.isNotEmpty()) listOf(ChartLine(d.temperature2, c.sleepLight, "Second value", "°C", gap = 300.0, width = 1.5.dp, format = { "%.2f".format(it) })) else emptyList()
+            val lines = listOf(ChartLine(d.temperature, c.warn, "Skin", "°C", gap = 300.0, format = { "%.2f".format(it) })) +
+                if (d.temperature2.isNotEmpty()) listOf(ChartLine(d.temperature2, c.sleepLight, "Second sensor", "°C", gap = 300.0, width = 1.5.dp, format = { "%.2f".format(it) })) else emptyList()
             InteractiveChart(lines, d.dayStart.toDouble(), d.dayStart + 86_400.0, height = 190.dp, spans = sleepAndWorkoutSpans(d, c))
         }
         Gap(8)
-        MutedText("The watch's temperature sensor reads the skin under it while worn and the air when it is off your wrist, and needs about 15 minutes to settle after you put it on. The second value is a companion reading in each record whose exact meaning Amazfit does not document.")
+        MutedText("The watch's temperature sensor reads the skin under it while worn and the air when it is off your wrist, and needs about 15 minutes to settle after you put it on. Each minute's record holds two readings. Off the wrist both match the room; worn, the second sits about 1.3 °C below the first (measured on your watch, 7 Nov), so it looks like a second sensor further from the skin, probably inside the case. Amazfit doesn't document it, so Heartline uses the first as your skin temperature.")
     }
 }
 
