@@ -56,7 +56,7 @@ fun DailyResult.trendsUi(health: Map<String, Map<LocalDate, Double>>): TrendsUi 
         series("stress", "Stress", accent = true) { it.stressAvg },
         series("pai", "PAI", bars = true) { health["pai"]?.get(LocalDate.parse(it.date)) },
         series("temp", "Skin temperature", "°C") { health["temperature"]?.get(LocalDate.parse(it.date)) },
-    ))
+    ), days.map { NightSpan(LocalDate.parse(it.date), it.sleepStart, it.sleepEnd, it.sleepMinutes, it.sleepOngoing) })
 }
 fun SessionResult.sessionUi(id: String = file) = SessionUi(id, start.toLong(), durationS, signalQuality, hrBpm,
     hrv.rmssdMs, hrv.sdnnMs, hrv.pnn50, hrv.stressIndex, hrv.lfHf, respiratoryRate, rhythmStatus(rhythm.status),

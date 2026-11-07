@@ -103,12 +103,18 @@ fun SleepScreen(controller: HeartlineController, nav: Navigator) {
                 Heading("Last ${s.points.size} nights", action = "Trend", onAction = { nav.push(Route.Trend("sleep")) })
                 Card(padding = 14.dp) {
                     val avg = s.points.mapNotNull { it.value }.takeIf { it.isNotEmpty() }?.average()
+                    val nights = trends?.nights.orEmpty().takeLast(s.points.size)
+                    val usual = dev.heartline.ui.components.usualWindow(nights)
                     Row(Modifier.fillMaxWidth()) {
                         dev.heartline.ui.components.Fact("Average", avg?.let { hm((it * 60).roundToInt()) } ?: "–", Modifier.weight(1f))
-                        dev.heartline.ui.components.Fact("7 h or more", "${s.points.count { (it.value ?: 0.0) >= 7 }} of ${s.points.count { it.value != null }}", Modifier.weight(1f), unit = "nights")
+                        dev.heartline.ui.components.Fact("Usual bedtime", usual?.let { dev.heartline.ui.components.clockOf(it.first) } ?: "–", Modifier.weight(1f))
+                        dev.heartline.ui.components.Fact("Usual wake", usual?.let { dev.heartline.ui.components.clockOf(it.second) } ?: "–", Modifier.weight(1f))
                     }
+                    Gap(4)
+                    MutedText("${s.points.count { (it.value ?: 0.0) >= 7 }} of ${s.points.count { it.value != null }} nights reached 7 hours, the least most adults need.")
                     Gap(10)
-                    DayBars(s.points, c.hue(Area.SLEEP), reference = 7.0, referenceLabel = "7 h, the least most adults need", unit = "h", format = { "%.1f".format(it) }, highlightLast = false)
+                    if (nights.any { it.start != null }) dev.heartline.ui.components.SleepWindows(nights, c.hue(Area.SLEEP))
+                    else DayBars(s.points, c.hue(Area.SLEEP), reference = 7.0, referenceLabel = "7 h, the least most adults need", unit = "h", format = { "%.1f".format(it) }, highlightLast = false)
                 }
             }
             scoreSeries?.takeIf { it.points.any { p -> p.value != null } }?.let { s ->

@@ -323,7 +323,10 @@ data class TrendSeries(val key: String, val title: String, val unit: String, val
 data class TrendsUi(
     val vo2max: Double?, val fitnessAge: Int?, val sleepRegularity: Int?, val load7d: Double?, val acwr: Double?,
     val series: List<TrendSeries>,
+    /** One per day: when the night ending that morning started and ended (null when no sleep was recorded). */
+    val nights: List<NightSpan> = emptyList(),
 )
+data class NightSpan(val date: java.time.LocalDate, val start: Long?, val end: Long?, val asleepMin: Int?, val ongoing: Boolean = false)
 
 enum class MinuteState { NOT_WORN, SLEEP_LIGHT, SLEEP_DEEP, SLEEP_REM, ACTIVE, IDLE, CHARGING, UNKNOWN }
 data class MinuteUi(val ts: Long, val state: MinuteState, val steps: Int, val hr: Int?)
