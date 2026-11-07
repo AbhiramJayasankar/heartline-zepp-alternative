@@ -202,6 +202,22 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
     val result by produceState<CaptureAnalysisUi?>(null, id) { value = controller.captureDetail(id) }
     var confirm by remember { mutableStateOf(false) }
     val a = result
+    // With a gym log over this capture: compare with the last session doing the same exercises, and its recording.
+    val log by controller.gymLog.collectAsStateWithLifecycle()
+    val captures by controller.captures.collectAsStateWithLifecycle()
+    val base = remember(a, log) { a?.let { dev.heartline.app.sessionInsights(it, log) } }
+    val prevId = remember(base, captures) { base?.previous?.let { dev.heartline.app.captureForSession(it, captures) }?.id?.takeIf { it != id } }
+    val prev by produceState<CaptureAnalysisUi?>(null, prevId) { value = prevId?.let { controller.captureDetail(it) } }
+    val skin by produceState<Pair<Double, Double>?>(null, a?.id, base != null) {
+        val cap = a ?: return@produceState
+        if (base == null) return@produceState
+        val zone = java.time.ZoneId.systemDefault()
+        val days = listOf(cap.start, cap.start + cap.durationS).map { java.time.Instant.ofEpochSecond(it).atZone(zone).toLocalDate() }.distinct()
+        val temps = days.flatMap { d -> withTimeoutOrNull(5000) { controller.healthDay(d).first() }?.temperature ?: emptyList() }
+            .filter { it.t >= cap.start && it.t <= cap.start + cap.durationS }.map { it.v }
+        value = temps.takeIf { it.size >= 5 }?.let { it.min() to it.max() }
+    }
+    val ins = remember(base, prev, skin) { if (base == null || a == null) null else dev.heartline.app.sessionInsights(a, log, prev?.recovery ?: emptyList(), skin) }
     Screen(a?.label ?: "Session", onBack = { nav.pop() }, subtitle = a?.let { "${dateTimeOf(it.start)}, ${fmtHm(it.durationS / 60)}" },
         trailing = { TextButton({ confirm = true }) { Text("Delete", color = c.inkSoft) } }) {
         if (a == null) { MutedText("Analysing the recording…"); return@Screen }
@@ -217,7 +233,7 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
             Triple("Under load", a.workS?.let { fmtHm(((it + 30) / 60)) } ?: "–", null),
             Triple("Work share", a.workS?.let { w -> a.restS?.takeIf { w + it > 0 }?.let { "${100 * w / (w + it)}" } } ?: "–", "%"),
             Triple("Exercises", if (a.sets.isEmpty()) "–" else a.sets.map { it.group }.distinct().size.toString(), null),
-        ))
+        ) + listOfNotNull(ins?.takeIf { it.volumeKg > 0 }?.let { Triple("Volume", "%,d".format(it.volumeKg.roundToInt()), "kg") }))
         Gap(20)
         Panel(padding = PaddingValues(12.dp)) {
             Text(if (a.floor.size > 1) "Heart rate, sets shaded by exercise, dashed line is your lowest per 5 min" else "Heart rate, sets shaded", style = HL.type.label, color = c.inkSoft)
@@ -243,10 +259,13 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
             }
         }
         BaselineNote(a)
+        ins?.let { Findings(it) }
         if (a.activities.isNotEmpty()) WatchWorkouts(a)
-        if (a.logTotal != null) LogAndWatch(a)
-        if (a.sets.isNotEmpty()) Exercises(a)
-        if (a.recovery.size >= 2) Recovery(a, medianRest)
+        if (a.sets.isNotEmpty()) Exercises(a, ins)
+        ins?.let { RestRepsSection(it); HeartCost(it) }
+        if (a.recovery.size >= 2) Recovery(a, medianRest, prev?.recovery ?: emptyList(), ins?.previous?.date)
+        ins?.let { FloorSection(a, it) }
+        if (a.logTotal != null) LogAndWatch(a, ins?.score)
         a.cardio.forEach { CardioBlock(a, it) }
         a.pulse?.let { PulseSection(it) }
         if (a.zones.isNotEmpty()) {
@@ -292,7 +311,7 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
 
 /** A panel ruled like ECG paper, for the charts that plot heart signals. */
 @Composable
-private fun PaperPanel(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+internal fun PaperPanel(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
     val c = HL.colors
     val shape = RoundedCornerShape(10.dp)
     Column(Modifier.fillMaxWidth().clip(shape).background(c.surface).border(1.dp, c.line, shape).padding(12.dp), content = content)
@@ -352,7 +371,7 @@ private fun WatchWorkouts(a: CaptureAnalysisUi) {
 }
 
 @Composable
-private fun Exercises(a: CaptureAnalysisUi) {
+private fun Exercises(a: CaptureAnalysisUi, ins: dev.heartline.app.SessionInsights?) {
     val c = HL.colors
     val logged = a.logTotal != null
     Gap(24); SectionTitle("Exercises and sets"); Gap(4)
@@ -362,7 +381,10 @@ private fun Exercises(a: CaptureAnalysisUi) {
     a.sets.forEach { s -> if (groups.lastOrNull()?.last()?.group == s.group) groups.last().add(s) else groups.add(mutableListOf(s)) }
     val maxDur = a.sets.maxOfOrNull { s -> s.repDetail.sumOf { it.durationS } }?.coerceAtLeast(1.0) ?: 1.0
     var setNo = 0
+    val lastRun = groups.indices.associateBy { groups[it].first().exercise }
+    val shown = HashSet<String>()
     groups.forEachIndexed { gi, sets ->
+        val info = ins?.exercises?.firstOrNull { it.exercise == sets.first().exercise }
         val color = dev.heartline.ui.components.groupColor(sets.first().group, c)
         val arcMax = sets.flatMap { s -> s.repDetail.map { minOf(it.arcDeg, 160.0) } }.maxOrNull() ?: 1.0
         Gap(18)
@@ -372,9 +394,11 @@ private fun Exercises(a: CaptureAnalysisUi) {
         }
         MutedText(listOfNotNull(if (sets.size == 1) "1 set" else "${sets.size} sets",
             if (logged) null else "${sets.sumOf { it.reps }} reps",
+            sets.mapNotNull { s -> s.startHr?.let { h -> s.hrRise?.let { h + it } } ?: s.peakHr }.maxOrNull()?.let { "peak $it bpm" },
             sets.mapNotNull { it.tempoS }.takeIf { it.isNotEmpty() }?.let { "about %.1f s per rep".format(it.average()) },
             sets.mapNotNull { s -> s.repDetail.map { it.arcDeg }.sorted().let { r -> r.getOrNull(r.size / 2) } }.takeIf { it.isNotEmpty() }?.let { "wrist turns about ${it.average().roundToInt()}°" },
             sets.first().activity).joinToString(", "))
+        if (info != null && shown.add(info.exercise)) ExerciseVersus(info)
         sets.forEach { s ->
             setNo++
             val rest = a.rests.firstOrNull { it.start >= s.end - 1 && it.start <= s.end + 5 }
@@ -387,15 +411,31 @@ private fun Exercises(a: CaptureAnalysisUi) {
                 if (s.repDetail.isNotEmpty()) dev.heartline.ui.components.RepStrip(s.repDetail, maxDur, arcMax, color, Modifier.weight(1f))
                 else Spacer(Modifier.weight(1f))
             }
+            ins?.sets?.firstOrNull { it.set === s }?.let(::logDetail)?.let { Gap(2); Text(it, style = HL.type.small, color = c.ink) }
             MutedText(listOfNotNull(
                 watchCount(s),
                 "${clock(s.start)}, lasted ${clock(s.end - s.start)}",
-                if (s.startHr != null && s.peakHr != null) "HR ${s.startHr} to ${s.peakHr}" + (s.hrRise?.let { " (+$it)" } ?: "") else s.peakHr?.let { "peak $it bpm" },
+                if (s.startHr != null && s.hrRise != null) "HR ${s.startHr} to ${s.startHr + s.hrRise} (${if (s.hrRise >= 0) "+" else ""}${s.hrRise})" else s.peakHr?.let { "peak $it bpm" },
                 s.slowdownS?.takeIf { it >= 0.1 }?.let { "slowed %.2f s per rep".format(it) },
                 if (s.partialLast) "last rep was short" else null,
-                rest?.let { "then ${clock(it.end - it.start)} rest" + (it.drop60?.let { d -> ", HR down $d in 1 min" } ?: "") },
+                rest?.let { "then ${clock(it.end - it.start)} rest" + (it.drop60?.let { d -> if (d >= 0) ", HR down $d in 1 min" else ", HR up ${-d} in 1 min" } ?: "") },
             ).joinToString(", "))
         }
+        if (info != null && lastRun[info.exercise] == gi) OffChartRows(info.untimed + info.skipped)
+    }
+    // Exercises in the log with no set in the recording: untimed or skipped.
+    ins?.exercises?.filter { e -> a.sets.none { it.exercise == e.exercise } }?.forEach { e ->
+        Gap(18)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            dev.heartline.ui.components.Dot(c.inkSoft, 10.dp); Spacer(Modifier.width(8.dp))
+            Text(e.exercise, style = HL.type.section.copy(fontSize = 20.sp), color = c.ink)
+        }
+        if (e.volumeKg > 0) ExerciseVersus(e)
+        OffChartRows(e.untimed + e.skipped)
+    }
+    if (ins != null) {
+        Gap(12)
+        MutedText("Estimated one-rep max uses Epley, load × (1 + reps/30), on working sets of 12 reps or fewer. Each exercise is compared with the last session in your log that had it, with names matched loosely across logs. Volume is load × reps over completed working sets, including ones with no times. HR is from a set's first reading to its peak up to 15 s after it ends.")
     }
 }
 
@@ -417,12 +457,22 @@ private fun watchCount(s: dev.heartline.app.SetUi): String? = when {
 
 /** How the gym log and the watch's own set finding line up for this capture. */
 @Composable
-private fun LogAndWatch(a: CaptureAnalysisUi) {
+private fun LogAndWatch(a: CaptureAnalysisUi, score: dev.heartline.app.DetectionScore?) {
     val total = a.logTotal ?: return
     val found = a.logMatched ?: 0
     val counted = a.sets.filter { it.loggedReps != null && it.reps > 0 }
     val close = counted.count { kotlin.math.abs(it.reps - it.loggedReps!!) <= 2 }
     Gap(24); SectionTitle("Your log and the watch"); Gap(4)
+    score?.let { sc ->
+        Gap(8)
+        StatGrid(listOfNotNull(
+            Triple("Logged sets found", "${sc.found}/${sc.total}", null), Triple("Finds that were sets", "${sc.found}/${sc.finds}", null),
+            if (sc.counted > 0) Triple("Reps within 2", "${sc.within2}/${sc.counted}", null) else null,
+            if (sc.counted > 0) Triple("Reps within 1", "${sc.within1}/${sc.counted}", null) else null,
+            if (sc.handTotal != null) Triple("Found, no forearm work", "${sc.handFound}/${sc.handTotal}", null) else null,
+        ))
+        Gap(10)
+    }
     MutedText("Your gym log has $total timed sets in this recording, and they set the sets, names and rest times on this page. " +
         "The watch found $found of them from wrist motion alone" + (if (found < total) "; for the other ${total - found}, it had only your logged times." else ".") +
         (if (counted.isNotEmpty()) " Where it counted reps, it was within 2 of your log on $close of ${counted.size} sets." else ""))
@@ -437,16 +487,25 @@ private fun LogAndWatch(a: CaptureAnalysisUi) {
 private fun exerciseLetter(i: Int): String = if (i < 26) ('A' + i).toString() else "${i + 1}"
 
 @Composable
-private fun Recovery(a: CaptureAnalysisUi, medianRest: Double?) {
+private fun Recovery(a: CaptureAnalysisUi, medianRest: Double?, compare: List<dev.heartline.app.RecoveryPointUi> = emptyList(), compareDate: LocalDate? = null) {
     val m = a.recovery.minBy { it.delta }
     val at60 = a.recovery.minByOrNull { kotlin.math.abs(it.t - 60) }
     Gap(24); SectionTitle("Heart rate between sets"); Gap(4)
     MutedText("Average change from each set's peak while you rested, across ${a.recovery.first().n} rests.")
     Gap(10)
-    PaperPanel { dev.heartline.ui.components.RecoveryChart(a.recovery, medianRest) }
+    val label = compareDate?.format(java.time.format.DateTimeFormatter.ofPattern("d MMM"))
+    PaperPanel {
+        dev.heartline.ui.components.RecoveryChart(a.recovery, medianRest, compare = if (label != null) compare else emptyList(), compareLabel = label)
+        if (label != null && compare.size >= 2) {
+            Gap(6)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) { LegendDot(HL.colors.pulse, "This session"); LegendDot(HL.colors.inkSoft, label) }
+        }
+    }
     Gap(10)
     MutedText(buildString {
-        at60?.let { append("Heart rate fell about ${(-it.delta).roundToInt()} bpm in the first minute. ") }
+        at60?.let { append("Heart rate fell about ${(-it.delta).roundToInt()} bpm in the first minute") }
+        val then60 = compare.minByOrNull { kotlin.math.abs(it.t - 60) }?.takeIf { label != null && kotlin.math.abs(it.t - 60) <= 10 }
+        if (at60 != null) append(then60?.let { ", against ${(-it.delta).roundToInt()} bpm on $label. " } ?: ". ")
         append("It stopped falling around ${m.t} s")
         medianRest?.let { append(if (it > m.t + 30) ", well before your median rest of ${clock(it)} ended" else ", close to your median rest of ${clock(it)}") }
         append(". Heart-rate recovery is not muscle recovery, so longer rests before hard sets can still pay off.")

@@ -50,14 +50,19 @@ fun RepStrip(reps: List<RepUi>, maxDurationS: Double, maxArc: Double, color: Col
 
 /** Average heart-rate change after a set's peak, with the session's median rest marked. */
 @Composable
-fun RecoveryChart(points: List<RecoveryPointUi>, medianRestS: Double?, modifier: Modifier = Modifier) {
+fun RecoveryChart(points: List<RecoveryPointUi>, medianRestS: Double?, modifier: Modifier = Modifier,
+                  compare: List<RecoveryPointUi> = emptyList(), compareLabel: String? = null) {
     val c = HL.colors
     if (points.size < 2) return
     val end = points.maxOf { it.t }.coerceAtLeast(60).toDouble()
-    val line = ChartLine(points.map { SeriesPoint(it.t.toDouble(), it.delta) }, c.pulse, "Change from set peak", "bpm", fill = true, gap = 30.0,
+    val line = ChartLine(points.map { SeriesPoint(it.t.toDouble(), it.delta) }, c.pulse, "Change from set peak", "bpm", fill = compare.size < 2, gap = 30.0,
         format = { "%+.1f".format(it) })
+    // An earlier session's curve over the same span, for comparison.
+    val other = compare.filter { it.t <= end }.takeIf { it.size >= 2 }?.let { pts ->
+        ChartLine(pts.map { SeriesPoint(it.t.toDouble(), it.delta) }, c.inkSoft, compareLabel ?: "Earlier", "bpm", width = 1.5.dp, gap = 30.0, format = { "%+.1f".format(it) })
+    }
     val counts = points.map { SeriesPoint(it.t.toDouble(), it.n.toDouble()) }
-    InteractiveChart(listOf(line, ChartLine(counts, c.inkSoft, "Rests averaged", "", width = 0.dp, axis = false, gap = 30.0)), 0.0, end, modifier, height = 170.dp,
+    InteractiveChart(listOfNotNull(line, other, ChartLine(counts, c.inkSoft, "Rests averaged", "", width = 0.dp, axis = false, gap = 30.0)), 0.0, end, modifier, height = 170.dp,
         spans = medianRestS?.takeIf { it <= end }?.let { listOf(ChartSpan(it - 1, it + 1, c.inkSoft.copy(alpha = 0.6f), "Your median rest")) } ?: emptyList(),
         xLabel = { if (it == 0.0) "peak" else "${it.toInt()}s" }, readoutX = { "${it.toInt()} s after the set's peak" }, minSpan = 30.0,
         idleHint = "Touch to see the average change at that point in a rest.")

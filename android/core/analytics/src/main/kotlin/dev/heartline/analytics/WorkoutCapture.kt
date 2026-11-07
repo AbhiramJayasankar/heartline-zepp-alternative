@@ -103,8 +103,12 @@ fun analyzeCapture(rec: Recording, hr: List<Pair<Double, Int>>, profile: Profile
     val rests = sets.zipWithNext().mapNotNull { (a, b) ->
         if (b.start <= a.end) return@mapNotNull null
         val first = near(a.end); val last = near(b.start - 1)
-        val at60 = if (b.start - a.end >= 60) near(a.end + 60) else null
-        CaptureRest(a.end, b.start, first, last, if (first != null && at60 != null) first - at60 else null)
+        // Wrist heart rate keeps climbing for a few seconds after a set, so the 1-minute drop runs from the peak
+        // within 20 s of the set's end, as the recovery curve does, not from the end itself.
+        val peakT = (0..20).map { a.end + it }.filter { it < b.start }.maxByOrNull { near(it) ?: -1 }
+        val peak = peakT?.let { near(it) }
+        val at60 = if (peakT != null && b.start - peakT >= 60) near(peakT + 60) else null
+        CaptureRest(a.end, b.start, first, last, if (peak != null && at60 != null) peak - at60 else null)
     }
     val calories = captureCalories(valid, profile)
     val notes = mutableListOf("Heart rate comes from the watch's live HR_MEASURE notifications; moving PPG is not used for heart rate.")
