@@ -14,6 +14,7 @@ internal fun JSONArray.numbers(): List<Double> = (0 until length()).map { getDou
 internal fun settingValue(key: String, text: String): Any = when (dev.heartline.protocol.SETTINGS.firstOrNull { it.key == key }?.type) {
     "bool" -> text == "true"
     "int" -> text.toIntOrNull() ?: text
+    "pin" -> text
     else -> text.toIntOrNull() ?: text
 }
 internal fun Workout.stored(): StoredWorkout {

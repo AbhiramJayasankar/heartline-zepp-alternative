@@ -63,6 +63,9 @@ val SETTINGS: List<SettingDef> = listOf(
         listOf(SettingOption("off", "Off"), SettingOption("on", "Always"), SettingOption("scheduled", "Between set times")), section = "Connection", androidOnly = true),
     SettingDef("disconnect_start", "Disconnect alert from", "enum", HALF_HOURS, section = "Connection", androidOnly = true),
     SettingDef("disconnect_end", "Disconnect alert until", "enum", HALF_HOURS, section = "Connection", androidOnly = true),
+    // Zepp 6.3 setUnwearPassword and Gadgetbridge setPassword: the watch asks for it when it is put back on after coming off.
+    SettingDef("passcode", "Ask for a passcode when you put the watch on", "bool", section = "Passcode", androidOnly = true),
+    SettingDef("passcode_pin", "Passcode", "pin", section = "Passcode", androidOnly = true),
     SettingDef("language", "Watch language", "enum", WATCH_LANGUAGES, section = "Watch", androidOnly = true),
     SettingDef("wear_location", "Worn on", "enum", listOf(SettingOption("left", "Left wrist"), SettingOption("right", "Right wrist")),
         target = SettingTarget.USER, section = "Watch", androidOnly = true),
@@ -80,7 +83,7 @@ fun settingSection(def: SettingDef): String = when (def.key) {
 }
 
 /** Section order on the settings screen. */
-val SETTING_SECTIONS = listOf("Health", "Display", "Do not disturb", "Move reminders", "Connection", "Watch")
+val SETTING_SECTIONS = listOf("Health", "Display", "Do not disturb", "Move reminders", "Connection", "Passcode", "Watch")
 
 /** What the encoders assume until a value is set, so the screen can show it instead of "Not set". */
 fun settingDefault(key: String): Any? = when (key) {
@@ -94,6 +97,7 @@ fun settingDefault(key: String): Any? = when (key) {
 }
 
 private val HH_MM = Regex("""\d{2}:\d{2}""")
+private val PASSCODE = Regex("""\d{4}""")
 
 private fun hm(v: Any?, default: String): Pair<Int, Int> {
     val t = (v as? String)?.takeIf { it.matches(HH_MM) } ?: default
@@ -139,6 +143,8 @@ fun validateSetting(key: String, value: Any): Any {
                 "$key must be between ${spec.min} and ${spec.max}"
             }
         }.toInt()
+        // The GTR 2e's keypad takes four digits (Zepp's six-digit passcodes are for the Zepp OS watches).
+        "pin" -> value.toString().also { require(it.matches(PASSCODE)) { "$key must be 4 digits" } }
         else -> {
             val normalized = when (value) { is Boolean -> if (value) 1 else 0; is Number -> value.toDouble(); else -> value }
             require(spec.options.any { opt -> if (opt.value is Number && normalized is Number) opt.value.toDouble() == normalized.toDouble() else opt.value == normalized }) {
@@ -222,6 +228,15 @@ fun settingCommand(key: String, value: Any, current: Map<String, Any?> = emptyMa
             val out = bytes(6, 0x17, 0, 0, 0, 0, 0, 0)
             tag.toByteArray(Charsets.US_ASCII).take(5).forEachIndexed { i, c -> out[3 + i] = c }
             out
+        }
+        // Zepp 6.3 setUnwearPassword: 06 21 00 on/off, the digits as ASCII, 00. The GTR 2e answered 10 06 21 00 01 (2026-11-07).
+        // Turning it off still sends a passcode, as Zepp and Gadgetbridge do; "0000" when none was ever set.
+        "passcode", "passcode_pin" -> {
+            val m = current + (key to v)
+            val on = truthy(m["passcode"])
+            val pin = m["passcode_pin"]?.toString()?.takeIf { it.matches(PASSCODE) }
+            require(!on || pin != null) { "Choose a 4-digit passcode first" }
+            bytes(6, 0x21, 0, if (on) 1 else 0) + (pin ?: "0000").toByteArray(Charsets.US_ASCII) + bytes(0)
         }
         // HuamiService.WEAR_LOCATION_LEFT_WRIST / RIGHT_WRIST, written to the user-settings characteristic.
         "wear_location" -> if (v == "right") bytes(0x20, 0, 0, 0x82) else bytes(0x20, 0, 0, 2)

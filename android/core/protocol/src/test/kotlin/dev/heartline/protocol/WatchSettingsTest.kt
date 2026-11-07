@@ -60,4 +60,15 @@ class WatchSettingsTest {
         assertEquals("23:30", HALF_HOURS.last().value)
         assertEquals("Display", settingSection(SETTINGS.first { it.key == "lift_wrist" }))
     }
+
+    @Test fun passcode() {
+        // Zepp 6.3 setUnwearPassword: 06 21 00, on/off, the digits as ASCII, 00
+        assertEquals(SettingTarget.CONFIG to "062100013132333400", cmd("passcode_pin", "1234", mapOf("passcode" to true)))
+        assertEquals("062100003132333400", cmd("passcode", false, mapOf("passcode_pin" to "1234")).second)
+        assertEquals("062100003030303000", cmd("passcode", false).second)
+        assertEquals("062100013930373000", cmd("passcode", true, mapOf("passcode_pin" to "9070")).second)
+        assertEquals("Choose a 4-digit passcode first", runCatching { cmd("passcode", true) }.exceptionOrNull()?.message)
+        assertEquals("passcode_pin must be 4 digits", runCatching { cmd("passcode_pin", "12a4") }.exceptionOrNull()?.message)
+        assertEquals("passcode_pin must be 4 digits", runCatching { cmd("passcode_pin", "12345") }.exceptionOrNull()?.message)
+    }
 }

@@ -454,7 +454,7 @@ class WatchConnection(
             } finally { c.enableNotification(Uuids.CONFIG, false) }
         }
         persistence.settingWritten(key, valid)
-        log("info", "Set $key to $valid")
+        log("info", "Set $key to ${if (key == "passcode_pin") "a new passcode" else valid}")
     }
     /**
      * The watch answers a CONFIG write with `10 cmd ... status`, echoing any sub-command first (language: `10 06 17 00 01`);

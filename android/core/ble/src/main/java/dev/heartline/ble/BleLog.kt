@@ -27,7 +27,10 @@ object BleLog {
 
     fun line(direction: String, uuid: UUID, value: ByteArray) {
         if (uuid in skip) return
-        append("$direction  ${short(uuid)}  ${value.joinToString("") { "%02x".format(it) }}")
+        // The watch passcode (06 21 00 on, digits, 00) is never written out.
+        val passcode = value.size > 4 && value[0] == 6.toByte() && value[1] == 0x21.toByte()
+        val hex = (if (passcode) value.copyOf(4) else value).joinToString("") { "%02x".format(it) }
+        append("$direction  ${short(uuid)}  $hex${if (passcode) " (passcode hidden)" else ""}")
     }
     private fun append(text: String) {
         val d = dir ?: return

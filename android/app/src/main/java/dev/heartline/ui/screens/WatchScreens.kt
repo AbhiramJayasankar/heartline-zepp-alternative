@@ -272,11 +272,14 @@ fun WatchSettingsScreen(controller: HeartlineController, nav: Navigator) {
         settings.groupBy { it.section }.toList().sortedBy { (s, _) -> dev.heartline.protocol.SETTING_SECTIONS.indexOf(s).let { if (it < 0) 99 else it } }.forEach { (section, rows) ->
             Gap(18); SectionTitle(section)
             NavGroup {
+                // The passcode switch waits for a passcode, but can always be turned off.
+                val hasPin = settings.any { it.key == "passcode_pin" && it.value != null }
                 rows.forEachIndexed { i, s ->
                     if (i > 0) HorizontalDivider(color = HL.colors.line)
-                    SettingRow(s, connected) { controller.applyWatchSetting(s.key, it) }
+                    SettingRow(s, connected && (s.key != "passcode" || hasPin || s.value == true)) { controller.applyWatchSetting(s.key, it) }
                 }
             }
+            if (section == "Passcode") { Gap(6); MutedText("The watch asks for these four digits when you put it back on after taking it off. Forgot it? Turn the switch off here while the watch is connected.") }
         }
     }
 }
@@ -338,6 +341,16 @@ private fun SettingRow(s: WatchSettingUi, enabled: Boolean, onChange: (Any) -> U
                         s.options.forEach { (v, label) -> DropdownMenuItem(text = { Text(label) }, onClick = { open = false; onChange(v) }) }
                     }
                 }
+            }
+            "pin" -> {
+                // Masked, and sent once all four digits are in; the saved passcode is never shown.
+                var text by remember(s.value) { mutableStateOf("") }
+                OutlinedTextField(
+                    text, { text = it.filter(Char::isDigit).take(4); if (text.length == 4) onChange(text) },
+                    singleLine = true, enabled = enabled, placeholder = { Text(if (s.value != null) "••••" else "4 digits") },
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), modifier = Modifier.width(120.dp),
+                )
             }
             else -> {
                 var text by remember(s.value) { mutableStateOf(s.value?.toString() ?: "") }
