@@ -5,6 +5,7 @@ import dev.heartline.ui.theme.raised
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.offset
@@ -40,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -156,6 +158,23 @@ fun InteractiveChart(
         // Readout: values at the touched moment, or the chart's own summary/hint at rest.
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
         Box(Modifier.weight(1f).heightIn(min = 62.dp)) {
+            // The readout at its fullest (every series, the longest span and lane names), invisible, so the chart keeps
+            // one height whatever is under the finger and doesn't jump as you drag.
+            val fullest = remember(lines, bars, spans, lanes) {
+                val out = ArrayList<Triple<Color, String, String>>()
+                lines.forEach { l -> l.points.maxByOrNull { l.format(it.v).length }?.let { p -> out += Triple(l.color, l.label, l.format(p.v) + if (l.unit.isEmpty()) "" else " ${l.unit}") } }
+                bars.forEach { b -> b.points.maxByOrNull { b.format(it.v).length }?.let { p -> out += Triple(b.color, b.label, b.format(p.v) + if (b.unit.isEmpty()) "" else " ${b.unit}") } }
+                spans.mapNotNull { it.label }.maxByOrNull { it.length }?.let { out += Triple(Color.Transparent, it, "") }
+                lanes.filter { it.inReadout }.forEach { lane ->
+                    val v = (lane.spans.mapNotNull { it.label } + lane.bars.take(400).mapNotNull { p -> lane.readout?.invoke(p.t) }).maxByOrNull { it.length }
+                    if (v != null) out += Triple(Color.Transparent, lane.label, v)
+                }
+                out
+            }
+            if (fullest.isNotEmpty()) Column(Modifier.alpha(0f).clearAndSetSemantics { }) {
+                Text(readoutX(xEnd), style = HL.type.label, color = c.inkSoft)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) { fullest.forEach { (col, l, v) -> ReadoutValue(col, l, v) } }
+            }
             val sel = selected
             if (sel == null) {
                 if (summary != null) summary() else if (idleHint != null) MutedText(idleHint)
@@ -266,7 +285,7 @@ fun InteractiveChart(
             val unit = lines.firstOrNull { it.axis && it.unit.isNotEmpty() }?.unit ?: bars.firstOrNull { it.unit.isNotEmpty() }?.unit
             yTicks.forEachIndexed { i, v ->
                 drawLine(c.line, Offset(leftPad, y(v)), Offset(right, y(v)), 1f)
-                label(tm, formatTick(v) + if (i == yTicks.lastIndex && unit != null && unit.length <= 4) " $unit" else "", right + 4.dp.toPx(), y(v) - 7.dp.toPx(), c.inkSoft)
+                label(tm, formatTick(v) + if (i == yTicks.lastIndex && unit != null && unit.length <= 4) " $unit" else "", right + 4.dp.toPx(), y(v).coerceAtLeast(7.dp.toPx()), c.inkSoft)
             }
             bars.forEach { s ->
                 s.points.forEach { p ->
@@ -369,11 +388,11 @@ fun InteractiveChart(
                         val word = s.label.substringBefore(' ')
                         (listOf(s.label, word) + (word.length - 1 downTo 3).map { word.take(it) + "…" }).distinct().firstOrNull { t ->
                             tm.measure(t, axisStyle).size.let { it.width < x2 - x1 - 6.dp.toPx() && it.height <= lh + 2.dp.toPx() }
-                        }?.let { t -> label(tm, t, x1 + 4.dp.toPx(), laneTop + (lh - tm.measure(t, axisStyle).size.height) / 2, c.ink) }
+                        }?.let { t -> label(tm, t, (x1 + 1.5.dp.toPx() + x2) / 2, laneTop + lh / 2, c.ink, center = true) }
                     }
                 }
                 val lr = tm.measure(lane.label, axisStyle)
-                if (lr.size.width <= rightPad - 4.dp.toPx()) label(tm, lane.label, right + 4.dp.toPx(), laneTop + (lh - lr.size.height) / 2, c.inkSoft)
+                if (lr.size.width <= rightPad - 4.dp.toPx()) label(tm, lane.label, right + 4.dp.toPx(), laneTop + lh / 2, c.inkSoft)
                 laneTop += lh + LANE_GAP.toPx()
             }
             // X labels at a round step for the visible span. Times of day round to the clock; a relative axis (seconds
