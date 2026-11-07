@@ -57,6 +57,8 @@ val Gutter = 20.dp
 
 /** Tabs keep one scroll position each, so coming back from a sub-screen lands where you left. Sub-screens get null. */
 val LocalTabScroll = androidx.compose.runtime.staticCompositionLocalOf<ScrollState?> { null }
+/** True while a banner (a heart check, a capture, find phone) sits under the status bar, so screens don't leave room for it again. */
+val LocalStatusBarCovered = androidx.compose.runtime.compositionLocalOf { false }
 
 /** Pull down to refresh on the tabs: whether a refresh is running, and what pulling starts. */
 class PageRefresh(val refreshing: Boolean, val onRefresh: () -> Unit)
@@ -89,7 +91,7 @@ fun ScrollPage(state: ScrollState = LocalTabScroll.current ?: rememberScrollStat
         else androidx.compose.material3.pulltorefresh.PullToRefreshBox(refresh.refreshing, refresh.onRefresh, Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize().verticalScroll(state), content = content)
         }
-        Box(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(HL.colors.paper.copy(alpha = alpha)))
+        if (!LocalStatusBarCovered.current) Box(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(HL.colors.paper.copy(alpha = alpha)))
     }
 }
 
@@ -109,7 +111,7 @@ fun Screen(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     ScrollPage(scroll ?: LocalTabScroll.current ?: rememberScrollState()) {
-        Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
+        if (!LocalStatusBarCovered.current) Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
         if (title != null || onBack != null) {
             Row(Modifier.fillMaxWidth().padding(start = if (onBack != null) 6.dp else Gutter, end = Gutter, top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (onBack != null) {

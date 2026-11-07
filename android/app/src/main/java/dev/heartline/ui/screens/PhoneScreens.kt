@@ -1,5 +1,7 @@
 package dev.heartline.ui.screens
 
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.statusBars
 import dev.heartline.ui.theme.raised
 
 import androidx.compose.foundation.selection.toggleable
@@ -448,7 +450,7 @@ fun FindPhoneBanner(controller: HeartlineController) {
     if (!p.findPhoneRinging) return
     val c = HL.colors
     Row(
-        Modifier.fillMaxWidth().background(c.pulse).padding(horizontal = Gutter, vertical = 14.dp),
+        Modifier.fillMaxWidth().windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.statusBars).background(c.pulse).padding(horizontal = Gutter, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("Your watch is looking for this phone", style = HL.type.bodyStrong, color = c.surface, modifier = Modifier.weight(1f))

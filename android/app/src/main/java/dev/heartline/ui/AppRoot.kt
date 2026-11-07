@@ -172,9 +172,14 @@ fun AppRoot(controller: HeartlineController) {
     ) { inner ->
         Box(Modifier.fillMaxSize().background(c.paper).padding(inner).then(if (top != null) Modifier.navigationBarsPadding() else Modifier)) {
             Column(Modifier.fillMaxSize()) {
+            val ringing by controller.phoneLink.collectAsStateWithLifecycle()
+            val capturing by controller.captureRun.collectAsStateWithLifecycle()
+            val checking by controller.hrvCheck.collectAsStateWithLifecycle()
+            val covered = ringing.findPhoneRinging || (capturing != null && top != Route.Capture) || checking != null
             dev.heartline.ui.screens.FindPhoneBanner(controller)
             if (top != Route.Capture) dev.heartline.ui.screens.CaptureBanner(controller) { nav.push(Route.Capture) }
             dev.heartline.ui.screens.HrvCheckBanner(controller) { night -> nav.stack.clear(); tab = if (night) Tab.SLEEP else Tab.HEART }
+            androidx.compose.runtime.CompositionLocalProvider(dev.heartline.ui.screens.LocalStatusBarCovered provides covered) {
             AnimatedContent(targetState = top ?: tab, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "screen") { target ->
                 Column(Modifier.fillMaxSize()) {
                     val syncUi by controller.sync.collectAsStateWithLifecycle()
@@ -227,6 +232,7 @@ fun AppRoot(controller: HeartlineController) {
                     }
                     }
                 }
+            }
             }
             }
         }

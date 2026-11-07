@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -162,7 +164,8 @@ fun CaptureBanner(controller: HeartlineController, onOpen: () -> Unit) {
     val c = HL.colors
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(1000); now = System.currentTimeMillis() } }
-    Row(Modifier.fillMaxWidth().background(c.ink).clickable(onClick = onOpen).padding(horizontal = Gutter, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.statusBars).background(c.ink)
+        .clickable(onClick = onOpen).padding(horizontal = Gutter, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         dev.heartline.ui.components.Dot(c.pulse, 8.dp)
         Spacer(Modifier.width(10.dp))
         Text("Capturing ${r.label.lowercase()}, ${clock(((now / 1000) - r.startedAt).coerceAtLeast(0).toDouble())}", style = HL.type.bodyStrong, color = c.paper, modifier = Modifier.weight(1f))

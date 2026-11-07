@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Column
@@ -208,7 +210,9 @@ fun HrvCheckBanner(controller: HeartlineController, onOpen: (night: Boolean) -> 
     val (left, done) = checkProgress(r)
     val beat by androidx.compose.animation.core.rememberInfiniteTransition(label = "beat").animateFloat(0.3f, 1f,
         androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(550), androidx.compose.animation.core.RepeatMode.Reverse), label = "beat")
-    Column(Modifier.fillMaxWidth().background(c.ink).clickable(onClickLabel = "Open heart checks") { onOpen(r.night) }) {
+    // Screens draw behind the status bar, so the banner pads itself below it.
+    Column(Modifier.fillMaxWidth().windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.statusBars).background(c.ink)
+        .clickable(onClickLabel = "Open heart checks") { onOpen(r.night) }) {
         Row(Modifier.fillMaxWidth().padding(horizontal = Gutter, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             dev.heartline.ui.components.Dot(c.pulse.copy(alpha = beat), 9.dp)
             Spacer(Modifier.width(10.dp))
