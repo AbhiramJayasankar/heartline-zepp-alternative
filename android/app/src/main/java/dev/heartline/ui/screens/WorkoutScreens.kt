@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -259,6 +260,13 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
             .filter { it.t >= cap.start && it.t <= cap.start + cap.durationS }.map { it.v }
         value = temps.takeIf { it.size >= 5 }?.let { it.min() to it.max() }
     }
+    // Calories every 5 s: heart rate, the logged treadmill's speed and incline, and the watch's own workouts.
+    val prefs by controller.prefs.collectAsStateWithLifecycle()
+    val trends by controller.trends.collectAsStateWithLifecycle()
+    val energyOf: (CaptureAnalysisUi) -> dev.heartline.app.CaptureEnergyUi? = remember(log, prefs.profile, trends?.hrRest, trends?.vo2max) {
+        { x -> dev.heartline.app.captureEnergy(x, log, prefs.profile, trends?.hrRest, trends?.vo2max) }
+    }
+    val energy = remember(a, energyOf) { a?.let(energyOf) }
     val ins = remember(base, prev, skin) { if (base == null || a == null) null else dev.heartline.app.sessionInsights(a, log, prev?.recovery ?: emptyList(), skin) }
     Screen(a?.label ?: "Session", onBack = { nav.pop() }, subtitle = a?.let { "${dateTimeOf(it.start)}, ${fmtHm(it.durationS / 60)}" }, scroll = scroll,
         trailing = { TextButton({ confirm = true }) { Text("Delete", color = c.inkSoft) } }) {
@@ -271,7 +279,7 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
         val medianRest = restLengths.getOrNull(restLengths.size / 2)
         StatGrid(listOf(
             Triple("Average", fmtInt(a.avgHr), "bpm"), Triple("Max", fmtInt(a.maxHr), "bpm"), Triple("Lowest", fmtInt(a.minHr), "bpm"),
-            Triple("Load", a.load?.roundToInt()?.toString() ?: "–", null), Triple("Calories", fmtInt(a.calories), "kcal"), Triple("Steps", fmtInt(a.steps), null),
+            Triple("Load", a.load?.roundToInt()?.toString() ?: "–", null), Triple("Calories", fmtInt(energy?.total?.roundToInt() ?: a.calories), "kcal"), Triple("Steps", fmtInt(a.steps), null),
             Triple("Sets", if (a.sets.isEmpty()) "–" else a.sets.size.toString(), null),
             // With a log, its reps are the true count; the watch's own count is compared set by set below.
             // Logged partial reps (5.4) count as whole reps here; the sets below keep the partial.
@@ -307,7 +315,8 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
                     if (a.floor.size > 1) listOf(ChartLine(a.floor, c.pulse.copy(alpha = 0.7f), "5-min low", "bpm", width = 1.5.dp, dashed = true, step = true, gap = 400.0)) else emptyList(),
                 0.0, a.durationS.toDouble().coerceAtLeast(60.0), height = 210.dp, spans = setLabels + cardioSpans,
                 bands = a.zones.filter { it.zone >= 3 }.map { z -> ChartBand(z.lowBpm.toDouble(), (z.highBpm ?: 240).toDouble(), dev.heartline.ui.components.zoneColor(z.zone, c).copy(alpha = 0.06f)) },
-                xLabel = { clock(it) }, readoutX = { "${clock(it)} in, at " + dev.heartline.ui.components.epochClock(a.start + it, seconds = true) }, minSpan = 60.0,
+                xLabel = { clock(it) }, readoutX = { t -> "${clock(t)} in, at " + dev.heartline.ui.components.epochClock(a.start + t, seconds = true) +
+                    (energy?.let { e -> ", ${e.at(t).roundToInt()} kcal so far" } ?: "") }, minSpan = 60.0,
                 idleHint = "Touch for heart rate and the set at that moment. Pinch to zoom into a set.", lanes = lanes)
             Gap(8)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -319,8 +328,8 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
         ins?.let { Findings(it) }
         ins?.let { i -> CoachNote(controller, a, i) }
         AroundSession(controller, a, nav)
-        if (a.activities.isNotEmpty()) WatchWorkouts(controller, a, nav)
-        if (a.sets.isNotEmpty()) Exercises(a, ins, anchor = { key -> androidx.compose.ui.Modifier.onGloballyPositioned { tops[key] = it.positionInRoot().y } },
+        if (a.activities.isNotEmpty()) WatchWorkouts(controller, a, nav, energy)
+        if (a.sets.isNotEmpty()) Exercises(a, ins, energy, anchor = { key -> androidx.compose.ui.Modifier.onGloballyPositioned { tops[key] = it.positionInRoot().y } },
             openPrev = { e ->
                 // The same exercise in the session before: open its recording there. This page is kept in the back
                 // stack focused on the exercise, so Back returns to the same spot.
@@ -346,12 +355,13 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
                 }
             }
             val key = "cardio:${k.name ?: k.kind}"
-            CardioBlock(a, k, log, prevCardio, anchor = Modifier.onGloballyPositioned { tops[key] = it.positionInRoot().y },
+            CardioBlock(a, k, log, prevCardio, energyOf = energyOf, anchor = Modifier.onGloballyPositioned { tops[key] = it.positionInRoot().y },
                 onOpenPrev = prevCardio?.let { (pa, pk) -> {
                     if (nav.stack.isNotEmpty()) nav.stack[nav.stack.lastIndex] = Route.CaptureResult(id, key)
                     nav.push(Route.CaptureResult(pa.id, "cardio:${pk.name ?: pk.kind}"))
                 } })
         }
+        energy?.let { CaloriesSection(a, it) }
         a.pulse?.let { PulseSection(it) }
         if (a.zones.isNotEmpty()) {
             Gap(24); SectionTitle("Heart-rate zones"); Gap(12); ZoneBars(a.zones)
@@ -528,7 +538,7 @@ private fun AroundSession(controller: HeartlineController, a: CaptureAnalysisUi,
 }
 
 @Composable
-private fun WatchWorkouts(controller: HeartlineController, a: CaptureAnalysisUi, nav: Navigator) {
+private fun WatchWorkouts(controller: HeartlineController, a: CaptureAnalysisUi, nav: Navigator, energy: dev.heartline.app.CaptureEnergyUi?) {
     val c = HL.colors
     // The watch's own workout pages (laps, zones, its HR track): matched by overlap, since the capture clips their times.
     val day = java.time.Instant.ofEpochSecond(a.start).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
@@ -560,7 +570,7 @@ private fun WatchWorkouts(controller: HeartlineController, a: CaptureAnalysisUi,
             when { sets.isNotEmpty() -> clock(sets.sumOf { it.end - it.start }) + " in sets"; cardio.isNotEmpty() -> clock(cardio.sumOf { it.end - it.start }); else -> "–" })
         CompareRow("Steps", fmtInt(w.steps), if (steps > 0) fmtInt(steps) else "–")
         if (w.distanceM != null && w.distanceM > 0) CompareRow("Distance", "%.2f km".format(w.distanceM / 1000.0), "–")
-        CompareRow("Calories", w.calories?.let { "$it kcal" } ?: "–", "–")
+        CompareRow("Calories", w.calories?.let { "$it kcal" } ?: "–", energy?.let { "${it.between(w.start, w.end).roundToInt()} kcal" } ?: "–")
         if (sets.isNotEmpty()) CompareRow("Sets / reps", "–", "${sets.size} / ${sets.sumOf { it.reps }}")
         val abs = a.start + w.start; val absEnd = a.start + w.end
         watchDay.firstOrNull { it.type == w.type && it.start < absEnd && it.start + it.durationS > abs }?.let { ww ->
@@ -572,7 +582,7 @@ private fun WatchWorkouts(controller: HeartlineController, a: CaptureAnalysisUi,
 }
 
 @Composable
-private fun Exercises(a: CaptureAnalysisUi, ins: dev.heartline.app.SessionInsights?, anchor: (String) -> Modifier = { Modifier },
+private fun Exercises(a: CaptureAnalysisUi, ins: dev.heartline.app.SessionInsights?, energy: dev.heartline.app.CaptureEnergyUi?, anchor: (String) -> Modifier = { Modifier },
                       openPrev: (dev.heartline.app.ExerciseInsight) -> (() -> Unit)? = { null }) {
     val c = HL.colors
     val logged = a.logTotal != null
@@ -600,6 +610,10 @@ private fun Exercises(a: CaptureAnalysisUi, ins: dev.heartline.app.SessionInsigh
             sets.mapNotNull { it.tempoS }.takeIf { it.isNotEmpty() }?.let { "about %.1f s per rep".format(it.average()) },
             sets.mapNotNull { s -> s.repDetail.map { it.arcDeg }.sorted().let { r -> r.getOrNull(r.size / 2) } }.takeIf { it.isNotEmpty() }?.let { "wrist turns about ${it.average().roundToInt()}°" },
             sets.first().activity).joinToString(", "))
+        // Its calories over the whole session (every run of it), rests included.
+        energy?.exercises?.firstOrNull { it.exercise == (sets.first().exercise ?: "Exercise ${sets.first().group}") }?.takeIf { lastRun[sets.first().exercise] == gi }?.let { en ->
+            Text("About ${en.kcal.roundToInt()} kcal, ${en.inSets.roundToInt()} of it in the sets", style = HL.type.small, color = c.ink)
+        }
         if (info != null && shown.add(info.exercise)) ExerciseVersus(info, openPrev(info))
         sets.forEach { s ->
             setNo++
@@ -723,17 +737,11 @@ private fun Recovery(a: CaptureAnalysisUi, medianRest: Double?, compare: List<de
  * What a cardio block was set to and how far it went. Each figure comes from the most accurate source that has it: the
  * gym log (what the treadmill was set to), then the raw sensors, then the watch's workout. [src] names each figure's source.
  */
-private data class CardioFacts(val speedKmh: Double?, val inclinePct: Double?, val durationS: Double, val steps: Int?, val km: Double?, val kcal: Double?, val src: Map<String, String>)
+private data class CardioFacts(val speedKmh: Double?, val inclinePct: Double?, val durationS: Double, val steps: Int?, val km: Double?, val kcal: Double?,
+    val src: Map<String, String>, val displayKcal: Double? = null, val watchKcal: Double? = null)
 
-private fun cardioFacts(a: CaptureAnalysisUi, k: dev.heartline.app.CardioUi, log: List<dev.heartline.app.LoggedSet>): CardioFacts {
-    val zone = java.time.ZoneId.systemDefault()
-    val from = a.start + k.start.toLong(); val to = a.start + k.end.toLong()
-    val day = dev.heartline.app.sessionDate(a.start, zone).toString()
-    // A timed row that overlaps the block, else the evening's only untimed cardio row (a treadmill block takes a treadmill row).
-    val rows = log.filter { it.cardio && it.completed && it.date == day }
-    val row = rows.filter { it.start != null }.maxByOrNull { r -> minOf(to, r.end ?: (r.start!! + (r.durationS ?: 600.0).toLong())) - maxOf(from, r.start!!) }
-        ?.takeIf { r -> (r.end ?: (r.start!! + (r.durationS ?: 600.0).toLong())) > from && r.start!! < to }
-        ?: rows.filter { it.start == null }.let { u -> if (k.name?.contains("treadmill", true) == true) u.filter { it.exercise.contains("treadmill", true) || it.speedKmh != null } else u }.singleOrNull()
+private fun cardioFacts(a: CaptureAnalysisUi, k: dev.heartline.app.CardioUi, log: List<dev.heartline.app.LoggedSet>, energy: dev.heartline.app.CaptureEnergyUi?): CardioFacts {
+    val row = dev.heartline.app.cardioLogRow(a, k, log)
     val w = a.activities.filter { it.start < k.end && it.end > k.start }.maxByOrNull { minOf(it.end, k.end) - maxOf(it.start, k.start) }
     val src = LinkedHashMap<String, String>()
     fun <T> pick(name: String, vararg options: Pair<String, T?>): T? = options.firstOrNull { it.second != null }?.also { src[name] = it.first }?.second
@@ -744,17 +752,21 @@ private fun cardioFacts(a: CaptureAnalysisUi, k: dev.heartline.app.CardioUi, log
     val speed = pick("speed", "gym log" to row?.speedKmh, "watch" to k.speedKmh)
     val incline = pick("incline", "gym log" to row?.inclinePct)
     val km = pick("distance", "gym log" to (row?.distanceKm ?: row?.speedKmh?.let { v -> v * durationS / 3600.0 }), "watch" to k.distanceM?.takeIf { it > 0 }?.div(1000.0))
-    // The watch's calories are for its whole workout, so only when that workout is this block.
-    val kcal = pick("calories", "gym log" to row?.caloriesKcal, "watch" to w?.takeIf { it.start >= k.start - 120 && it.end <= k.end + 120 }?.calories?.toDouble())
-    return CardioFacts(speed, incline, durationS, steps, km, kcal, src)
+    // Calories: the treadmill equation from the logged speed and incline (the display's own figure is shown beside it,
+    // but treadmill displays guess at your weight), else the heart-rate estimate; the watch's own figure only without those.
+    val own = w?.takeIf { it.start >= k.start - 120 && it.end <= k.end + 120 }?.calories?.toDouble()
+    val byEquation = energy?.treadmill?.any { it.start < k.end && it.end > k.start } == true
+    val kcal = pick("calories", (if (byEquation) "treadmill equation" else "sensors") to energy?.between(k.start, k.end), "watch" to own)
+    return CardioFacts(speed, incline, durationS, steps, km, kcal, src, row?.caloriesKcal, own)
 }
 
 @Composable
 private fun CardioBlock(
     a: CaptureAnalysisUi, k: dev.heartline.app.CardioUi, log: List<dev.heartline.app.LoggedSet>,
     prev: Pair<CaptureAnalysisUi, dev.heartline.app.CardioUi>?, anchor: Modifier, onOpenPrev: (() -> Unit)?,
+    energyOf: (CaptureAnalysisUi) -> dev.heartline.app.CaptureEnergyUi?,
 ) {
-    val f = remember(a, k, log) { cardioFacts(a, k, log) }
+    val f = remember(a, k, log, energyOf) { cardioFacts(a, k, log, energyOf(a)) }
     Gap(24); SectionTitle(k.name ?: k.kind.replaceFirstChar { it.uppercase() }, modifier = anchor); Gap(4)
     MutedText("${clock(k.start)} to ${clock(k.end)} into the capture, ${clock(k.end - k.start)} of steady ${k.kind}" + (k.name?.let { ", named by the watch" } ?: "") +
         listOfNotNull(f.speedKmh?.let { "%.1f km/h".format(it) }, f.inclinePct?.let { "${num1(it)}% incline" }).takeIf { it.isNotEmpty() }?.joinToString(", ", prefix = ", at ").orEmpty())
@@ -785,11 +797,17 @@ private fun CardioBlock(
         },
         // Which source each figure came from, grouped: "From the gym log: time, speed, incline. From the sensors: ..."
         f.src.entries.groupBy({ it.value }, { it.key }).entries.joinToString(" ") { (from, what) ->
-            "From ${if (from == "watch") "the watch's workout" else "the $from"}: ${what.joinToString(", ")}" + (if (from == "sensors" && "steps" in what) " (cadence times the time walking)" else "") + "."
+            "From ${when (from) { "watch" -> "the watch's workout"; "treadmill equation" -> "the logged speed, incline and your weight (ACSM walking equation)"; else -> "the $from" }}: ${what.joinToString(", ")}" + (if (from == "sensors" && "steps" in what) " (cadence times the time walking)" else "") + "."
         }.takeIf { it.isNotEmpty() }?.let { "$it Heart rate and cadence are always the sensors'." },
     )
     notes.forEach { MutedText(it); Gap(4) }
-    prev?.let { (pa, pk) -> CardioCompare(a, k, f, pa, pk, cardioFacts(pa, pk, log), onOpenPrev) }
+    if (f.kcal != null && (f.displayKcal != null || f.watchKcal != null)) {
+        MutedText("Calories: " + listOfNotNull("${f.kcal.roundToInt()} kcal here", f.displayKcal?.let { "${it.roundToInt()} on the treadmill's display" },
+            f.watchKcal?.let { "${it.roundToInt()} from the watch" }).joinToString(", ") +
+            (if (f.src["calories"] == "treadmill equation") ". The equation works from the belt's speed and slope and your own weight; a treadmill display assumes a weight unless you enter one, and watches estimate from heart rate." else "."))
+        Gap(4)
+    }
+    prev?.let { (pa, pk) -> CardioCompare(a, k, f, pa, pk, remember(pa, pk, log, energyOf) { cardioFacts(pa, pk, log, energyOf(pa)) }, onOpenPrev) }
 }
 
 /** This block against the same block last time: the settings, then what the heart did at them. */
@@ -863,6 +881,69 @@ private fun cardioVerdict(k: dev.heartline.app.CardioUi, f: CardioFacts, pk: dev
 }
 
 private fun num1(v: Double): String = if (kotlin.math.abs(v - v.roundToInt()) < 0.05) v.roundToInt().toString() else "%.1f".format(v)
+
+/**
+ * Where the session's calories went: a running total across the session, each exercise (its sets and the rests after
+ * them), cardio and the rest, and how the estimate was put together from heart rate, the treadmill and the watch.
+ */
+@Composable
+private fun CaloriesSection(a: CaptureAnalysisUi, e: dev.heartline.app.CaptureEnergyUi) {
+    val c = HL.colors
+    val lifting = e.exercises.sumOf { it.kcal }
+    val cardio = a.cardio.filter { it.name != null || it.end - it.start >= 300 }.sumOf { e.between(it.start, it.end) }
+    Gap(24); SectionTitle("Calories"); Gap(4)
+    MutedText("About ${e.total.roundToInt()} kcal over ${fmtHm(a.durationS / 60)}, everything your body burned, resting share included. Touch the chart above for the running total at any moment.")
+    Gap(12)
+    StatGrid(listOfNotNull(
+        Triple("Total", e.total.roundToInt().toString(), "kcal"),
+        Triple("Lifting", lifting.roundToInt().toString(), "kcal").takeIf { lifting > 0 },
+        Triple("Cardio", cardio.roundToInt().toString(), "kcal").takeIf { cardio > 0 },
+        Triple("Other", (e.total - lifting - cardio).coerceAtLeast(0.0).roundToInt().toString(), "kcal"),
+        Triple("Per hour", (e.total * 3600 / a.durationS.coerceAtLeast(60)).roundToInt().toString(), "kcal"),
+    ))
+    Gap(14)
+    Panel(padding = PaddingValues(12.dp)) {
+        Text("Running total, sets shaded", style = HL.type.label, color = c.inkSoft)
+        Gap(6)
+        InteractiveChart(listOf(ChartLine(e.cumulative + dev.heartline.app.SeriesPoint(a.durationS.toDouble(), e.total), c.warn, "So far", "kcal", width = 2.dp)),
+            0.0, a.durationS.toDouble().coerceAtLeast(60.0), height = 130.dp,
+            spans = a.sets.map { s -> ChartSpan(s.start, s.end, dev.heartline.ui.components.groupColor(s.group, c).copy(alpha = 0.22f), s.exercise) } +
+                a.cardio.filter { it.name != null }.map { k -> ChartSpan(k.start, k.end, c.warn.copy(alpha = 0.12f), k.name) },
+            xLabel = { clock(it) }, readoutX = { "${clock(it)} in" }, minSpan = 60.0, idleHint = "Touch for the total so far.")
+    }
+    if (e.exercises.isNotEmpty()) {
+        Gap(16)
+        Text("By exercise", style = HL.type.bodyStrong, color = c.ink)
+        MutedText("Each bar is an exercise's sets and the rests after them; the solid part is the sets alone.")
+        Gap(8)
+        val top = e.exercises.maxOf { it.kcal }.coerceAtLeast(1.0)
+        e.exercises.sortedByDescending { it.kcal }.forEach { x ->
+            val color = dev.heartline.ui.components.groupColor(x.group, c)
+            Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(x.exercise, style = HL.type.body, color = c.ink, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(0.42f).padding(end = 8.dp))
+                androidx.compose.foundation.layout.Box(Modifier.weight(0.42f).height(12.dp)) {
+                    androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth((x.kcal / top).toFloat()).height(12.dp).clip(RoundedCornerShape(3.dp)).background(color.copy(alpha = 0.3f)))
+                    androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth((x.inSets / top).toFloat()).height(12.dp).clip(RoundedCornerShape(3.dp)).background(color))
+                }
+                Text("${x.kcal.roundToInt()}", style = HL.type.bodyStrong, color = c.ink, textAlign = TextAlign.End, modifier = Modifier.weight(0.16f))
+            }
+        }
+    }
+    Gap(12)
+    val how = buildList {
+        add("Heart rate alone gives ${e.heartRateOnly.roundToInt()} kcal: the share of your heart-rate reserve taken as the share of your oxygen reserve, " +
+            "with VO2max ${e.vo2max.roundToInt()} (${if (e.vo2FromFitness) "from your walks and runs" else "estimated from resting and maximum heart rate"}) and your weight.")
+        e.treadmill.forEach { t ->
+            add("The treadmill at %.1f km/h and %s%% incline: %d kcal from the ACSM walking equation".format(t.speedKmh, num1(t.inclinePct), t.kcal.roundToInt()) +
+                (t.display?.let { ", against ${it.roundToInt()} on its display" } ?: "") + ". The belt's work is measured directly, so this replaces heart rate there.")
+        }
+        e.watchSpans.forEach { w ->
+            add(if (w.blended) "The watch's ${w.type.lowercase()} workout says ${w.watch.roundToInt()} kcal, heart rate here ${w.heartRate.roundToInt()}; this page meets them halfway at ${w.used.roundToInt()}."
+                else "The watch's ${w.type.lowercase()} workout says ${w.watch.roundToInt()} kcal; the treadmill equation is used there instead.")
+        }
+    }
+    how.forEach { MutedText(it); Gap(4) }
+}
 
 @Composable
 private fun PulseSection(p: dev.heartline.app.PulseUi) {

@@ -365,6 +365,8 @@ data class TrendsUi(
     /** VO2max detail: from workouts or the heart-rate stand-in, the stand-in's value, the workouts used and how many were left out. */
     val vo2FromWorkouts: Boolean = false, val vo2StandIn: Double? = null,
     val vo2Used: List<dev.heartline.analytics.WorkoutVo2> = emptyList(), val vo2Skipped: List<String> = emptyList(),
+    /** Resting heart rate the daily figures use (profile, else awake resting); workout calories and load use it too. */
+    val hrRest: Double? = null,
 )
 data class NightSpan(val date: java.time.LocalDate, val start: Long?, val end: Long?, val asleepMin: Int?, val ongoing: Boolean = false)
 

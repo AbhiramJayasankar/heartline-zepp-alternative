@@ -144,7 +144,7 @@ class RealController(
                 val awakeRest = result.days.takeLast(7).mapNotNull { it.awakeRestingHr }.takeIf { it.isNotEmpty() }?.average()
                 val vo2 = vo2max(efforts.map { it.first }, now.toEpochSecond(), awakeRest, maxHeartRate(profile), profile.sex,
                     treadmill = treadmillEfforts(log, watchRefs(watchRows), zone))
-                result.todayUi(now.toLocalDate()) to result.trendsUi(healthByDay(values, zone = zone)).copy(vo2max = vo2.value, fitnessAge = vo2.fitnessAge,
+                result.todayUi(now.toLocalDate()) to result.trendsUi(healthByDay(values, zone = zone)).copy(vo2max = vo2.value, fitnessAge = vo2.fitnessAge, hrRest = result.trends.hrRestUsed,
                     vo2FromWorkouts = vo2.fromWorkouts, vo2StandIn = vo2.fromHeartRates, vo2Used = vo2.used,
                     // Runs, walks and treadmill sessions that didn't qualify say why; other workouts (gym and so on) are just counted.
                     vo2Skipped = vo2.skipped.filter { it.first.type in setOf("Outdoor running", "Walking", "Hiking", "Treadmill", "Treadmill (logged)") }.map { (w, why) ->
