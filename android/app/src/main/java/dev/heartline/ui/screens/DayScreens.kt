@@ -77,19 +77,40 @@ fun DayScreen(controller: HeartlineController, metric: DayMetric, epochDay: Long
     val date = LocalDate.ofEpochDay(epochDay)
     val today = LocalDate.now()
     val d by remember(epochDay) { controller.healthDay(date) }.collectAsState(initial = null)
-    Screen(metric.title, onBack = { nav.pop() }) {
+    val trends by controller.trends.collectAsState()
+    fun series(key: String) = trends?.series?.firstOrNull { it.key == key }?.takeIf { s -> s.points.any { it.value != null } }
+    // Its own scroll, shared through LocalTabScroll so a link's focus (a Trends card) can scroll to a section.
+    val scroll = androidx.compose.foundation.rememberScrollState()
+    androidx.compose.runtime.CompositionLocalProvider(LocalTabScroll provides scroll) {
+    Screen(metric.title, onBack = { nav.pop() }, scroll = scroll) {
         DaySwitcher(date, today, onPick = { nav.replace(dayRoute(metric, it.toEpochDay())) })
         Gap(12)
         val day = d
         if (day == null) { MutedText("Loading…"); return@Screen }
         when (metric) {
             DayMetric.HEART -> HeartDay(day, nav)
-            DayMetric.STRESS -> StressDay(day)
-            DayMetric.BODY -> BodyDay(day, live = date == today, onRefresh = controller::refreshTemperature)
+            DayMetric.STRESS -> { StressDay(day); series("stress")?.let { TwoWeeks(it, nav, HL.colors.warn) } }
+            DayMetric.BODY -> BodyDay(day, live = date == today, onRefresh = controller::refreshTemperature, nav = nav, spo2 = series("spo2"), temp = series("temp"))
         }
         Gap(28)
         // Jump sideways between the metrics for the same day.
         DayMetric.entries.filter { it != metric }.forEach { m -> NavRow(m.title, "Same day") { nav.replace(dayRoute(m, epochDay)) } }
+    }
+    }
+}
+
+/** A metric's last two weeks under its day: one value a day against your usual, then latest, average, range and every day. */
+@Composable
+private fun TwoWeeks(s: dev.heartline.app.TrendSeries, nav: Navigator, color: Color) {
+    Gap(20)
+    dev.heartline.ui.components.Card(padding = 14.dp) {
+        Text("${s.title}, last ${s.points.size} days", style = HL.type.label, color = HL.colors.inkSoft)
+        Gap(6)
+        val oneDecimal = s.key == "temp"
+        dev.heartline.ui.components.DayBars(s.points, color, line = true, height = 110.dp, reference = s.baseline,
+            referenceLabel = s.baseline?.let { "your usual, ${if (oneDecimal) "%.1f".format(it) else it.roundToInt().toString()} ${s.unit}".trim() },
+            unit = s.unit, format = { if (oneDecimal) "%.1f".format(it) else it.roundToInt().toString() })
+        TrendExtras(s)
     }
 }
 
@@ -256,11 +277,11 @@ private fun stressLevel(avg: Int?): String = when { avg == null -> "–"; avg < 
 // ---- SpO2 and temperature ----
 
 @Composable
-private fun BodyDay(d: HealthDayUi, live: Boolean, onRefresh: () -> Unit) {
+private fun BodyDay(d: HealthDayUi, live: Boolean, onRefresh: () -> Unit, nav: Navigator, spo2: dev.heartline.app.TrendSeries?, temp: dev.heartline.app.TrendSeries?) {
     val c = HL.colors
     // While today's page is open, fetch the newest temperature every minute (the service otherwise does every 5 minutes).
     if (live) LaunchedEffect(Unit) { while (true) { onRefresh(); delay(60_000) } }
-    SectionTitle("Blood oxygen (SpO2)"); Gap(8)
+    Column(Modifier.section(nav, "spo2")) { SectionTitle("Blood oxygen (SpO2)") }; Gap(8)
     if (d.spo2.isEmpty()) MutedText("No SpO2 readings this day. The watch records SpO2 during sleep and when you measure on the watch.")
     else {
         Stats(listOf(Triple("Average", d.spo2Avg?.let { "%.1f".format(it) } ?: "–", "%"), Triple("Lowest", d.spo2Min?.roundToInt()?.toString() ?: "–", "%"), Triple("Readings", fmtInt(d.spo2.size), null)))
@@ -274,7 +295,8 @@ private fun BodyDay(d: HealthDayUi, live: Boolean, onRefresh: () -> Unit) {
         Gap(14); BandBar(d.spo2Bands) { spo2Color(it, c) }
         Gap(8); MutedText("Wrist SpO2 is a wellness estimate. Brief dips during sleep are common; repeated readings under 90% are worth mentioning to a doctor.")
     }
-    Gap(28); SectionTitle("Temperature"); Gap(8)
+    spo2?.let { TwoWeeks(it, nav, c.sleepDeep) }
+    Gap(28); Column(Modifier.section(nav, "temp")) { SectionTitle("Temperature") }; Gap(8)
     if (live) d.temperature.lastOrNull()?.let { p -> TemperatureNow(p, onRefresh); Gap(14) }
     if (d.temperature.isEmpty()) MutedText("No temperature readings this day.")
     else {
@@ -289,6 +311,7 @@ private fun BodyDay(d: HealthDayUi, live: Boolean, onRefresh: () -> Unit) {
         Gap(8)
         MutedText("The watch's temperature sensor reads the skin under it while worn and the air when it is off your wrist, and needs about 15 minutes to settle after you put it on. Each minute's record holds two readings. Off the wrist both match the room; worn, the second sits about 1.3 °C below the first (measured on your watch, 7 Nov), so it looks like a second sensor further from the skin, probably inside the case. Amazfit doesn't document it, so Heartline uses the first as your skin temperature.")
     }
+    temp?.let { TwoWeeks(it, nav, c.warn) }
 }
 
 /** The newest reading and how old it is; the watch writes its temperature records with a delay of its own. */

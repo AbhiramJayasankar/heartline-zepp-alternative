@@ -64,7 +64,7 @@ fun computeDaily(
             lightMin = main?.light, remMin = main?.rem, awakeMin = main?.awake,
             sleepScore = main?.let { sleepScore(it.asleep, eff ?: 0.0, it.deep, it.rem) },
             steps = ms.takeIf { it.isNotEmpty() }?.sumOf { it.steps },
-            activeMinutes = ms.takeIf { it.isNotEmpty() }?.count { it.steps > 0 || it.state == "active" },
+            activeMinutes = ms.takeIf { it.isNotEmpty() }?.count { activeMinute(it, hrMax) },
             wornMinutes = ms.takeIf { it.isNotEmpty() }?.count { it.state !in noDataStates },
             strain = null, trimp = null, hrZones = hrMax?.takeIf { it != 0 && awakeHr.isNotEmpty() }?.let { zoneMinutes(awakeHr, it) },
             spo2Avg = ownHealth["spo2"]?.get(d), stressAvg = ownHealth["stress"]?.get(d),
@@ -119,7 +119,9 @@ fun computeDaily(
         return values.takeIf { it.isNotEmpty() }?.let { rounded(average(it), 1) }
     }
     val rhr7 = avg({ it.restingHr }, 7)
-    val vo2 = vo2maxUth(hrMax, rhr7, profile.sex)
+    // Uth's formula wants resting heart rate measured awake and lying still; sleeping heart rate runs lower and would
+    // inflate VO2max, so this uses the awake resting rate.
+    val vo2 = vo2maxUth(hrMax, avg({ it.awakeRestingHr }, 7), profile.sex)
     val trimps = rows.mapNotNull { (d, w) -> w.row.trimp?.let { d to it } }.toMap()
     val acute = trimps.filterKeys { it > today.minusDays(7) }.values.toList()
     val chronic = trimps.filterKeys { it > today.minusDays(28) }.values.toList()

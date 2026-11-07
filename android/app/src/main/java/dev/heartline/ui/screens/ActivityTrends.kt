@@ -61,7 +61,7 @@ fun TrendsScreen(controller: HeartlineController, nav: Navigator, onBack: (() ->
     val c = HL.colors
     val trends by controller.trends.collectAsStateWithLifecycle()
     val t = trends
-    Screen("Trends", onBack = onBack, subtitle = "Two weeks of everything, against your 28-day usual level. Tap a card to open it on its page.") {
+    Screen("Trends", onBack = onBack, scroll = nav.trendsScroll, subtitle = "Two weeks of everything, against your 28-day usual level. Tap a card to open it on its page.") {
         if (t == null) { MutedText("Trends appear after the first sync."); return@Screen }
         dev.heartline.ui.components.Card(padding = 14.dp) {
             dev.heartline.ui.components.FactGrid(listOf(
@@ -71,6 +71,9 @@ fun TrendsScreen(controller: HeartlineController, nav: Navigator, onBack: (() ->
                 dev.heartline.ui.components.FactItem("Load, 7 days", fmtInt(t.load7d?.roundToInt())),
                 dev.heartline.ui.components.FactItem("Acute : chronic", t.acwr?.let { "%.2f".format(it) } ?: "–", note = t.acwr?.let { when { it > 1.5 -> "ramping fast"; it < 0.8 -> "easing off"; else -> "steady" } }),
             ))
+            Gap(8)
+            MutedText("VO2max is estimated from heart rates alone, not measured: 15.3 × your max heart rate (your profile's, or 208 − 0.7 × age) ÷ your 7-day awake resting heart rate (Uth, 2004). " +
+                "Treat it as ±15%. Fitness age is the age whose average VO2max matches it, from the Norwegian HUNT study.")
         }
         Gap(14)
         // Every trend, grouped by the page it lives on. A card opens that page scrolled to its section.

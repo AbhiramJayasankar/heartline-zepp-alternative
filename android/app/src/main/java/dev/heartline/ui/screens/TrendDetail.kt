@@ -119,7 +119,8 @@ private fun trendAbout(key: String): About? = when (key) {
         "Under 8 is a light day, 14+ a hard one. Above 14 lowers the next day's readiness.", "strain")
     "steps" -> About("Steps counted by the watch each day.", "The watch's own step counter, synced minute by minute.",
         "7,000–10,000 a day is a common healthy target; benefits rise steeply from 2,000 to about 8,000.")
-    "active" -> About("Minutes each day with steps or active movement.", "Minutes the watch marked active, or with any steps.",
+    "active" -> About("Minutes each day of at least moderate activity.",
+        "A minute counts when you walk at 100 or more steps a minute (the pace that marks moderate intensity), or, awake, when your heart rate is at 64% or more of your max, which catches cycling and gym work. The watch's own \"active\" label isn't used: it stays on through most of the day.",
         "The WHO suggests 150–300 minutes of moderate activity a week.")
     "spo2" -> About("Blood oxygen saturation: how much of your blood's haemoglobin is carrying oxygen.",
         "The watch's red and infrared light readings, including the overnight ones when sleep breathing quality is on.",
@@ -170,9 +171,12 @@ fun TrendExtras(s: dev.heartline.app.TrendSeries, showAbout: Boolean = true) {
 
 /** Trends that live on their own tab now; the rest keep a trend page. */
 fun openTrend(nav: dev.heartline.ui.Navigator, key: String) = when (key) {
-    "sleep", "sleep_score", "hrv_sleep" -> nav.toTab(dev.heartline.ui.Tab.SLEEP, key)
-    "rhr", "awake_rhr", "hrv" -> nav.toTab(dev.heartline.ui.Tab.HEART, key)
-    "steps", "strain", "active", "pai" -> nav.toTab(dev.heartline.ui.Tab.ACTIVITY, key)
+    "sleep", "sleep_score", "hrv_sleep" -> nav.toTab(dev.heartline.ui.Tab.SLEEP, key, returnable = true)
+    "rhr", "awake_rhr", "hrv" -> nav.toTab(dev.heartline.ui.Tab.HEART, key, returnable = true)
+    "steps", "strain", "active", "pai" -> nav.toTab(dev.heartline.ui.Tab.ACTIVITY, key, returnable = true)
+    // Blood oxygen, temperature and stress live on today's day pages, with their two-week trends.
+    "spo2", "temp" -> { nav.focus = key; nav.push(dayRoute(DayMetric.BODY, java.time.LocalDate.now().toEpochDay())) }
+    "stress" -> { nav.push(dayRoute(DayMetric.STRESS, java.time.LocalDate.now().toEpochDay())) }
     "readiness" -> nav.push(dev.heartline.ui.Route.Readiness())
     else -> nav.push(dev.heartline.ui.Route.Trend(key))
 }

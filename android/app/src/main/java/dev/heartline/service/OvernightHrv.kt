@@ -66,7 +66,7 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
          * row first (see [extract]): all HRV numbers, rhythm, breathing and every beat-to-beat interval. Only re-running
          * beat detection or breathing with a future algorithm needs the raw file.
          */
-        const val KEEP_RAW_S = 3 * 86_400L
+        const val KEEP_RAW_S = 7 * 86_400L
 
         /** What a sample keeps once its raw recording is gone: every number the app shows, plus the beat-to-beat intervals. */
         fun extract(r: dev.heartline.analytics.SessionResult, into: JSONObject): JSONObject {

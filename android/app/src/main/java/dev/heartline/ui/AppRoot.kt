@@ -104,8 +104,25 @@ class Navigator {
     internal var tabSwitch: (Tab) -> Unit = {}
     /** A section the shown tab should scroll to and outline (see [dev.heartline.ui.screens.section]); cleared once done. */
     var focus by androidx.compose.runtime.mutableStateOf<String?>(null)
-    /** Closes any pushed screens and shows [t], for links from a detail page to a whole tab, scrolled to [focus] if given. */
-    fun toTab(t: Tab, focus: String? = null) { stack.clear(); this.focus = focus; tabSwitch(t) }
+    /** Set by [AppRoot]: the bottom tab showing now. */
+    internal var currentTab: () -> Tab = { Tab.TODAY }
+    /** Where Back goes after a returnable [toTab]: the screens that were open and the tab under them. */
+    private var returnTo by androidx.compose.runtime.mutableStateOf<Pair<List<Route>, Tab>?>(null)
+    val canReturn: Boolean get() = returnTo != null && stack.isEmpty()
+    /** Kept here so the Trends page comes back where you left it. */
+    val trendsScroll = androidx.compose.foundation.ScrollState(0)
+
+    /**
+     * Closes any pushed screens and shows [t], scrolled to [focus] if given. With [returnable], Back from that tab
+     * reopens the screens that were open (a Trends card, say), instead of leaving the app.
+     */
+    fun toTab(t: Tab, focus: String? = null, returnable: Boolean = false) {
+        returnTo = if (returnable && stack.isNotEmpty()) stack.toList() to currentTab() else null
+        stack.clear(); this.focus = focus; tabSwitch(t)
+    }
+    fun returnBack() { val r = returnTo ?: return; returnTo = null; focus = null; tabSwitch(r.second); stack.addAll(r.first) }
+    /** Choosing a tab yourself forgets the way back. */
+    fun forgetReturn() { returnTo = null; focus = null }
 }
 
 @Composable
@@ -118,7 +135,11 @@ fun AppRoot(controller: HeartlineController) {
     var tab by rememberSaveable { mutableStateOf(Tab.TODAY) }
     val nav = remember { Navigator() }
     nav.tabSwitch = { tab = it }
+    nav.currentTab = { tab }
     BackHandler(enabled = nav.stack.isNotEmpty()) { nav.pop() }
+    BackHandler(enabled = nav.canReturn) { nav.returnBack() }
+    // Back on any other tab goes to Today first, rather than leaving the app.
+    BackHandler(enabled = nav.stack.isEmpty() && !nav.canReturn && tab != Tab.TODAY) { tab = Tab.TODAY }
     val c = HL.colors
     val top = nav.stack.lastOrNull()
     val tabScroll = remember { Tab.entries.associateWith { androidx.compose.foundation.ScrollState(0) } }
@@ -133,7 +154,7 @@ fun AppRoot(controller: HeartlineController) {
                     Tab.entries.forEach { t ->
                         NavigationBarItem(
                             selected = tab == t,
-                            onClick = { tab = t },
+                            onClick = { nav.forgetReturn(); tab = t },
                             icon = { Icon(t.icon, contentDescription = null, modifier = Modifier.size(24.dp)) },
                             alwaysShowLabel = true,
                             label = { Text(t.label, style = HL.type.label) },

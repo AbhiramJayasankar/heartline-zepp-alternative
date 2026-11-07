@@ -36,6 +36,14 @@ internal fun keytelKcal(hr: List<Int>, profile: Profile, max: Int): Int? {
     }
     return rounded(kcal).toInt()
 }
+/**
+ * A minute of real activity: walking at 100 or more steps a minute (the cadence that marks moderate intensity,
+ * Tudor-Locke 2018), or, awake and worn, heart rate at 64% or more of max (moderate by ACSM), which catches cycling
+ * and gym work. The watch's own "active" label isn't used: it repeats through most awake minutes.
+ */
+internal fun activeMinute(m: MinuteSample, hrMax: Int?): Boolean =
+    m.steps >= 100 || (hrMax != null && hrMax != 0 && m.hr != null && m.state !in sleepStates && m.state !in noDataStates && m.hr >= 0.64 * hrMax)
+
 internal fun vo2maxUth(max: Int?, rest: Double?, sex: String?): Double? {
     if (max == null || max == 0 || rest == null || rest == 0.0) return null
     val k = when (sex) { "male" -> 15.3; "female" -> 14.5; else -> 15.0 }

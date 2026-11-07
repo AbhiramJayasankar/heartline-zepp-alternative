@@ -40,6 +40,7 @@ import androidx.compose.foundation.border
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.sp
@@ -65,8 +66,21 @@ val LocalPageRefresh = androidx.compose.runtime.compositionLocalOf<PageRefresh?>
  * A full-height scrolling page. Headers may draw behind the status bar at rest; once the page scrolls,
  * a paper scrim fades in under the status bar so content never runs into the clock and icons.
  */
+/** Where each tab was left, kept apart from its ScrollState, which clamps to the top while a returning tab is still loading. */
+private val leftAt = java.util.WeakHashMap<ScrollState, Int>()
+
 @Composable
 fun ScrollPage(state: ScrollState = LocalTabScroll.current ?: rememberScrollState(), content: @Composable ColumnScope.() -> Unit) {
+    if (state === LocalTabScroll.current) {
+        androidx.compose.runtime.DisposableEffect(state) { onDispose { leftAt[state] = state.value } }
+        // Coming back to a tab: once its content is tall enough again, put it back where it was left.
+        androidx.compose.runtime.LaunchedEffect(state) {
+            val want = leftAt[state] ?: return@LaunchedEffect
+            if (want == 0 || state.value >= want) return@LaunchedEffect
+            kotlinx.coroutines.withTimeoutOrNull(3000) { androidx.compose.runtime.snapshotFlow { state.maxValue }.first { it >= want } }
+            if (state.value < want) state.scrollTo(minOf(want, state.maxValue))
+        }
+    }
     val scrolled by remember(state) { derivedStateOf { state.value > 0 } }
     val alpha by animateFloatAsState(if (scrolled) 0.96f else 0f, label = "scrim")
     val refresh = LocalPageRefresh.current
@@ -196,10 +210,10 @@ fun Modifier.section(nav: dev.heartline.ui.Navigator, key: String): Modifier {
         val y = top ?: return@LaunchedEffect
         scroll.animateScrollTo((scroll.value + y - with(density) { 96.dp.toPx() }).toInt().coerceAtLeast(0))
         flash = true
-        kotlinx.coroutines.delay(1800)
-        flash = false
+        // Done: forget the focus now, so coming back to this tab later keeps wherever you scrolled.
         nav.focus = null
     }
+    androidx.compose.runtime.LaunchedEffect(flash) { if (flash) { kotlinx.coroutines.delay(1800); flash = false } }
     return this.then(androidx.compose.ui.Modifier.onGloballyPositioned { top = it.positionInRoot().y })
         .then(if (flash) androidx.compose.ui.Modifier.border(2.dp, HL.colors.pulse, androidx.compose.foundation.shape.RoundedCornerShape(18.dp)) else androidx.compose.ui.Modifier)
 }

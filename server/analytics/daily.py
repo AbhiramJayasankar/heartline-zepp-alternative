@@ -175,6 +175,29 @@ def sleep_regularity(minutes: list[dict]) -> float | None:
     return round(-100 + 200 * same / total, 1)
 
 
+def awake_resting_hr_from(rows: list[dict]) -> int | None:
+    """Lowest 10-minute median HR while awake and still (worn, no steps, intensity <= 30; >= 8 readings; runs break at gaps > 2 min)."""
+    still = [m for m in rows if m["state"] not in SLEEP and m["state"] not in NO_DATA and m["steps"] == 0
+             and m.get("intensity", 0) <= 30 and m["hr"] is not None and 30 <= m["hr"] <= 220]
+    best, run_start = None, 0
+    for i in range(len(still)):
+        if i > 0 and still[i]["ts"] - still[i - 1]["ts"] > 120:
+            run_start = i
+        j = i
+        while j > run_start and still[i]["ts"] - still[j - 1]["ts"] < 600:
+            j -= 1
+        if i - j + 1 >= 8:
+            v = median(m["hr"] for m in still[j:i + 1])
+            best = v if best is None else min(best, v)
+    return round(best) if best is not None else None
+
+
+def active_minute(m: dict, hr_max: int | None) -> bool:
+    """100+ steps a minute (moderate cadence), or awake and worn with HR >= 64% of max (moderate by ACSM)."""
+    return m["steps"] >= 100 or bool(hr_max and m["hr"] is not None and m["state"] not in SLEEP
+                                      and m["state"] not in NO_DATA and m["hr"] >= 0.64 * hr_max)
+
+
 def vo2max_uth(hr_max: int | None, rhr: float | None, sex: str | None) -> float | None:
     """Uth et al. 2004: VO2max ~= k * HRmax / HRrest, k = 15.3 men, 14.5 women (later work), 15.0 unknown."""
     if not hr_max or not rhr:
@@ -220,6 +243,7 @@ def compute(minutes: list[dict], profile: dict, days: int, today: date | None = 
     span = max(days, 35)
     dates = [today - timedelta(days=i) for i in range(span - 1, -1, -1)]
     rows = {}
+    awake_rest = {}
     for d in dates:
         if d < first - timedelta(days=1):
             continue
@@ -244,7 +268,7 @@ def compute(minutes: list[dict], profile: dict, days: int, today: date | None = 
             "sleep_minutes": None, "sleep_efficiency": None, "deep_min": None, "light_min": None,
             "rem_min": None, "awake_min": None, "sleep_score": None,
             "steps": sum(m["steps"] for m in ms) if ms else None,
-            "active_minutes": sum(1 for m in ms if m["steps"] > 0 or m["state"] == "active") if ms else None,
+            "active_minutes": sum(1 for m in ms if active_minute(m, hr_max)) if ms else None,
             "worn_minutes": worn if ms else None,
             "strain": None, "trimp": None, "hr_zones": None,
             "spo2_avg": health.get("spo2", {}).get(d), "stress_avg": health.get("stress", {}).get(d),
@@ -254,6 +278,7 @@ def compute(minutes: list[dict], profile: dict, days: int, today: date | None = 
         if hr_max and awake_hr:
             row["hr_zones"] = zone_minutes(awake_hr, hr_max)
         rows[d] = (row, awake_hr)
+        awake_rest[d] = awake_resting_hr_from(ms)
 
     # Baselines for HRrest: profile, else the median of measured resting HR.
     rhr_values = [r["resting_hr"] for r, _ in rows.values() if r["resting_hr"]]
@@ -305,7 +330,9 @@ def compute(minutes: list[dict], profile: dict, days: int, today: date | None = 
         return round(mean(vals), 1) if vals else None
 
     rhr7 = avg("resting_hr", 7)
-    vo2 = vo2max_uth(hr_max, rhr7, sex)
+    # Uth's formula wants resting HR measured awake and lying still; sleeping HR runs lower and would inflate VO2max.
+    awake_vals = [awake_rest[d] for d in ordered if d > today - timedelta(days=7) and awake_rest.get(d) is not None]
+    vo2 = vo2max_uth(hr_max, round(mean(awake_vals), 1) if awake_vals else None, sex)
     trimps = {d: rows[d][0]["trimp"] for d in ordered if rows[d][0]["trimp"] is not None}
     have_days = (today - first).days + 1
     acute = [v for d, v in trimps.items() if d > today - timedelta(days=7)]
