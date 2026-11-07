@@ -193,8 +193,8 @@ def awake_resting_hr_from(rows: list[dict]) -> int | None:
 
 
 def active_minutes_of(ms: list[dict], hr_max: int | None, hr_rest: float | None, workouts=()) -> int:
-    """Walking (>= 40 steps, or >= 20 next to such a minute), HR >= 40% of reserve, or inside a workout with
-    HR >= 30% of reserve or >= 20 steps; awake and worn only."""
+    """Walking (>= 40 steps, or >= 20 next to such a minute), HR >= 30% of reserve, or inside a workout with
+    HR >= 20% of reserve or >= 20 steps; awake and worn only."""
     reserve = hr_max - hr_rest if hr_max and hr_rest and hr_rest > 0 and hr_max > hr_rest else None
     walking = lambda i: ms[i]["steps"] >= 40
     n = 0
@@ -204,9 +204,9 @@ def active_minutes_of(ms: list[dict], hr_max: int | None, hr_rest: float | None,
         near = (i > 0 and m["ts"] - ms[i - 1]["ts"] <= 90 and walking(i - 1)) or                (i < len(ms) - 1 and ms[i + 1]["ts"] - m["ts"] <= 90 and walking(i + 1))
         walk = walking(i) or (m["steps"] >= 20 and near)
         hr = m["hr"] if m["hr"] is not None and 30 <= m["hr"] <= 220 else None
-        effort = reserve is not None and hr is not None and hr >= hr_rest + 0.4 * reserve
+        effort = reserve is not None and hr is not None and hr >= hr_rest + 0.3 * reserve
         in_workout = any(s <= m["ts"] < e for s, e in workouts)
-        working = in_workout and (m["steps"] >= 20 or (reserve is not None and hr is not None and hr >= hr_rest + 0.3 * reserve))
+        working = in_workout and (m["steps"] >= 20 or (reserve is not None and hr is not None and hr >= hr_rest + 0.2 * reserve))
         n += bool(walk or effort or working)
     return n
 
@@ -294,9 +294,11 @@ def compute(minutes: list[dict], profile: dict, days: int, today: date | None = 
         rows[d] = (row, awake_hr)
         awake_rest[d] = awake_resting_hr_from(ms)
 
-    # Baselines for HRrest: profile, else the median of measured resting HR.
     rhr_values = [r["resting_hr"] for r, _ in rows.values() if r["resting_hr"]]
-    hr_rest = profile.get("resting_hr") or (median(rhr_values) if rhr_values else None)
+    # Reserve wants resting HR awake (Karvonen): profile, else median awake resting, else sleeping + 8.
+    awake_values = [v for v in awake_rest.values() if v]
+    hr_rest = (profile.get("resting_hr") or (median(awake_values) if awake_values else None)
+               or (median(rhr_values) + 8 if rhr_values else None))
     for d, (row, _) in rows.items():
         if by_day.get(d):
             row["active_minutes"] = active_minutes_of(by_day[d], hr_max, hr_rest, workouts or ())

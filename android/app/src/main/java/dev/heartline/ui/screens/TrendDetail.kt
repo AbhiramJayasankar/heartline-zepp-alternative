@@ -120,8 +120,8 @@ private fun trendAbout(key: String): About? = when (key) {
     "steps" -> About("Steps counted by the watch each day.", "The watch's own step counter, synced minute by minute.",
         "7,000–10,000 a day is a common healthy target; benefits rise steeply from 2,000 to about 8,000.")
     "active" -> About("Minutes each day you were moving with purpose or working hard.",
-        "A minute counts, awake, when you walk (40 or more steps, or 20 next to such a minute, so a quick walk across the office counts), when your heart rate is at 40% or more of your heart rate reserve (moderate effort), " +
-            "or during a recorded workout while your heart rate stays at 30% or more of reserve, as it does between sets. Sitting with a workout running, before or after, doesn't count. The watch's own \"active\" label isn't used: it stays on most of the day.",
+        "A minute counts, awake, when you walk (40 or more steps, or 20 next to such a minute, so a quick walk across the office counts), when your heart rate is at 30% or more of your heart rate reserve, " +
+            "or during a recorded workout while your heart rate stays at 20% or more of reserve, as it does between sets. Heart rate reserve is your max minus your resting heart rate measured awake (your profile's, else your calmest still minutes awake). Sitting with a workout running, before or after, doesn't count. The watch's own \"active\" label isn't used: it stays on most of the day.",
         "The WHO suggests 150–300 minutes of moderate activity a week.")
     "spo2" -> About("Blood oxygen saturation: how much of your blood's haemoglobin is carrying oxygen.",
         "The watch's red and infrared light readings, including the overnight ones when sleep breathing quality is on.",

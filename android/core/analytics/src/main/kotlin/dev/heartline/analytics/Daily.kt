@@ -74,9 +74,13 @@ fun computeDaily(
             awakeRestingHr = awakeRestingHrFrom(ms), hrvSleep = ownHealth["hrv_sleep"]?.get(d),
         ), awakeHr)
     }
+    // Heart rate reserve wants resting heart rate awake (Karvonen): the profile's, else the median of each day's calmest
+    // still, awake 10 minutes. Sleeping heart rate runs lower, so it is only a fallback, raised by 8 bpm.
     val restingValues = rows.values.mapNotNull { it.row.restingHr?.takeIf { v -> v != 0.0 } }
+    val awakeValues = rows.values.mapNotNull { it.row.awakeRestingHr?.takeIf { v -> v != 0.0 } }
     val hrRest = profile.restingHr?.takeIf { it != 0 }?.toDouble()
-        ?: restingValues.takeIf { it.isNotEmpty() }?.let { median(it.toDoubleArray()) }
+        ?: awakeValues.takeIf { it.isNotEmpty() }?.let { median(it.toDoubleArray()) }
+        ?: restingValues.takeIf { it.isNotEmpty() }?.let { median(it.toDoubleArray()) + 8 }
     for ((d, work) in rows) byDay[d]?.takeIf { it.isNotEmpty() }?.let { ms ->
         work.row = work.row.copy(activeMinutes = activeMinutesOf(ms, hrMax, hrRest, workouts))
     }

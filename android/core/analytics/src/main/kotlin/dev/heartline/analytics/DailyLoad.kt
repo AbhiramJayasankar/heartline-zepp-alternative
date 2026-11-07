@@ -37,12 +37,15 @@ internal fun keytelKcal(hr: List<Int>, profile: Profile, max: Int): Int? {
     return rounded(kcal).toInt()
 }
 /**
- * Minutes of real activity in one day's minutes (time order). A minute counts, awake and worn, when any of these hold:
+ * Minutes of real activity in one day's minutes (time order). Reserve is max minus resting heart rate measured awake.
+ * A minute counts, awake and worn, when any of these hold:
  * - Walking: 40 or more steps, or 20 or more next to such a minute (a minute or two across the office counts;
  *   shuffling around a room doesn't).
- * - Effort: heart rate at 40% or more of heart rate reserve (moderate intensity by ACSM), anywhere.
- * - Inside a recorded workout: heart rate at 30% or more of reserve, which holds between sets while you recover,
- *   or 20 or more steps. Sitting with a workout running, before or after, stays out: heart rate drops below that.
+ * - Effort: heart rate at 30% or more of heart rate reserve, anywhere (ACSM calls 30-39% light and 40-59% moderate;
+ *   30% is set for the effort you put in, by your choice).
+ * - Inside a recorded workout: heart rate at 20% or more of reserve, which holds between sets while you recover,
+ *   or 20 or more steps. Sitting with a workout running, before or after, stays out: heart rate drops below that
+ *   (on 6 Nov: sitting before reached 92 bpm, between sets never fell under 97; 20% of reserve was 94).
  * The watch's own "active" label isn't used: it repeats through most awake minutes. Without max and resting heart
  * rate only walking counts.
  */
@@ -56,9 +59,9 @@ internal fun activeMinutesOf(ms: List<MinuteSample>, hrMax: Int?, hrRest: Double
         val near = (i > 0 && m.ts - ms[i - 1].ts <= 90 && walking(i - 1)) || (i < ms.lastIndex && ms[i + 1].ts - m.ts <= 90 && walking(i + 1))
         val walk = walking(i) || (m.steps >= 20 && near)
         val hr = m.hr?.takeIf { it in 30..220 }
-        val effort = reserve != null && hr != null && hr >= hrRest!! + 0.4 * reserve
+        val effort = reserve != null && hr != null && hr >= hrRest!! + 0.3 * reserve
         val inWorkout = workouts.any { m.ts >= it.first && m.ts < it.second }
-        val working = inWorkout && (m.steps >= 20 || (reserve != null && hr != null && hr >= hrRest!! + 0.3 * reserve))
+        val working = inWorkout && (m.steps >= 20 || (reserve != null && hr != null && hr >= hrRest!! + 0.2 * reserve))
         if (walk || effort || working) n++
     }
     return n

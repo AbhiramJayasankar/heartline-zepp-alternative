@@ -41,14 +41,14 @@ class Vo2maxTest {
     @Test fun activeMinutesCountWalksAndWorkingSetsButNotSitting() {
         fun m(i: Int, steps: Int, hr: Int?, state: String = "active") = MinuteSample(now + i * 60L, 1, 50, steps, hr, 0, 0, 0, state)
         val ms = listOf(
-            m(0, 0, 80), m(1, 0, 85),                // sitting with the workout already running: out
-            m(2, 0, 104), m(3, 3, 112),              // between sets, heart rate up: in (inside the workout)
-            m(4, 0, 100, "idle"),                    // after the workout ends, still 100: out (under 40% of reserve)
+            m(0, 0, 80), m(1, 0, 92),                // sitting with the workout already running: out (under 20% of reserve)
+            m(2, 0, 97), m(3, 3, 112),               // between sets, heart rate up: in (inside the workout, 20% or more)
+            m(4, 0, 100, "idle"),                    // after the workout ends, still 100: out (under 30% of reserve)
             m(5, 70, 85), m(6, 25, 84), m(7, 15, 80), // a short walk: 70 in, 25 next to it in, 15 out
-            m(8, 0, 120),                            // 120 bpm anywhere: in (over 40% of reserve)
+            m(8, 0, 110),                            // 110 bpm anywhere: in (30% of reserve or more)
             m(9, 200, null, "sleep_light"),          // asleep: never
         )
-        // Rest 56, max 193: 30% of reserve = 97.1, 40% = 110.8.
-        assertEquals(5, activeMinutesOf(ms, 193, 56.0, listOf(now to now + 4 * 60L)))
+        // Awake rest 69, max 193: reserve 124, so 20% = 93.8 and 30% = 106.2.
+        assertEquals(5, activeMinutesOf(ms, 193, 69.0, listOf(now to now + 4 * 60L)))
     }
 }
