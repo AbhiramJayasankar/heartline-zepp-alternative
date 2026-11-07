@@ -1,5 +1,7 @@
 package dev.heartline.ui
 
+import dev.heartline.ui.theme.raised
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
@@ -61,6 +63,8 @@ sealed interface Route {
     data class Workout(val start: Long, val epochDay: Long) : Route
     data object Sensors : Route
     data object WatchSettings : Route
+    /** How readiness and the other Today scores are worked out; [focus] scrolls to one factor or score. */
+    data class Readiness(val focus: String? = null) : Route
     data object WatchMenu : Route
     data object Vibration : Route
     data object Alexa : Route
@@ -95,6 +99,10 @@ class Navigator {
     fun push(r: Route) { stack.add(r) }
     fun pop() { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) }
     fun replace(r: Route) { pop(); push(r) }
+    /** Set by [AppRoot]: switches the bottom tab. */
+    internal var tabSwitch: (Tab) -> Unit = {}
+    /** Closes any pushed screens and shows [t], for links from a detail page to a whole tab. */
+    fun toTab(t: Tab) { stack.clear(); tabSwitch(t) }
 }
 
 @Composable
@@ -106,6 +114,7 @@ fun AppRoot(controller: HeartlineController) {
     }
     var tab by rememberSaveable { mutableStateOf(Tab.TODAY) }
     val nav = remember { Navigator() }
+    nav.tabSwitch = { tab = it }
     BackHandler(enabled = nav.stack.isNotEmpty()) { nav.pop() }
     val c = HL.colors
     val top = nav.stack.lastOrNull()
@@ -126,7 +135,7 @@ fun AppRoot(controller: HeartlineController) {
                             alwaysShowLabel = true,
                             label = { Text(t.label, style = HL.type.label) },
                             colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = c.pulse, selectedTextColor = c.ink, indicatorColor = c.wash,
+                                selectedIconColor = c.pulse, selectedTextColor = c.ink, indicatorColor = c.raised,
                                 unselectedIconColor = c.inkSoft, unselectedTextColor = c.inkSoft,
                             ),
                         )
@@ -163,6 +172,7 @@ fun AppRoot(controller: HeartlineController) {
                         is Route.Workout -> WorkoutScreen(controller, target, nav)
                         Route.Sensors -> SensorsScreen(controller, nav)
                         Route.WatchSettings -> WatchSettingsScreen(controller, nav)
+                        is Route.Readiness -> dev.heartline.ui.screens.ReadinessScreen(controller, target.focus, nav)
                         Route.WatchMenu -> WatchMenuScreen(controller, nav)
                         Route.Vibration -> VibrationScreen(controller, nav)
                         Route.Alexa -> dev.heartline.ui.screens.AlexaScreen(controller, nav)

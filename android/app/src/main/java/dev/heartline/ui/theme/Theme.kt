@@ -38,7 +38,12 @@ data class Palette(
     val isDark: Boolean,
     /** Blood oxygen and body readings. */
     val oxygen: Color = Color(0xFF2A7FA8),
+    /** Tinted boxes, chips and wells inside the page; [wash] when unset. OLED Black keeps these grey while its page stays black. */
+    val box: Color = Color.Unspecified,
 )
+
+/** The fill for tinted boxes inside a page (see [Palette.box]); [Palette.wash] is the page-level band behind headers. */
+val Palette.raised: Color get() = if (box == Color.Unspecified) wash else box
 
 val LightPalette = Palette(
     paper = Color(0xFFFCF6F4), gridMinor = Color(0xFFF6E0DC), gridMajor = Color(0xFFECBDB6),
@@ -65,7 +70,7 @@ val BlackPalette = Palette(
     wash = Color(0xFF000000), line = Color(0xFF242424), surface = Color(0xFF0E0E0E),
     ok = Color(0xFF4ADE80), warn = Color(0xFFF5B041),
     sleepDeep = Color(0xFF8E9BFF), sleepLight = Color(0xFF465094), sleepRem = Color(0xFFD08CE0), idle = Color(0xFF1E1E1E),
-    isDark = true, oxygen = Color(0xFF4FC3F7),
+    isDark = true, oxygen = Color(0xFF4FC3F7), box = Color(0xFF181818),
 )
 
 /** Warm dark: espresso and plum with a coral accent. */
@@ -88,6 +93,26 @@ val SagePalette = Palette(
     isDark = false, oxygen = Color(0xFF1F7A9E),
 )
 
+/** Cool light: lavender paper, aubergine ink and a raspberry pulse. */
+val LilacPalette = Palette(
+    paper = Color(0xFFF5F3F9), gridMinor = Color(0xFFEAE5F3), gridMajor = Color(0xFFD5CCE8),
+    ink = Color(0xFF221D3B), inkSoft = Color(0xFF5F5980), pulse = Color(0xFFC2185B),
+    wash = Color(0xFFECE7F5), line = Color(0xFFDDD6EB), surface = Color(0xFFFDFCFF),
+    ok = Color(0xFF2B7A57), warn = Color(0xFF9E5A10),
+    sleepDeep = Color(0xFF3A2F80), sleepLight = Color(0xFF9D94D0), sleepRem = Color(0xFFBF7FBF), idle = Color(0xFFE7E1F1),
+    isDark = false, oxygen = Color(0xFF1D6E9E),
+)
+
+/** Deep green dark: pine-black page, mint and coral accents. */
+val ForestPalette = Palette(
+    paper = Color(0xFF0D1512), gridMinor = Color(0xFF131E1A), gridMajor = Color(0xFF22312B),
+    ink = Color(0xFFE8F1EB), inkSoft = Color(0xFF99ABA2), pulse = Color(0xFFFF8A7A),
+    wash = Color(0xFF16221D), line = Color(0xFF273730), surface = Color(0xFF131D19),
+    ok = Color(0xFF7FD8A4), warn = Color(0xFFE9C46A),
+    sleepDeep = Color(0xFFA3B6F2), sleepLight = Color(0xFF4D6385), sleepRem = Color(0xFFC99AD2), idle = Color(0xFF1F2C26),
+    isDark = true, oxygen = Color(0xFF6CC7DE),
+)
+
 /** A ready-made theme: its name, what it's like, and its palette ([ThemeMode.SYSTEM] has none of its own). */
 data class ThemeInfo(val mode: ThemeMode, val name: String, val about: String)
 val THEMES = listOf(
@@ -97,6 +122,8 @@ val THEMES = listOf(
     ThemeInfo(ThemeMode.BLACK, "OLED Black", "True black; pixels off on OLED screens"),
     ThemeInfo(ThemeMode.DUSK, "Dusk", "Warm espresso dark"),
     ThemeInfo(ThemeMode.SAGE, "Sage", "Cool green light"),
+    ThemeInfo(ThemeMode.LILAC, "Lilac", "Lavender light, raspberry pulse"),
+    ThemeInfo(ThemeMode.FOREST, "Forest", "Pine dark, mint and coral"),
 )
 
 /** The palette for [mode]; [systemDark] decides "Follow phone". */
@@ -104,6 +131,7 @@ fun paletteFor(mode: ThemeMode, systemDark: Boolean): Palette = when (mode) {
     ThemeMode.SYSTEM -> if (systemDark) DarkPalette else LightPalette
     ThemeMode.LIGHT -> LightPalette; ThemeMode.DARK -> DarkPalette; ThemeMode.BLACK -> BlackPalette
     ThemeMode.DUSK -> DuskPalette; ThemeMode.SAGE -> SagePalette
+    ThemeMode.LILAC -> LilacPalette; ThemeMode.FOREST -> ForestPalette
 }
 
 /** One hue per part of health, used for its page accent, tile and charts. */
@@ -148,7 +176,7 @@ object HL {
     val type: HeartlineType @Composable get() = LocalType.current
 }
 
-enum class ThemeMode { SYSTEM, LIGHT, DARK, BLACK, DUSK, SAGE }
+enum class ThemeMode { SYSTEM, LIGHT, DARK, BLACK, DUSK, SAGE, LILAC, FOREST }
 
 @Composable
 fun HeartlineTheme(mode: ThemeMode = ThemeMode.SYSTEM, content: @Composable () -> Unit) {

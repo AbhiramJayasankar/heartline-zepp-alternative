@@ -273,11 +273,12 @@ fun ThemeGallery(selected: ThemeMode, onPick: (ThemeMode) -> Unit) {
     Text("Theme", style = HL.type.label, color = c.inkSoft)
     Gap(8)
     THEMES.chunked(2).forEach { row ->
-        Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        // Equal tiles: each row is as tall as its taller tile, and descriptions always take two lines.
+        Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min).padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             row.forEach { info ->
                 val on = info.mode == selected
                 Column(
-                    Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).background(c.surface)
+                    Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(16.dp)).background(c.surface)
                         .border(if (on) 2.dp else 1.dp, if (on) c.pulse else c.line, RoundedCornerShape(16.dp))
                         .selectable(on, role = Role.RadioButton) { onPick(info.mode) }.padding(10.dp),
                 ) {
@@ -287,7 +288,7 @@ fun ThemeGallery(selected: ThemeMode, onPick: (ThemeMode) -> Unit) {
                     } else ThemePreview(paletteFor(info.mode, false), Modifier.fillMaxWidth().aspectRatio(1.35f).clip(RoundedCornerShape(10.dp)))
                     Gap(8)
                     Text(info.name, style = HL.type.bodyStrong, color = c.ink)
-                    Text(info.about, style = HL.type.small.copy(fontSize = 12.sp), color = c.inkSoft, maxLines = 2)
+                    Text(info.about, style = HL.type.small.copy(fontSize = 12.sp), color = c.inkSoft, minLines = 2, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                 }
             }
             if (row.size == 1) Spacer(Modifier.weight(1f))

@@ -76,7 +76,13 @@ data class DayResult(
     /** The night may still be going on: it ended under 30 min before the latest data, before noon. */
     val sleepOngoing: Boolean = false,
 )
-data class ReadinessFactor(val name: String, val impact: String, val detail: String)
+data class ReadinessFactor(
+    val name: String, val impact: String, val detail: String,
+    /** How far today is from the usual, in standard deviations (positive is better), its weight, and the points it moved readiness. */
+    val z: Double = 0.0, val weight: Double = 0.0, val points: Double = 0.0,
+    /** Today's value, the 28-day usual it was compared with, and its unit, when the factor has them. */
+    val value: Double? = null, val usual: Double? = null, val unit: String = "",
+)
 data class LastReadiness(val date: String, val value: Int)
 data class TodayResult(
     val readiness: Int?, val readinessFactors: List<ReadinessFactor>, val strain: Double?,

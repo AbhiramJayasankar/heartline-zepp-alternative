@@ -1,5 +1,7 @@
 package dev.heartline.ui.components
 
+import dev.heartline.ui.theme.raised
+
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -192,7 +194,7 @@ data class FactItem(val label: String, val value: String, val unit: String? = nu
 @Composable
 fun Note(text: String, modifier: Modifier = Modifier, color: Color = HL.colors.inkSoft, title: String? = null) {
     val c = HL.colors
-    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(if (color == c.inkSoft) c.wash else color.copy(alpha = 0.10f))
+    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(if (color == c.inkSoft) c.raised else color.copy(alpha = 0.10f))
         .semantics(mergeDescendants = true) {}.padding(horizontal = 14.dp, vertical = 12.dp)) {
         if (title != null) Text(title, style = HL.type.bodyStrong.copy(fontSize = 14.sp), color = if (color == c.inkSoft) c.ink else color)
         Text(text, style = HL.type.small, color = c.inkSoft)

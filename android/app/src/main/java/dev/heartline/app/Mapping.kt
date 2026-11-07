@@ -36,7 +36,8 @@ fun DailyResult.todayUi(date: LocalDate): TodayUi {
     return TodayUi(today.readiness ?: readiness?.value,
         if (today.readiness == null && readiness != null) "Readiness, ${LocalDate.parse(readiness.date).format(DateTimeFormatter.ofPattern("d MMM"))}" else "Readiness",
         today.recommendation, today.strain, today.sleepScore, today.bodyBattery, day?.restingHr?.roundToInt(),
-        today.readinessFactors.map { Factor(it.name, when (it.impact) { "positive" -> Impact.POSITIVE; "negative" -> Impact.NEGATIVE; else -> Impact.NEUTRAL }, it.detail) },
+        today.readinessFactors.map { Factor(it.name, when (it.impact) { "positive" -> Impact.POSITIVE; "negative" -> Impact.NEGATIVE; else -> Impact.NEUTRAL }, it.detail,
+            it.z, it.weight, it.points, it.value, it.usual, it.unit) },
         alerts.map { AlertUi(it.level == "warn" || it.level == "warning", it.title, it.detail) }, last?.sleepUi(), day?.steps, day?.activeMinutes)
 }
 fun DailyResult.trendsUi(health: Map<String, Map<LocalDate, Double>>): TrendsUi {
@@ -60,7 +61,7 @@ fun DailyResult.trendsUi(health: Map<String, Map<LocalDate, Double>>): TrendsUi 
 fun SessionResult.sessionUi(id: String = file) = SessionUi(id, start.toLong(), durationS, signalQuality, hrBpm,
     hrv.rmssdMs, hrv.sdnnMs, hrv.pnn50, hrv.stressIndex, hrv.lfHf, respiratoryRate, rhythmStatus(rhythm.status),
     rhythm.ectopicBeats, rhythm.notes, rr.map { RrUi(it.t, it.rrMs, it.ectopic) }, ppgPreview.map { it.toFloat() }.toFloatArray(),
-    previewFs ?: 25.0, beatTimes.toDoubleArray())
+    previewFs ?: 25.0, beatTimes.toDoubleArray(), usableS)
 
 fun quietNow(minute: Int, start: Int?, end: Int?): Boolean {
     if (start == null || end == null || start == end) return false

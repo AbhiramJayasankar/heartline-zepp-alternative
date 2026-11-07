@@ -83,22 +83,26 @@ fun computeDaily(
         val row = work.row
         val prev = rows.filterKeys { it >= d.minusDays(28) && it < d }.values.map { it.row }
         val zs = arrayListOf<Pair<Double, Double>>()
-        fun factor(name: String, z: Double, weight: Double, detail: String) {
+        fun factor(name: String, z: Double, weight: Double, detail: String, value: Double? = null, usual: Double? = null, unit: String = "") {
             zs.add(z to weight)
-            work.factors.add(ReadinessFactor(name, if (z > 0.3) "positive" else if (z < -0.3) "negative" else "neutral", detail))
+            work.factors.add(ReadinessFactor(name, if (z > 0.3) "positive" else if (z < -0.3) "negative" else "neutral", detail, z, weight,
+                value = value, usual = usual, unit = unit))
         }
         val baseRest = prev.mapNotNull { it.restingHr?.takeIf { v -> v != 0.0 } }
         val rhrText = row.restingHr?.let { if (ownHealth["resting_hr"]?.containsKey(d) == true) it.toString() else it.toLong().toString() }
         zScore(row.restingHr, baseRest, 2.0)?.let { z -> factor("Resting heart rate", -z, 0.30,
-            "$rhrText bpm vs your usual ${rounded(average(baseRest)).toLong()}") }
+            "$rhrText bpm vs your usual ${rounded(average(baseRest)).toLong()}", row.restingHr, average(baseRest), "bpm") }
         val baseHrv = prev.mapNotNull { it.hrvRmssd?.takeIf { v -> v != 0.0 } }
         zScore(row.hrvRmssd, baseHrv, if (baseHrv.isNotEmpty()) 0.1 * average(baseHrv) else 1.0)?.let { z ->
-            factor("HRV", z, 0.35, "RMSSD ${rounded(row.hrvRmssd!!).toLong()} ms vs your usual ${rounded(average(baseHrv)).toLong()}")
+            factor("HRV", z, 0.35, "RMSSD ${rounded(row.hrvRmssd!!).toLong()} ms vs your usual ${rounded(average(baseHrv)).toLong()}", row.hrvRmssd, average(baseHrv), "ms")
         }
         row.sleepScore?.let { score -> factor("Sleep", (score - 70) / 15.0, 0.25,
-            "sleep score $score, ${row.sleepMinutes!! / 60} h ${row.sleepMinutes % 60} min asleep") }
+            "sleep score $score, ${row.sleepMinutes!! / 60} h ${row.sleepMinutes % 60} min asleep", score.toDouble(), 70.0) }
         rows[d.minusDays(1)]?.row?.strain?.let { strain -> factor("Yesterday's strain",
-            if (strain > 14) -(strain - 14) / 4 else 0.0, 0.10, "strain $strain") }
+            if (strain > 14) -(strain - 14) / 4 else 0.0, 0.10, "strain $strain", strain, 14.0) }
+        // Each factor's share of the score: readiness = 70 + the sum of these points.
+        val totalWeight = zs.sumOf { it.second }
+        if (totalWeight > 0) work.factors.replaceAll { it.copy(points = 15 * it.z * it.weight / totalWeight) }
         if (zs.isNotEmpty() && work.factors.any { it.name == "Resting heart rate" || it.name == "Sleep" }) {
             work.row = row.copy(readiness = rounded(70 + 15 * zs.sumOf { it.first * it.second } / zs.sumOf { it.second }).toInt().coerceIn(0, 100))
         }

@@ -1,5 +1,7 @@
 package dev.heartline.ui.components
 
+import dev.heartline.ui.theme.raised
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.semantics.Role
@@ -9,6 +11,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.Canvas
@@ -139,14 +142,18 @@ fun InteractiveChart(
                 }
             }
         }
-        if (title != null && !fullscreen) Box(Modifier.size(44.dp).clip(CircleShape).background(c.wash)
-            .clickable(onClickLabel = "Open full screen", role = Role.Button) { expanded = true }
+        // An outlined 34 dp square on the readout's first line, its right edge on the chart's right edge. The 48 dp touch
+        // target around it is shifted by the 7 dp difference so the drawn square, not the target, lines up.
+        if (title != null && !fullscreen) Box(Modifier.padding(start = 4.dp).offset(x = 7.dp, y = (-7).dp).size(48.dp)
+            .clip(RoundedCornerShape(12.dp)).clickable(onClickLabel = "Open full screen", role = Role.Button) { expanded = true }
             .semantics { contentDescription = "Open $title full screen" }, contentAlignment = Alignment.Center) {
-            Canvas(Modifier.size(16.dp)) {
+            Box(Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(c.raised).border(1.dp, c.line, RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
+            Canvas(Modifier.size(14.dp)) {
                 val w = size.width; val k = w * 0.38f; val st = Stroke(1.8.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
                 listOf(Offset(0f, 0f) to Offset(1f, 1f), Offset(w, 0f) to Offset(-1f, 1f), Offset(0f, w) to Offset(1f, -1f), Offset(w, w) to Offset(-1f, -1f)).forEach { (o, d) ->
                     drawPath(Path().apply { moveTo(o.x + d.x * k, o.y); lineTo(o.x, o.y); lineTo(o.x, o.y + d.y * k) }, c.ink, style = st)
                 }
+            }
             }
         }
         }

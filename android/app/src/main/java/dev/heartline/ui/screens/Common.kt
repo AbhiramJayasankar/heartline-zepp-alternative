@@ -86,9 +86,11 @@ fun Screen(
     /** With an icon, the subtitle sits beside a tinted badge in a header card, so each inner page has its own face. */
     icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
     tint: androidx.compose.ui.graphics.Color? = null,
+    /** Pass one in to scroll the page from outside (to a focused section, say). */
+    scroll: ScrollState? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    ScrollPage {
+    ScrollPage(scroll ?: LocalTabScroll.current ?: rememberScrollState()) {
         Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
         if (title != null || onBack != null) {
             Row(Modifier.fillMaxWidth().padding(start = if (onBack != null) 6.dp else Gutter, end = Gutter, top = 10.dp), verticalAlignment = Alignment.CenterVertically) {

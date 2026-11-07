@@ -1,5 +1,7 @@
 package dev.heartline.ui.components
 
+import dev.heartline.ui.theme.raised
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -151,7 +153,7 @@ fun Panel(modifier: Modifier = Modifier, wash: Boolean = false, padding: Padding
         modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
-            .background(if (wash) c.wash else c.surface)
+            .background(if (wash) c.raised else c.surface)
             .border(1.dp, c.line, RoundedCornerShape(18.dp))
             .padding(padding),
         content = content,

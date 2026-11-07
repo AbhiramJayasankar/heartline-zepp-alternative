@@ -296,7 +296,10 @@ data class StepsUi(val steps: Int, val distanceM: Int?, val calories: Int?)
 data class SyncUi(val running: Boolean = false, val lastActivity: Long? = null, val lastHealth: Long? = null, val message: String? = null)
 
 enum class Impact { POSITIVE, NEUTRAL, NEGATIVE }
-data class Factor(val name: String, val impact: Impact, val detail: String)
+data class Factor(
+    val name: String, val impact: Impact, val detail: String,
+    val z: Double = 0.0, val weight: Double = 0.0, val points: Double = 0.0, val value: Double? = null, val usual: Double? = null, val unit: String = "",
+)
 data class AlertUi(val warn: Boolean, val title: String, val detail: String)
 data class SleepNightUi(val start: Long, val end: Long, val deepMin: Int, val lightMin: Int, val remMin: Int, val awakeMin: Int, val ongoing: Boolean = false)
 
@@ -339,6 +342,8 @@ data class SessionUi(
     val rmssd: Double?, val sdnn: Double?, val pnn50: Double?, val stressIndex: Double?, val lfHf: Double?,
     val respiratoryRate: Double?, val rhythm: RhythmStatus, val ectopic: Int, val notes: List<String>,
     val rr: List<RrUi>, val ppgPreview: FloatArray, val previewFs: Double, val beatTimes: DoubleArray,
+    /** Seconds of clean beat intervals; the HRV trend needs 45. */
+    val usableS: Double = 0.0,
 )
 data class CheckRunUi(val seconds: Int, val startedAt: Long, val analysing: Boolean, val result: SessionUi?, val error: String?)
 

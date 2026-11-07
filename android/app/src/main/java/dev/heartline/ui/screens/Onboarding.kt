@@ -1,5 +1,7 @@
 package dev.heartline.ui.screens
 
+import dev.heartline.ui.theme.raised
+
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -217,7 +219,7 @@ private fun PermissionRow(icon: ImageVector, title: String, detail: String, ok: 
     Row(Modifier.fillMaxWidth().padding(bottom = 10.dp).clip(shape).background(c.surface).border(1.dp, if (ok) c.ok.copy(alpha = 0.5f) else c.line, shape)
         .semantics(mergeDescendants = true) { contentDescription = "$title, ${if (ok) "allowed" else "not allowed yet"}. $detail" }.padding(16.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(40.dp).clip(CircleShape).background(c.wash), contentAlignment = Alignment.Center) { Icon(icon, null, tint = c.ink, modifier = Modifier.size(20.dp)) }
+        Box(Modifier.size(40.dp).clip(CircleShape).background(c.raised), contentAlignment = Alignment.Center) { Icon(icon, null, tint = c.ink, modifier = Modifier.size(20.dp)) }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(title, style = HL.type.bodyStrong, color = c.ink)

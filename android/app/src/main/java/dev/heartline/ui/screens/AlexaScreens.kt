@@ -1,5 +1,7 @@
 package dev.heartline.ui.screens
 
+import dev.heartline.ui.theme.raised
+
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import android.media.MediaPlayer
@@ -435,7 +437,7 @@ private fun AlertsPage(controller: HeartlineController, nav: Navigator) {
 private fun Code(text: String) {
     SelectionContainer {
         Text(text, style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 17.sp, color = HL.colors.ink),
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(HL.colors.wash).padding(10.dp))
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(HL.colors.raised).padding(10.dp))
     }
 }
 

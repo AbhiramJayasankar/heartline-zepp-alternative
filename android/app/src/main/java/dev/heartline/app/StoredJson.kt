@@ -50,7 +50,7 @@ internal fun sessionFromJson(text: String, id: String): SessionUi {
         rhythmStatus(r.optString("status")), r.optInt("ectopic_beats"), r.optJSONArray("notes")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty(),
         j.optJSONArray("rr")?.objects()?.map { RrUi(it.getDouble("t"), it.getDouble("rr_ms"), it.optBoolean("ectopic")) }.orEmpty(),
         j.optJSONArray("ppg_preview")?.numbers()?.map { it.toFloat() }?.toFloatArray() ?: FloatArray(0), j.number("preview_fs") ?: 25.0,
-        j.optJSONArray("beat_times")?.numbers()?.toDoubleArray() ?: DoubleArray(0))
+        j.optJSONArray("beat_times")?.numbers()?.toDoubleArray() ?: DoubleArray(0), usableS = j.optDouble("usable_s", 0.0))
 }
 
 internal fun readRecording(file: File) = file.bufferedReader().use(::readRecordingCsv)

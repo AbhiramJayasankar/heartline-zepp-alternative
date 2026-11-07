@@ -1,5 +1,7 @@
 package dev.heartline.ui.screens
 
+import dev.heartline.ui.theme.raised
+
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.semantics.semantics
@@ -333,7 +335,7 @@ private fun AlarmEditor(alarm: AlarmUi, isNew: Boolean, onDismiss: () -> Unit, o
                 TimePicker(
                     time,
                     colors = TimePickerDefaults.colors(
-                        clockDialColor = c.wash, selectorColor = c.pulse, timeSelectorSelectedContainerColor = c.wash,
+                        clockDialColor = c.raised, selectorColor = c.pulse, timeSelectorSelectedContainerColor = c.raised,
                         timeSelectorSelectedContentColor = c.ink, timeSelectorUnselectedContainerColor = c.paper, timeSelectorUnselectedContentColor = c.inkSoft,
                         clockDialSelectedContentColor = c.surface, clockDialUnselectedContentColor = c.ink,
                     ),
@@ -473,7 +475,7 @@ fun HealthConnectScreen(controller: HeartlineController, nav: Navigator) {
             Gap(8)
             androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("Heart rate", "Resting heart rate", "HRV", "Steps", "Distance", "Calories", "Sleep stages", "SpO2", "Breathing rate", "Skin temperature", "Workouts").forEach { t ->
-                    Box(Modifier.clip(RoundedCornerShape(50)).background(HL.colors.wash).padding(horizontal = 10.dp, vertical = 5.dp)) { Text(t, style = HL.type.small.copy(fontSize = 12.sp), color = HL.colors.ink) }
+                    Box(Modifier.clip(RoundedCornerShape(50)).background(HL.colors.raised).padding(horizontal = 10.dp, vertical = 5.dp)) { Text(t, style = HL.type.small.copy(fontSize = 12.sp), color = HL.colors.ink) }
                 }
             }
             hc.lastExport?.let { Gap(10); MutedText("Last written ${agoOf(it)}" + (hc.lastResult?.let { r -> ": $r" } ?: "")) }

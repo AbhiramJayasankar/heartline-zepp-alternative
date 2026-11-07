@@ -1,5 +1,7 @@
 package dev.heartline.ui.screens
 
+import dev.heartline.ui.theme.raised
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -118,7 +120,7 @@ fun InsightsScreen(controller: HeartlineController, nav: Navigator) {
         Gap(18)
         // ---- Headline ----
         if (report.headline.isNotEmpty()) {
-            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.wash).padding(18.dp)) {
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.raised).padding(18.dp)) {
                 Column {
                     AreaLabel("The main takeaway", c.pulse, dot = false)
                     Gap(6)
@@ -134,7 +136,7 @@ fun InsightsScreen(controller: HeartlineController, nav: Navigator) {
             if (watch > 0) Delta("$watch to watch", false)
         }
         Gap(4)
-        report.insights.forEach { i -> Gap(10); InsightCard(i, c) }
+        report.insights.forEach { i -> Gap(10); InsightCard(i, c, nav) }
 
         // ---- Transparency ----
         Heading("How this was written")
@@ -145,10 +147,20 @@ fun InsightsScreen(controller: HeartlineController, nav: Navigator) {
 }
 
 @Composable
-private fun InsightCard(i: Insight, c: Palette) {
+private fun InsightCard(i: Insight, c: Palette, nav: Navigator) {
+    // Where the finding lives in the app: its tab, page or trend.
+    val today = java.time.LocalDate.now().toEpochDay()
+    val (linkLabel, open) = when (i.area) {
+        "sleep" -> "Open Sleep" to { nav.toTab(dev.heartline.ui.Tab.SLEEP) }
+        "heart" -> "Open Heart" to { nav.toTab(dev.heartline.ui.Tab.HEART) }
+        "activity" -> "Open Activity" to { nav.toTab(dev.heartline.ui.Tab.ACTIVITY) }
+        "stress" -> "Open today's stress" to { nav.push(dayRoute(DayMetric.STRESS, today)) }
+        "body" -> "Open blood oxygen and temperature" to { nav.push(dayRoute(DayMetric.BODY, today)) }
+        else -> "How readiness is worked out" to { nav.push(dev.heartline.ui.Route.Readiness()) }
+    }
     val area = areaOf(i.area)
     val toneColor: Color = when (i.tone) { "good" -> c.ok; "watch" -> c.pulse; else -> c.inkSoft }
-    Card(padding = 16.dp) {
+    Card(padding = 16.dp, onClick = open, onClickLabel = linkLabel) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             AreaLabel(areaTitle(i.area), c.hue(area), Modifier.weight(1f))
             Delta(when (i.tone) { "good" -> "Going well"; "watch" -> "Watch"; else -> "Note" }, when (i.tone) { "good" -> true; "watch" -> false; else -> null })
@@ -170,12 +182,14 @@ private fun InsightCard(i: Insight, c: Palette) {
             Gap(4)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 i.basis.forEach { b ->
-                    Box(Modifier.clip(RoundedCornerShape(50)).background(c.wash).padding(horizontal = 10.dp, vertical = 4.dp)) {
+                    Box(Modifier.clip(RoundedCornerShape(50)).background(c.raised).padding(horizontal = 10.dp, vertical = 4.dp)) {
                         Text(b, style = HL.type.small.copy(fontSize = 12.sp), color = c.ink)
                     }
                 }
             }
         }
+        Gap(10)
+        Text("$linkLabel ›", style = HL.type.label, color = c.pulse)
     }
 }
 
@@ -192,7 +206,7 @@ private fun HowItWasMade(r: InsightReport) {
         r.digest.takeIf { it.isNotEmpty() }?.let { d ->
             val sections = d.split("\n## ").map { it.removePrefix("## ") }
             FlowRow(Modifier.padding(start = 34.dp, top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                sections.forEach { s -> Box(Modifier.clip(RoundedCornerShape(50)).background(c.wash).padding(horizontal = 10.dp, vertical = 4.dp)) {
+                sections.forEach { s -> Box(Modifier.clip(RoundedCornerShape(50)).background(c.raised).padding(horizontal = 10.dp, vertical = 4.dp)) {
                     Text(s.lineSequence().first(), style = HL.type.small.copy(fontSize = 12.sp), color = c.ink)
                 } }
             }
@@ -217,7 +231,7 @@ private fun HowItWasMade(r: InsightReport) {
 private fun Step(n: String, title: String, detail: String) {
     val c = HL.colors
     Row(verticalAlignment = Alignment.Top) {
-        Box(Modifier.width(24.dp).height(24.dp).clip(RoundedCornerShape(50)).background(c.wash), contentAlignment = Alignment.Center) {
+        Box(Modifier.width(24.dp).height(24.dp).clip(RoundedCornerShape(50)).background(c.raised), contentAlignment = Alignment.Center) {
             Text(n, style = HL.type.label.copy(fontSize = 12.sp), color = c.ink)
         }
         Spacer(Modifier.width(10.dp))
@@ -232,7 +246,7 @@ private fun Step(n: String, title: String, detail: String) {
 @Composable
 private fun Attempts(list: List<InsightAttempt>) {
     val c = HL.colors
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.wash).padding(10.dp)) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.raised).padding(10.dp)) {
         list.forEachIndexed { i, a ->
             if (i > 0) Gap(8)
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -256,7 +270,7 @@ private fun Expandable(title: String, text: String) {
             .padding(horizontal = 4.dp), contentAlignment = Alignment.CenterStart) {
             Text((if (open) "Hide: " else "") + title, style = HL.type.label, color = c.pulse)
         }
-        if (open) Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.wash).padding(10.dp).horizontalScroll(rememberScrollState())) {
+        if (open) Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.raised).padding(10.dp).horizontalScroll(rememberScrollState())) {
             SelectionContainer { Text(text, style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 15.sp, color = c.ink)) }
         }
     }

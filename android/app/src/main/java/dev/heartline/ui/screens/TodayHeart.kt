@@ -1,5 +1,7 @@
 package dev.heartline.ui.screens
 
+import dev.heartline.ui.theme.raised
+
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -52,6 +54,7 @@ import dev.heartline.ui.components.ButtonStyle
 import dev.heartline.ui.components.ConnectionChip
 import dev.heartline.ui.components.Dot
 import dev.heartline.ui.components.HrTraceChart
+import dev.heartline.ui.components.Heading
 import dev.heartline.ui.components.MutedText
 import dev.heartline.ui.components.Panel
 import dev.heartline.ui.components.PillButton
@@ -102,7 +105,7 @@ fun CheckRunScreen(controller: HeartlineController, nav: Navigator) {
     val left = if (r == null) 0 else (r.seconds - elapsed).toInt().coerceAtLeast(0)
     val progress by animateFloatAsState(if (r == null) 0f else (elapsed / r.seconds).coerceIn(0f, 1f), tween(250), label = "progress")
 
-    Column(Modifier.fillMaxSize().paper().statusBarsPadding().padding(Gutter)) {
+    Column(Modifier.fillMaxSize().paper().statusBarsPadding().verticalScroll(rememberScrollState()).padding(Gutter)) {
         Text("Heart check", style = HL.type.title, color = c.ink)
         Gap(6)
         MutedText(if (r?.analysing == true) "Finding every beat…" else "Rest your arm, breathe normally and keep still.")
@@ -117,11 +120,30 @@ fun CheckRunScreen(controller: HeartlineController, nav: Navigator) {
         Panel(padding = androidx.compose.foundation.layout.PaddingValues(10.dp)) {
             Text("Your pulse, live", style = HL.type.label, color = c.inkSoft)
             val sig = remember(sensors.ppg) { detrendPulse(sensors.ppg).let { it.copyOfRange(maxOf(0, it.size - 200), it.size) } }
-            SignalCanvas(listOf(sig), listOf(c.ink), Modifier.fillMaxWidth().height(170.dp))
+            Box(Modifier.fillMaxWidth().height(150.dp), contentAlignment = Alignment.Center) {
+                if (sig.size < 25) MutedText("Waiting for the watch's pulse signal…")
+                else SignalCanvas(listOf(sig), listOf(c.ink), Modifier.fillMaxWidth().height(150.dp))
+            }
+            MutedText("The last few seconds of light reflected from your wrist. Each wave is one heartbeat; smooth, even waves mean a clean reading.")
         }
         r?.error?.let { Gap(12); Text(it, style = HL.type.body, color = c.pulse) }
-        Spacer(Modifier.weight(1f))
+        Gap(14)
         PillButton("Cancel", { controller.cancelCheck(); nav.pop() }, Modifier.fillMaxWidth(), style = ButtonStyle.QUIET)
+        Gap(22)
+        Text("What's happening", style = HL.type.bodyStrong, color = c.ink)
+        Gap(4)
+        MutedText("The watch's green LED shines into your wrist and measures how much light comes back. Blood absorbs green light, so each heartbeat " +
+            "shows as a dip. Heartline records this raw signal plus the accelerometer, then finds every beat and times the gaps between them to the millisecond.")
+        Gap(10)
+        Text("For the best reading", style = HL.type.bodyStrong, color = c.ink)
+        Gap(4)
+        MutedText("Sit with your forearm resting on a table, palm down, hand relaxed. Strap a notch tighter than usual, about a finger above the wrist bone. " +
+            "Breathe normally rather than slowly, don't talk, and keep the same routine each day: soon after waking is best for comparing days.")
+        Gap(10)
+        Text("Afterwards you'll see", style = HL.type.bodyStrong, color = c.ink)
+        Gap(4)
+        MutedText("Heart rate, HRV (RMSSD, SDNN, pNN50), stress index, breathing rate, rhythm regularity and extra beats, each explained with your own range and what is worth a look.")
+        Gap(24)
     }
 }
 
@@ -131,9 +153,18 @@ fun CheckResultScreen(controller: HeartlineController, id: String, nav: Navigato
     val session by produceState<SessionUi?>(null, id) {
         value = controller.checkRun.value?.result?.takeIf { it.id == id } ?: controller.checkDetail(id)
     }
+    // Earlier checks for "your range": the last 15 besides this one.
+    val checks by controller.checks.collectAsStateWithLifecycle()
+    val history by produceState(emptyList<SessionUi>(), id, checks.size) {
+        value = checks.filter { it.id != id && it.rhythm != RhythmStatus.INSUFFICIENT }.sortedByDescending { it.start }.take(15).mapNotNull { controller.checkDetail(it.id) }
+    }
+    val todayUi by controller.today.collectAsStateWithLifecycle()
+    val trendsUi by controller.trends.collectAsStateWithLifecycle()
+    val prefs by controller.prefs.collectAsStateWithLifecycle()
+    val resting = todayUi?.restingHr?.toDouble() ?: trendsUi?.series?.firstOrNull { it.key == "rhr" }?.let { s -> s.baseline ?: s.points.lastOrNull { it.value != null }?.value }
     Screen("Heart check", onBack = { nav.pop() }, subtitle = session?.let { "${dateTimeOf(it.start)}, ${it.durationS.toInt()} s" }) {
         val s = session ?: run { MutedText("Loading…"); return@Screen }
-        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.wash)) {
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.raised)) {
             Column(Modifier.padding(16.dp)) {
                 dev.heartline.ui.components.AreaLabel("Rhythm", rhythmColor(s.rhythm))
                 Text(rhythmText(s.rhythm), style = HL.type.section.copy(fontSize = 28.sp), color = if (s.rhythm == RhythmStatus.POSSIBLE_AF) c.pulse else c.ink)
@@ -141,7 +172,8 @@ fun CheckResultScreen(controller: HeartlineController, id: String, nav: Navigato
                 MutedText((s.notes.filterNot { it.contains("diagnosis") } + DISCLAIMER).joinToString(" "))
             }
         }
-        Gap(20)
+        CheckGlance(s, history, resting)
+        Heading("The numbers")
         val grid = listOf(
             Triple("Heart rate", fmtInt(s.hr?.roundToInt()), "bpm"), Triple("HRV (RMSSD)", fmtInt(s.rmssd?.roundToInt()), "ms"),
             Triple("SDNN", fmtInt(s.sdnn?.roundToInt()), "ms"), Triple("pNN50", fmtInt(s.pnn50?.let { (if (it <= 1) it * 100 else it).roundToInt() }), "%"),
@@ -157,6 +189,8 @@ fun CheckResultScreen(controller: HeartlineController, id: String, nav: Navigato
             Text("Beat-to-beat intervals", style = HL.type.label, color = c.inkSoft)
             Gap(6)
             Tachogram(s.rr)
+            Gap(6)
+            MutedText("Each dot is the gap before one beat. The gaps lengthen as you breathe out and shorten as you breathe in; that gentle wave is healthy. Sudden single spikes are extra beats or movement.")
         }
         Gap(14)
         Panel {
@@ -171,9 +205,10 @@ fun CheckResultScreen(controller: HeartlineController, id: String, nav: Navigato
             Text("Detected beats", style = HL.type.label, color = c.inkSoft)
             Gap(6)
             BeatsPlot(s.ppgPreview, s.previewFs, s.beatTimes)
+            Gap(6)
+            MutedText("The raw light signal from the watch's green LED, filtered. Each dot is a beat Heartline found; smooth, even waves mean a good fit and a still arm.")
         }
-        Gap(14)
-        MutedText("Typical for a short resting reading: RMSSD 19 to 75 ms and SDNN 32 to 93 ms (Nunan et al. 2010). Your own baseline matters more than these ranges.")
+        CheckExplained(s, history, resting, prefs.profile.age, nav)
     }
 }
 

@@ -1,6 +1,7 @@
 package dev.heartline.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -79,7 +80,8 @@ fun stepGoal(controller: HeartlineController): Int {
 fun TrendsUi?.latestOf(key: String): Pair<Double, LocalDate>? = this?.series?.firstOrNull { it.key == key }?.points?.latest()?.let { p -> p.value!! to p.date }
 fun TrendsUi?.seriesOf(key: String) = this?.series?.firstOrNull { it.key == key }
 
-fun readinessWord(r: Int): String = when { r >= 80 -> "Primed"; r >= 65 -> "Good to go"; r >= 45 -> "Steady"; else -> "Go easy" }
+// Same bands as the advice in DailyLoad.recommendation, so the word and the sentence under it agree.
+fun readinessWord(r: Int): String = when { r >= 80 -> "Primed"; r >= 65 -> "Good to go"; r >= 50 -> "Steady"; else -> "Go easy" }
 
 /**
  * Today: readiness up top with its three drivers, the AI's headline, a tile for each part of health (each opens its
@@ -114,12 +116,13 @@ fun OverviewScreen(controller: HeartlineController, nav: Navigator, onTab: (Tab)
             Text(date.format(DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.ENGLISH)), style = HL.type.label, color = c.inkSoft)
             val ready = t?.readiness
             val readyColor = when { ready == null -> c.inkSoft; ready >= 70 -> c.ok; ready < 45 -> c.pulse; else -> c.ink }
-            Row(Modifier.semantics(mergeDescendants = true) { contentDescription = if (ready == null) "Readiness not yet available" else "${t.readinessLabel} $ready out of 100, ${readinessWord(ready)}" },
+            Row(Modifier.clip(RoundedCornerShape(16.dp)).clickable(onClickLabel = "How readiness is worked out", role = androidx.compose.ui.semantics.Role.Button) { nav.push(Route.Readiness()) }
+                .semantics(mergeDescendants = true) { contentDescription = if (ready == null) "Readiness not yet available" else "${t.readinessLabel} $ready out of 100, ${readinessWord(ready)}" },
                 verticalAlignment = Alignment.Bottom) {
                 Text(ready?.toString() ?: "–", style = HL.type.hero, color = readyColor)
                 Column(Modifier.padding(start = 12.dp, bottom = 14.dp)) {
                     Text(if (ready == null) "Readiness" else readinessWord(ready), style = HL.type.section, color = c.ink)
-                    Text((t?.readinessLabel ?: "Readiness") + " · of 100", style = HL.type.small, color = c.inkSoft)
+                    Text((t?.readinessLabel ?: "Readiness") + " · of 100 ›", style = HL.type.small, color = c.inkSoft)
                 }
             }
             Text(t?.recommendation ?: "Wear the watch tonight and take a heart check in the morning; readiness learns your baseline from both.",
@@ -131,9 +134,9 @@ fun OverviewScreen(controller: HeartlineController, nav: Navigator, onTab: (Tab)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 // A night that may still be going on shows straight away, marked "so far" until it is settled.
                 val sleepSoFar = t?.lastNight?.ongoing == true && sleepScore?.second == date
-                Driver("Sleep", sleepScore?.first?.roundToInt()?.toString() ?: "–", "/100", (sleepScore?.first ?: 0.0) / 100, c.hue(Area.SLEEP), sleepScore?.second?.takeIf { it != date }, Modifier.weight(1f), if (sleepSoFar) "so far" else null)
-                Driver("Strain", strain?.first?.let { "%.1f".format(it) } ?: "–", "/21", (strain?.first ?: 0.0) / 21, c.pulse, strain?.second?.takeIf { it != date }, Modifier.weight(1f))
-                Driver("Battery", t?.bodyBattery?.toString() ?: "–", "/100", (t?.bodyBattery ?: 0) / 100.0, c.ok, null, Modifier.weight(1f), if (t?.bodyBattery == null) "after a night's sleep" else null)
+                Driver("Sleep", sleepScore?.first?.roundToInt()?.toString() ?: "–", "/100", (sleepScore?.first ?: 0.0) / 100, c.hue(Area.SLEEP), sleepScore?.second?.takeIf { it != date }, Modifier.weight(1f), if (sleepSoFar) "so far" else null) { nav.push(Route.Readiness("sleep_score")) }
+                Driver("Strain", strain?.first?.let { "%.1f".format(it) } ?: "–", "/21", (strain?.first ?: 0.0) / 21, c.pulse, strain?.second?.takeIf { it != date }, Modifier.weight(1f)) { nav.push(Route.Readiness("strain")) }
+                Driver("Battery", t?.bodyBattery?.toString() ?: "–", "/100", (t?.bodyBattery ?: 0) / 100.0, c.ok, null, Modifier.weight(1f), if (t?.bodyBattery == null) "after a night's sleep" else null) { nav.push(Route.Readiness("battery")) }
             }
         }
 
@@ -241,11 +244,13 @@ fun OverviewScreen(controller: HeartlineController, nav: Navigator, onTab: (Tab)
 
             // ---- What shaped readiness ----
             if (t != null && t.factors.isNotEmpty()) {
-                Heading("What shaped today")
-                Card(padding = 14.dp) {
+                Heading("What shaped today", action = "How it works", onAction = { nav.push(Route.Readiness()) })
+                Card(padding = 6.dp) {
                     t.factors.forEachIndexed { i, f ->
-                        if (i > 0) Gap(10)
-                        Row(Modifier.semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.Top) {
+                        if (i > 0) androidx.compose.material3.HorizontalDivider(color = c.line, modifier = Modifier.padding(horizontal = 8.dp))
+                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                            .clickable(onClickLabel = "Explain ${f.name}", role = androidx.compose.ui.semantics.Role.Button) { nav.push(Route.Readiness(f.name)) }
+                            .padding(horizontal = 8.dp, vertical = 10.dp).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.Top) {
                             val (mark, color) = when (f.impact) { Impact.POSITIVE -> "+" to c.ok; Impact.NEGATIVE -> "–" to c.pulse; Impact.NEUTRAL -> "·" to c.inkSoft }
                             Box(Modifier.size(24.dp).clip(RoundedCornerShape(50)).background(color.copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
                                 Text(mark, style = HL.type.bodyStrong, color = color)
@@ -254,6 +259,10 @@ fun OverviewScreen(controller: HeartlineController, nav: Navigator, onTab: (Tab)
                             Column(Modifier.weight(1f)) {
                                 Text(f.name, style = HL.type.bodyStrong, color = c.ink)
                                 Text(f.detail, style = HL.type.small, color = c.inkSoft)
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text((if (f.points >= 0) "+" else "−") + "%.1f".format(kotlin.math.abs(f.points)), style = HL.type.bodyStrong, color = color)
+                                Text("points ›", style = HL.type.small.copy(fontSize = 11.sp), color = c.inkSoft)
                             }
                         }
                     }
@@ -295,9 +304,10 @@ fun stressWord(v: Double): String = when { v < 40 -> "Relaxed"; v < 60 -> "Norma
 
 /** One of readiness' three drivers: value, a meter, and the date when it isn't today's. */
 @Composable
-private fun Driver(label: String, value: String, unit: String, fraction: Double, color: Color, from: LocalDate?, modifier: Modifier, note: String? = null) {
+private fun Driver(label: String, value: String, unit: String, fraction: Double, color: Color, from: LocalDate?, modifier: Modifier, note: String? = null, onClick: () -> Unit) {
     val c = HL.colors
-    Column(modifier.semantics(mergeDescendants = true) {}) {
+    Column(modifier.clip(RoundedCornerShape(10.dp)).clickable(onClickLabel = "How $label is worked out", role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
+        .semantics(mergeDescendants = true) {}) {
         Text(label, style = HL.type.label, color = c.inkSoft)
         BigValue(value, unit, size = 26)
         Gap(6)
