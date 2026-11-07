@@ -119,8 +119,9 @@ private fun trendAbout(key: String): About? = when (key) {
         "Under 8 is a light day, 14+ a hard one. Above 14 lowers the next day's readiness.", "strain")
     "steps" -> About("Steps counted by the watch each day.", "The watch's own step counter, synced minute by minute.",
         "7,000–10,000 a day is a common healthy target; benefits rise steeply from 2,000 to about 8,000.")
-    "active" -> About("Minutes each day of at least moderate activity.",
-        "A minute counts when you walk at 100 or more steps a minute (the pace that marks moderate intensity), or, awake, when your heart rate is at 64% or more of your max, which catches cycling and gym work. The watch's own \"active\" label isn't used: it stays on through most of the day.",
+    "active" -> About("Minutes each day you were moving with purpose or working hard.",
+        "A minute counts, awake, when you walk (40 or more steps, or 20 next to such a minute, so a quick walk across the office counts), when your heart rate is at 40% or more of your heart rate reserve (moderate effort), " +
+            "or during a recorded workout while your heart rate stays at 30% or more of reserve, as it does between sets. Sitting with a workout running, before or after, doesn't count. The watch's own \"active\" label isn't used: it stays on most of the day.",
         "The WHO suggests 150–300 minutes of moderate activity a week.")
     "spo2" -> About("Blood oxygen saturation: how much of your blood's haemoglobin is carrying oxygen.",
         "The watch's red and infrared light readings, including the overnight ones when sleep breathing quality is on.",
@@ -129,7 +130,7 @@ private fun trendAbout(key: String): About? = when (key) {
         "Under 40 relaxed, 40–59 normal, 60–79 medium, 80+ high.")
     "pai" -> About("Personal Activity Intelligence: a weekly score of heart-rate-raising activity.", "The watch's own PAI, summed over the last 7 days.",
         "Keeping 100 or more over a week is linked with lower heart disease risk in the HUNT study.")
-    "temp" -> About("Skin temperature at the wrist.", "The watch's skin sensor, averaged over the day.",
+    "temp" -> About("Skin temperature at the wrist.", "The watch's skin sensor, averaged over the day's on-wrist readings only (off-wrist, settling and spike readings are left out).",
         "Wrist skin runs a few degrees below core temperature and moves with the room. A night well above your usual can come with illness.")
     else -> null
 }

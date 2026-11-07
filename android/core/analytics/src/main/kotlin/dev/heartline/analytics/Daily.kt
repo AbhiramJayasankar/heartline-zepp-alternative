@@ -38,6 +38,8 @@ fun computeDaily(
     profile: Profile, days: Int, now: ZonedDateTime,
     /** Python's daily.night_for left out a night that may still be going on; Heartline shows it, flagged [DayResult.sleepOngoing]. */
     holdOngoingNights: Boolean = false,
+    /** Recorded workouts as (start, end) seconds; their minutes count as active while heart rate or steps show work. */
+    workouts: List<Pair<Long, Long>> = emptyList(),
 ): DailyResult {
     require(days > 0)
     val today = now.toLocalDate()
@@ -64,7 +66,7 @@ fun computeDaily(
             lightMin = main?.light, remMin = main?.rem, awakeMin = main?.awake,
             sleepScore = main?.let { sleepScore(it.asleep, eff ?: 0.0, it.deep, it.rem) },
             steps = ms.takeIf { it.isNotEmpty() }?.sumOf { it.steps },
-            activeMinutes = ms.takeIf { it.isNotEmpty() }?.count { activeMinute(it, hrMax) },
+            activeMinutes = null, // set below, once resting heart rate is known
             wornMinutes = ms.takeIf { it.isNotEmpty() }?.count { it.state !in noDataStates },
             strain = null, trimp = null, hrZones = hrMax?.takeIf { it != 0 && awakeHr.isNotEmpty() }?.let { zoneMinutes(awakeHr, it) },
             spo2Avg = ownHealth["spo2"]?.get(d), stressAvg = ownHealth["stress"]?.get(d),
@@ -75,6 +77,9 @@ fun computeDaily(
     val restingValues = rows.values.mapNotNull { it.row.restingHr?.takeIf { v -> v != 0.0 } }
     val hrRest = profile.restingHr?.takeIf { it != 0 }?.toDouble()
         ?: restingValues.takeIf { it.isNotEmpty() }?.let { median(it.toDoubleArray()) }
+    for ((d, work) in rows) byDay[d]?.takeIf { it.isNotEmpty() }?.let { ms ->
+        work.row = work.row.copy(activeMinutes = activeMinutesOf(ms, hrMax, hrRest, workouts))
+    }
     for (work in rows.values) if (hrMax != null && hrMax != 0 && nonzero(hrRest) && work.awakeHr.isNotEmpty()) {
         val trimp = banisterTrimp(work.awakeHr, hrRest!!, hrMax, profile.sex)
         work.row = work.row.copy(trimp = rounded(trimp, 1), strain = rounded(21 * (1 - exp(-trimp / 120)), 1),

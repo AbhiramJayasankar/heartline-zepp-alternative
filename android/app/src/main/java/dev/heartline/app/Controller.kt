@@ -195,6 +195,8 @@ data class HealthDayUi(
     val minutes: List<MinuteUi>, val sleep: SleepNightUi?, val workouts: List<WorkoutUi>,
     /** Lowest 10-minute median while awake and still ([restingHr] is the sleeping value). */
     val awakeRestingHr: Int? = null,
+    /** Temperature readings left out of skin temperature: off the wrist, settling after putting it on, or a one-off spike. */
+    val temperatureSetAside: List<SeriesPoint> = emptyList(),
 )
 data class LapUi(val index: Int, val durationS: Int, val distanceM: Int?, val avgHr: Int?, val paceSPerKm: Double?)
 /** Everything decoded beyond the basic summary. Any decoded field without a dedicated slot goes in [extras] as label to value. */
@@ -339,6 +341,9 @@ data class TrendsUi(
     val series: List<TrendSeries>,
     /** One per day: when the night ending that morning started and ended (null when no sleep was recorded). */
     val nights: List<NightSpan> = emptyList(),
+    /** VO2max detail: from workouts or the heart-rate stand-in, the stand-in's value, the workouts used and how many were left out. */
+    val vo2FromWorkouts: Boolean = false, val vo2StandIn: Double? = null,
+    val vo2Used: List<dev.heartline.analytics.WorkoutVo2> = emptyList(), val vo2Skipped: List<String> = emptyList(),
 )
 data class NightSpan(val date: java.time.LocalDate, val start: Long?, val end: Long?, val asleepMin: Int?, val ongoing: Boolean = false)
 

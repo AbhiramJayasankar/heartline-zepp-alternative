@@ -121,10 +121,29 @@ class RealController(
         combine(db.activity.observeRange(from, Double.MAX_VALUE), db.health.observeByType(from), db.insights.observeAll(), settings.profile, tick) { rows, health, insights, p, now ->
             val previousKind = db.activity.prevKind(from)
             withContext(Dispatchers.Default) {
-                val values = health.values.flatten().mapNotNull { it.value?.let { value -> HealthValue(it.type, it.ts, value) } }
+                val minutes = analyticsMinutes(rows, previousKind)
+                // Skin temperature only: readings off the wrist, settling or spiking are left out of the daily values.
+                val hrMinutes = minutes.filter { it.hr != null && it.hr in 30..220 }.map { it.ts / 60 }.toHashSet()
+                val skin = skinTemperatures(health["temperature"].orEmpty().mapNotNull { h -> h.value?.let { TempReading(h.ts.toLong(), it, sensor2(h.extra)) } }, hrMinutes)
+                val values = health.filterKeys { it != "temperature" }.values.flatten().mapNotNull { it.value?.let { value -> HealthValue(it.type, it.ts, value) } } +
+                    skin.map { HealthValue("temperature", it.ts, it.value) }
                 val summaries = insights.mapNotNull { i -> i.start?.let { CheckSummary(it, i.rmssd, i.hr, i.quality ?: 0.0, i.usableS ?: 0.0, i.rhythm) } }
-                val result = computeDaily(analyticsMinutes(rows, previousKind), values, summaries, Profile(p.age, p.sex?.name?.lowercase(), p.weightKg, p.heightCm, p.maxHr, p.restingHr), 28, now)
-                result.todayUi(now.toLocalDate()) to result.trendsUi(healthByDay(values, zone = zone))
+                val profile = Profile(p.age, p.sex?.name?.lowercase(), p.weightKg, p.heightCm, p.maxHr, p.restingHr)
+                val efforts = db.health.workouts(from).mapNotNull { w -> runCatching { org.json.JSONObject(w.data) }.getOrNull()?.let { j ->
+                    WorkoutEffort(j.optLong("start", w.start), j.optString("type"), j.optInt("active_s", j.optInt("duration_s")),
+                        j.optInt("distance_m").takeIf { it > 0 }, j.optInt("avg_hr").takeIf { it > 0 }) to (j.optLong("start", w.start) to j.optLong("end", w.start))
+                } }
+                val result = computeDaily(minutes, values, summaries, profile, 28, now, workouts = efforts.map { it.second })
+                // VO2max: outdoor runs and walks when there are any, else the heart-rate estimate from awake resting heart rate.
+                val awakeRest = result.days.takeLast(7).mapNotNull { it.awakeRestingHr }.takeIf { it.isNotEmpty() }?.average()
+                val vo2 = vo2max(efforts.map { it.first }, now.toEpochSecond(), awakeRest, maxHeartRate(profile), profile.sex)
+                result.todayUi(now.toLocalDate()) to result.trendsUi(healthByDay(values, zone = zone)).copy(vo2max = vo2.value, fitnessAge = vo2.fitnessAge,
+                    vo2FromWorkouts = vo2.fromWorkouts, vo2StandIn = vo2.fromHeartRates, vo2Used = vo2.used,
+                    // Runs, walks and treadmill sessions that didn't qualify say why; other workouts (gym and so on) are just counted.
+                    vo2Skipped = vo2.skipped.filter { it.first.type in setOf("Outdoor running", "Walking", "Hiking", "Treadmill") }.map { (w, why) ->
+                        "${w.type.lowercase()} on ${java.time.Instant.ofEpochSecond(w.start).atZone(zone).toLocalDate().format(java.time.format.DateTimeFormatter.ofPattern("d MMM"))}: $why" } +
+                        vo2.skipped.count { it.first.type !in setOf("Outdoor running", "Walking", "Hiking", "Treadmill") }.takeIf { it > 0 }
+                            ?.let { listOf("$it gym and other workouts, which have no pace to measure") }.orEmpty())
             }
         }.collect { (t, tr) -> today.value = t; trends.value = tr }
     }
@@ -157,7 +176,9 @@ class RealController(
             val sleepFrom = from - 86400
             val allRows = db.activity.range(sleepFrom, to)
             val daily = withContext(Dispatchers.Default) { computeDaily(analyticsMinutes(allRows), emptyList(), emptyList(), Profile(), 2, date.atTime(23, 59).atZone(zone)) }
-            ActivityDayUi(date, minutes, minutes.sumOf { it.steps }, minutes.count { it.steps > 0 || it.state == MinuteState.ACTIVE },
+            val active = trends.value?.series?.firstOrNull { it.key == "active" }?.points?.firstOrNull { it.date == date }?.value?.toInt()
+                ?: daily.days.lastOrNull { it.date == date.toString() }?.activeMinutes ?: 0
+            ActivityDayUi(date, minutes, minutes.sumOf { it.steps }, active,
                 minutes.count { it.state in setOf(MinuteState.SLEEP_DEEP, MinuteState.SLEEP_LIGHT, MinuteState.SLEEP_REM) },
                 minutes.count { it.state !in setOf(MinuteState.NOT_WORN, MinuteState.CHARGING) }, hr.minOrNull(), hr.takeIf { it.isNotEmpty() }?.average()?.toInt(), hr.maxOrNull(),
                 daily.days.lastOrNull { it.date == date.toString() }?.sleepUi(), workouts.map { workout ->

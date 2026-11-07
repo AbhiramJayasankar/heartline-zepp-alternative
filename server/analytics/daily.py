@@ -192,10 +192,23 @@ def awake_resting_hr_from(rows: list[dict]) -> int | None:
     return round(best) if best is not None else None
 
 
-def active_minute(m: dict, hr_max: int | None) -> bool:
-    """100+ steps a minute (moderate cadence), or awake and worn with HR >= 64% of max (moderate by ACSM)."""
-    return m["steps"] >= 100 or bool(hr_max and m["hr"] is not None and m["state"] not in SLEEP
-                                      and m["state"] not in NO_DATA and m["hr"] >= 0.64 * hr_max)
+def active_minutes_of(ms: list[dict], hr_max: int | None, hr_rest: float | None, workouts=()) -> int:
+    """Walking (>= 40 steps, or >= 20 next to such a minute), HR >= 40% of reserve, or inside a workout with
+    HR >= 30% of reserve or >= 20 steps; awake and worn only."""
+    reserve = hr_max - hr_rest if hr_max and hr_rest and hr_rest > 0 and hr_max > hr_rest else None
+    walking = lambda i: ms[i]["steps"] >= 40
+    n = 0
+    for i, m in enumerate(ms):
+        if m["state"] in SLEEP or m["state"] in NO_DATA:
+            continue
+        near = (i > 0 and m["ts"] - ms[i - 1]["ts"] <= 90 and walking(i - 1)) or                (i < len(ms) - 1 and ms[i + 1]["ts"] - m["ts"] <= 90 and walking(i + 1))
+        walk = walking(i) or (m["steps"] >= 20 and near)
+        hr = m["hr"] if m["hr"] is not None and 30 <= m["hr"] <= 220 else None
+        effort = reserve is not None and hr is not None and hr >= hr_rest + 0.4 * reserve
+        in_workout = any(s <= m["ts"] < e for s, e in workouts)
+        working = in_workout and (m["steps"] >= 20 or (reserve is not None and hr is not None and hr >= hr_rest + 0.3 * reserve))
+        n += bool(walk or effort or working)
+    return n
 
 
 def vo2max_uth(hr_max: int | None, rhr: float | None, sex: str | None) -> float | None:
@@ -225,7 +238,8 @@ def _z(value, base: list[float], floor: float) -> float | None:
 
 
 def compute(minutes: list[dict], profile: dict, days: int, today: date | None = None,
-            hrv_by_day: dict | None = None, health: dict | None = None, rhythm_latest: dict | None = None) -> dict:
+            hrv_by_day: dict | None = None, health: dict | None = None, rhythm_latest: dict | None = None,
+            workouts: list | None = None) -> dict:
     today = today or date.today()
     hrv_by_day = hrv_by_day or {}
     health = health or {}
@@ -268,7 +282,7 @@ def compute(minutes: list[dict], profile: dict, days: int, today: date | None = 
             "sleep_minutes": None, "sleep_efficiency": None, "deep_min": None, "light_min": None,
             "rem_min": None, "awake_min": None, "sleep_score": None,
             "steps": sum(m["steps"] for m in ms) if ms else None,
-            "active_minutes": sum(1 for m in ms if active_minute(m, hr_max)) if ms else None,
+            "active_minutes": None,  # set below, once resting HR is known
             "worn_minutes": worn if ms else None,
             "strain": None, "trimp": None, "hr_zones": None,
             "spo2_avg": health.get("spo2", {}).get(d), "stress_avg": health.get("stress", {}).get(d),
@@ -283,6 +297,9 @@ def compute(minutes: list[dict], profile: dict, days: int, today: date | None = 
     # Baselines for HRrest: profile, else the median of measured resting HR.
     rhr_values = [r["resting_hr"] for r, _ in rows.values() if r["resting_hr"]]
     hr_rest = profile.get("resting_hr") or (median(rhr_values) if rhr_values else None)
+    for d, (row, _) in rows.items():
+        if by_day.get(d):
+            row["active_minutes"] = active_minutes_of(by_day[d], hr_max, hr_rest, workouts or ())
     for d, (row, awake_hr) in rows.items():
         if hr_max and hr_rest and awake_hr:
             t = banister_trimp(awake_hr, hr_rest, hr_max, sex)

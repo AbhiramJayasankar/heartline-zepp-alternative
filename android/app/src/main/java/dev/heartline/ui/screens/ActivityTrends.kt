@@ -65,15 +65,21 @@ fun TrendsScreen(controller: HeartlineController, nav: Navigator, onBack: (() ->
         if (t == null) { MutedText("Trends appear after the first sync."); return@Screen }
         dev.heartline.ui.components.Card(padding = 14.dp) {
             dev.heartline.ui.components.FactGrid(listOf(
-                dev.heartline.ui.components.FactItem("VO2max", fmtOne(t.vo2max), note = "ml/kg/min"),
+                dev.heartline.ui.components.FactItem("VO2max", fmtOne(t.vo2max), note = if (t.vo2FromWorkouts) "from ${t.vo2Used.size} run${if (t.vo2Used.size > 1) "s" else ""}/walks" else "estimate"),
                 dev.heartline.ui.components.FactItem("Fitness age", fmtInt(t.fitnessAge), note = "from VO2max"),
                 dev.heartline.ui.components.FactItem("Sleep regularity", fmtInt(t.sleepRegularity), "/100"),
                 dev.heartline.ui.components.FactItem("Load, 7 days", fmtInt(t.load7d?.roundToInt())),
                 dev.heartline.ui.components.FactItem("Acute : chronic", t.acwr?.let { "%.2f".format(it) } ?: "–", note = t.acwr?.let { when { it > 1.5 -> "ramping fast"; it < 0.8 -> "easing off"; else -> "steady" } }),
             ))
             Gap(8)
-            MutedText("VO2max is estimated from heart rates alone, not measured: 15.3 × your max heart rate (your profile's, or 208 − 0.7 × age) ÷ your 7-day awake resting heart rate (Uth, 2004). " +
-                "Treat it as ±15%. Fitness age is the age whose average VO2max matches it, from the Norwegian HUNT study.")
+            MutedText(if (t.vo2FromWorkouts) "VO2max (ml/kg/min) comes from your outdoor runs and walks: the oxygen cost of your pace (ACSM equations) divided by how hard your heart was working " +
+                "(share of heart rate reserve), the median of the newest ${t.vo2Used.size}. ${t.vo2Used.joinToString("; ") { "${it.type} at ${it.speedKmh} km/h, ${it.avgHr} bpm (${it.reservePct}%): ${it.vo2max}" }}. " +
+                "From heart rates alone it would be ${fmtOne(t.vo2StandIn)}."
+            else "VO2max (ml/kg/min) here is a stand-in from heart rates alone: 15.3 × your max heart rate (your profile's, or 208 − 0.7 × age) ÷ your 7-day awake resting heart rate (Uth, 2004); treat it as ±15%. " +
+                "An outdoor run or walk of 10+ minutes with GPS, brisk enough to reach 40% of your heart rate reserve, replaces it with a measured estimate: pace against heart rate." +
+                (if (t.vo2Skipped.isNotEmpty()) " Not used: ${t.vo2Skipped.take(4).joinToString("; ")}${if (t.vo2Skipped.size > 4) "; and ${t.vo2Skipped.size - 4} more" else ""}." else ""))
+            Gap(4)
+            MutedText("Fitness age is the age whose average VO2max matches yours, from the Norwegian HUNT study, whose averages run high.")
         }
         Gap(14)
         // Every trend, grouped by the page it lives on. A card opens that page scrolled to its section.

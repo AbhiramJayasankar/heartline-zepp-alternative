@@ -43,11 +43,14 @@ internal fun buildHealthDay(
     val stress = stressRows.map { SeriesPoint(it.ts.toDouble(), it.value) }
     val spo2Rows = (series("spo2_sleep") + series("spo2")).filter { it.value in 70.0..100.0 }.sortedBy { it.ts }
     val spo2 = spo2Rows.map { SeriesPoint(it.ts.toDouble(), it.value) }
-    val worn = day.minutes.filter { it.state != MinuteState.NOT_WORN && it.state != MinuteState.CHARGING }.map { it.ts / 60 }.toHashSet()
     val tempRows = series("temperature").filter { it.value in 15.0..45.0 }
-    val temperature = tempRows.map { SeriesPoint(it.ts.toDouble(), it.value) }
+    val skin = skinTemperatures(tempRows.map { TempReading(it.ts, it.value, sensor2(it.extra)) },
+        day.minutes.filter { it.hr != null && it.hr in 30..220 }.map { it.ts / 60 }.toHashSet())
+    val skinTs = skin.map { it.ts }.toHashSet()
+    val temperature = skin.map { SeriesPoint(it.ts.toDouble(), it.value) }
+    val setAside = tempRows.filter { it.ts !in skinTs }.map { SeriesPoint(it.ts.toDouble(), it.value) }
     val temperature2 = tempRows.mapNotNull { r -> sensor2(r.extra)?.takeIf { it in 5.0..45.0 }?.let { SeriesPoint(r.ts.toDouble(), it) } }
-    val tempWorn = tempRows.filter { worn.isEmpty() || it.ts / 60 in worn }.map { it.value }
+    val tempWorn = skin.map { it.value }
     val steps = day.minutes.filter { it.steps > 0 }.map { SeriesPoint(it.ts.toDouble(), it.steps.toDouble()) }
     val pai = series("pai").lastOrNull()
 
@@ -63,6 +66,7 @@ internal fun buildHealthDay(
         day.activeMinutes, day.wornMinutes,
         pai?.value, pai?.extra?.let { extraNumber(it, "total") },
         day.minutes, day.sleep, day.workouts,
+        temperatureSetAside = setAside
     )
 }
 
@@ -91,5 +95,30 @@ internal fun thin(points: List<SeriesPoint>, limit: Int): List<SeriesPoint> {
     }
 }
 
-private fun sensor2(extra: String?): Double? = extra?.let { Regex("\"sensor2\"\\s*:\\s*\"?(-?[0-9.]+)").find(it)?.groupValues?.get(1)?.toDoubleOrNull() }
+internal fun sensor2(extra: String?): Double? = extra?.let { Regex("\"sensor2\"\\s*:\\s*\"?(-?[0-9.]+)").find(it)?.groupValues?.get(1)?.toDoubleOrNull() }
 private fun extraNumber(extra: String, key: String): Double? = Regex("\"$key\"\\s*:\\s*(-?[0-9.]+)").find(extra)?.groupValues?.get(1)?.toDoubleOrNull()
+
+/** One per-minute temperature record: the skin sensor and, when present, the second sensor (°C). */
+internal data class TempReading(val ts: Long, val value: Double, val sensor2: Double?)
+
+/**
+ * The readings that are skin temperature. On the wrist means a valid heart rate that minute, or the skin sensor at
+ * 30 °C or more and at least 0.75 °C above the second sensor (worn, the two sit about 1.3 °C apart; off the wrist both
+ * read the room). The first 10 minutes after the watch was off are dropped while the sensor warms, and so is any
+ * reading more than 2 °C from the median of those within 10 minutes of it (a one-off spike).
+ */
+internal fun skinTemperatures(rows: List<TempReading>, hrMinutes: Set<Long>): List<TempReading> {
+    fun onWrist(r: TempReading) = r.ts / 60 in hrMinutes || (r.sensor2 != null && r.value >= 30 && r.value - r.sensor2 >= 0.75)
+    var lastOff = Long.MIN_VALUE / 2
+    val kept = ArrayList<TempReading>()
+    for (r in rows.sortedBy { it.ts }) {
+        if (r.value !in 15.0..45.0) continue
+        if (!onWrist(r)) { lastOff = r.ts; continue }
+        if (r.ts - lastOff < 600) continue
+        kept.add(r)
+    }
+    return kept.filterIndexed { i, r ->
+        val near = kept.subList(maxOf(0, i - 10), minOf(kept.size, i + 11)).filter { kotlin.math.abs(it.ts - r.ts) <= 600 }.map { it.value }.sorted()
+        near.size < 5 || kotlin.math.abs(r.value - near[near.size / 2]) <= 2.0
+    }
+}
