@@ -111,9 +111,10 @@ fun GymLogScreen(controller: HeartlineController, nav: Navigator) {
             Column(Modifier.fillMaxWidth().clickable(onClickLabel = if (open == id) "Hide sets" else "Show sets", role = Role.Button) { open = if (open == id) null else id }
                 .padding(vertical = 12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (s.date != java.time.LocalDate.MIN) { DateChip(s.date); androidx.compose.foundation.layout.Spacer(Modifier.width(14.dp)) }
                     Column(Modifier.weight(1f)) {
                         Text(s.name.replaceFirstChar { it.uppercase() }, style = HL.type.bodyStrong, color = c.ink)
-                        MutedText(listOfNotNull(s.date.format(dayFmt),
+                        MutedText(listOfNotNull(
                             s.start?.let { a -> s.end?.let { b -> "${timeOf(a)} to ${timeOf(b)}" } } ?: "no times in the log",
                             "${s.workingSets} working sets").joinToString(", "))
                     }

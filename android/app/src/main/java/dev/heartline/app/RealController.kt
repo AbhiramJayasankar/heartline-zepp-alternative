@@ -636,6 +636,7 @@ class RealController(
             p.value, num("hr"), num("resp"), j.optDouble("quality", 0.0), j.optDouble("usable_s", 0.0), j.optString("reason").takeIf { it.isNotEmpty() && it != "null" },
             j.optInt("attempt", 0), j.optInt("length_s", 0))
     }
+    override val hrvCheck: StateFlow<HrvCheckUi?> = dev.heartline.service.OvernightHrv.running
     override val overnight: StateFlow<OvernightUi> = combine(db.meta.observe(dev.heartline.service.OvernightHrv.KEY), dev.heartline.service.OvernightHrv.status,
         dev.heartline.service.OvernightHrv.dayStatus,
         db.health.observeSeries(dev.heartline.service.OvernightHrv.SAMPLE, System.currentTimeMillis() / 1000.0 - 40 * 86_400),

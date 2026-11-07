@@ -53,7 +53,10 @@ class WatchService : Service() {
             setSound(null, null); enableVibration(false); setShowBadge(false)
         })
         scope.launch {
-            combine(watch.connection, watch.battery) { state, battery ->
+            combine(watch.connection, watch.battery, OvernightHrv.running) { state, battery, check ->
+                // A heart check in progress leads, so it is plain from the notification shade that one is running.
+                (check?.let { r -> "Taking a ${r.seconds / 60}-minute heart check until " +
+                    java.time.Instant.ofEpochSecond(r.startedAt + r.seconds).atZone(java.time.ZoneId.systemDefault()).toLocalTime().let { "%02d:%02d".format(it.hour, it.minute) } + ". " } ?: "") +
                 state.state.name.lowercase().replaceFirstChar { it.uppercase() } + (battery?.let { ", battery ${it.level}%" } ?: "")
             }.collect { manager.notify(ID, notification(it)) }
         }

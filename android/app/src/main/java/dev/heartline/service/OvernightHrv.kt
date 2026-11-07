@@ -86,6 +86,8 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         val status = MutableStateFlow("Off")
         /** What daytime sampling is doing now, for the Heart page. */
         val dayStatus = MutableStateFlow("Off")
+        /** The automatic heart check recording right now, if any, for the app-wide banner and the notification. */
+        val running = MutableStateFlow<dev.heartline.app.HrvCheckUi?>(null)
     }
 
     private val zone get() = ZoneId.systemDefault()
@@ -219,8 +221,11 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         val plan = dayPlan ?: DayHrvPlan(nextAt = app.db.health.series(DAY_SAMPLE, now - 86_400.0, now.toDouble())
             .filter { it.value != null }.maxOfOrNull { it.ts }?.let { it + every } ?: 0L).also { dayPlan = it }
         if (now < plan.nextAt) {
-            dayStatus.value = if (plan.backingOff) "You were walking during the last check; next try at ${clock(plan.nextAt)}"
-                else "Clean reading taken; next checks from ${clock(plan.nextAt)}"
+            dayStatus.value = when {
+                plan.backingOff -> "You were walking during the last check; next try at ${clock(plan.nextAt)}"
+                plan.gaveUp -> "${DayHrvPlan.STILL_TRIES} checks weren't clean; trying again from ${clock(plan.nextAt)}"
+                else -> "Clean reading taken; next checks from ${clock(plan.nextAt)}"
+            }
             return
         }
         if (watch.battery.value?.charging == true) { dayStatus.value = "Waiting: the watch is charging"; return }
@@ -235,10 +240,11 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         val end = System.currentTimeMillis() / 1000
         // Steps during the check mean you were walking: back off. Wrist movement alone just gets another try.
         val walked = lastStepChange >= now
-        val next = if (out.clean) plan.afterClean(end, every) else plan.afterFail(end, walked)
+        val next = if (out.clean) plan.afterClean(end, every) else plan.afterFail(end, walked, every)
         dayPlan = next
         dayStatus.value = when {
             out.clean -> "Clean reading at ${clock(end)}; next checks from ${clock(next.nextAt)}"
+            next.gaveUp -> "${DayHrvPlan.STILL_TRIES} checks weren't clean; trying again from ${clock(next.nextAt)}"
             next.nextAt > end -> "You walked during that check; next try at ${clock(next.nextAt)}"
             else -> "That check wasn't clean; trying again after a minute without steps"
         }
@@ -252,8 +258,9 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         var file: java.io.File? = null
         try {
             file = watch.startRaw(setOf(RawSensor.PPG, RawSensor.ACCEL))
+            running.value = dev.heartline.app.HrvCheckUi(type == SAMPLE, System.currentTimeMillis() / 1000, seconds, attempt)
             delay(seconds * 1000L)
-        } finally { withContext(NonCancellable) { runCatching { watch.stopRaw() } } }
+        } finally { running.value = null; withContext(NonCancellable) { runCatching { watch.stopRaw() } } }
         val f = file ?: return Outcome(false, 0.0)
         val result = withContext(Dispatchers.Default) { analyzeSession(readRecording(f), f.name) }
         // The share of the check the wrist was moving, by the same 0.05 g limit beat detection uses.

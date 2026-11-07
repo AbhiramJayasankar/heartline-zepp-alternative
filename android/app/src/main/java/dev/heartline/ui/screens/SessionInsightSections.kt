@@ -2,6 +2,7 @@ package dev.heartline.ui.screens
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -68,7 +69,7 @@ internal fun Findings(ins: SessionInsights) {
 
 /** Best estimated one-rep max and working volume, each against the last session with the same exercise. */
 @Composable
-internal fun ExerciseVersus(e: ExerciseInsight) {
+internal fun ExerciseVersus(e: ExerciseInsight, onOpenPrev: (() -> Unit)? = null) {
     val c = HL.colors
     val p = e.prev
     Gap(8)
@@ -104,6 +105,14 @@ internal fun ExerciseVersus(e: ExerciseInsight) {
     }
     if (p == null) MutedText("First time in your log, so nothing to compare with yet.")
     else if (!p.name.equals(e.exercise, ignoreCase = true)) MutedText("Compared with “${p.name}” on ${p.date.format(shortDay)}.")
+    if (p != null && onOpenPrev != null) {
+        // Opens the earlier session at this exercise; Back comes straight back here.
+        Row(Modifier.fillMaxWidth().clickable(onClickLabel = "Open ${p.date.format(shortDay)}", onClick = onOpenPrev).padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text("See this exercise on ${p.date.format(DateTimeFormatter.ofPattern("EEE d MMM"))}", style = HL.type.label, color = c.pulse, modifier = Modifier.weight(1f))
+            Text("›", style = HL.type.bodyStrong, color = c.pulse)
+        }
+    }
 }
 
 /** What the log says about a set beyond load and reps: rest before it, failure, reps in reserve, difficulty, notes. */

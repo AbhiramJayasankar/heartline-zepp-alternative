@@ -86,7 +86,8 @@ sealed interface Route {
     data object PhoneLink : Route
     data object HealthConnect : Route
     data object Capture : Route
-    data class CaptureResult(val id: String) : Route
+    /** A capture's analysis; [focus] is an exercise name to scroll to. */
+    data class CaptureResult(val id: String, val focus: String? = null) : Route
     /** A day detail page; [metric] is a DayMetric name. */
     data class Day(val metric: String, val epochDay: Long) : Route
     data class Trend(val key: String) : Route
@@ -173,6 +174,7 @@ fun AppRoot(controller: HeartlineController) {
             Column(Modifier.fillMaxSize()) {
             dev.heartline.ui.screens.FindPhoneBanner(controller)
             if (top != Route.Capture) dev.heartline.ui.screens.CaptureBanner(controller) { nav.push(Route.Capture) }
+            dev.heartline.ui.screens.HrvCheckBanner(controller) { night -> nav.stack.clear(); tab = if (night) Tab.SLEEP else Tab.HEART }
             AnimatedContent(targetState = top ?: tab, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "screen") { target ->
                 Column(Modifier.fillMaxSize()) {
                     val syncUi by controller.sync.collectAsStateWithLifecycle()
@@ -218,7 +220,7 @@ fun AppRoot(controller: HeartlineController) {
                         Route.PhoneLink -> dev.heartline.ui.screens.PhoneLinkScreen(controller, nav)
                         Route.HealthConnect -> dev.heartline.ui.screens.HealthConnectScreen(controller, nav)
                         Route.Capture -> dev.heartline.ui.screens.CaptureScreen(controller, nav)
-                        is Route.CaptureResult -> dev.heartline.ui.screens.CaptureResultScreen(controller, target.id, nav)
+                        is Route.CaptureResult -> dev.heartline.ui.screens.CaptureResultScreen(controller, target.id, nav, target.focus)
                         is Route.Trend -> dev.heartline.ui.screens.TrendDetailScreen(controller, target.key, nav)
                         is Route.Day -> dev.heartline.ui.screens.DayScreen(controller, dev.heartline.ui.screens.DayMetric.valueOf(target.metric), target.epochDay, nav)
                         else -> Unit

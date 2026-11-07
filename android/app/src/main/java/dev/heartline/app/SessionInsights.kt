@@ -9,7 +9,9 @@ import kotlin.math.roundToInt
 data class BestSet(val e1rmKg: Double, val loadKg: Double, val reps: Double)
 
 /** The same exercise in an earlier session, under whatever name that log used. */
-data class ExerciseHistory(val date: LocalDate, val name: String, val workingSets: Int, val volumeKg: Double, val best: BestSet?)
+data class ExerciseHistory(val date: LocalDate, val name: String, val workingSets: Int, val volumeKg: Double, val best: BestSet?,
+                           /** The session it came from, to open its recording. */
+                           val session: LoggedSession? = null)
 
 /**
  * One exercise of a logged session. [volumeKg] is load × reps over completed working sets, timed or not. [rises] are
@@ -143,7 +145,7 @@ fun sessionInsights(
     val previous = earlier.firstOrNull { p -> names.count { n -> p.sets.any { it.working() && sameExercise(it.exercise, n) } } >= need.coerceAtLeast(1) }
     fun history(name: String): ExerciseHistory? = (listOfNotNull(previous) + earlier).firstNotNullOfOrNull { p ->
         val rows = p.sets.filter { it.working() && sameExercise(it.exercise, name) }
-        rows.takeIf { it.isNotEmpty() }?.let { ExerciseHistory(p.date, it.first().exercise, it.size, volumeOf(it), bestOf(it)) }
+        rows.takeIf { it.isNotEmpty() }?.let { ExerciseHistory(p.date, it.first().exercise, it.size, volumeOf(it), bestOf(it), p) }
     }
 
     // Capture sets with their log rows, the rest before each and the lowest heart rate in that rest.

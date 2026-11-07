@@ -1,5 +1,14 @@
 package dev.heartline.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -8,6 +17,8 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -122,11 +133,12 @@ fun DayHrvCard(controller: HeartlineController, date: LocalDate) {
             Switch(o.allDay, { controller.setAllDayHrv(it) },
                 colors = SwitchDefaults.colors(checkedTrackColor = c.ok, checkedThumbColor = c.surface, uncheckedTrackColor = c.gridMajor, uncheckedThumbColor = c.surface, uncheckedBorderColor = c.gridMajor))
         }
+        if (o.allDay) RunningCheck(controller)
         if (o.allDay) Schedule(o.dayEvery, o.dayLen, OvernightSettings.DAY_EVERY, day = true) { e, l -> controller.setHrvSchedule(false, e, l) }
         if (samples.isEmpty()) {
             Gap(8)
             MutedText(if (o.allDay) "No samples this day yet. Once the watch has counted no steps for a minute, a ${o.dayLen}-minute heart check runs, and checks keep going back to back until one is clean. " +
-                "Then it waits ${o.dayEvery} minutes. A check you walk during waits 2, 4, 8, then 16 minutes before the next try." else
+                "Then it waits ${o.dayEvery} minutes, as it does after 7 checks without steps that weren't clean. A check you walk during waits 2, 4, 8, then 16 minutes before the next try." else
                 "When on, Heartline takes a short heart check whenever you've stopped walking for a minute, trying until it gets a clean one, then waits (30 minutes by default), so you can see how HRV moves through the day. " +
                     "Daytime HRV changes a lot with posture, food, caffeine and stress, so it doesn't feed readiness. It costs some battery.")
             return@Card
@@ -168,7 +180,65 @@ private fun Schedule(every: Int, length: Int, everyOptions: List<Int>, day: Bool
     Gap(4)
     Segmented(OvernightSettings.LENGTHS.map { it to "$it min" }, length, { onChange(every, it) }, Modifier.fillMaxWidth())
     Gap(4)
-    Text(if (day) "Checks of $length minutes run back to back until one is clean, then wait $every minutes. Longer checks give steadier HRV but are harder to get clean." else
+    Text(if (day) "Checks of $length minutes run back to back until one is clean (or 7 have failed while you sat still), then wait $every minutes. Longer checks give steadier HRV but are harder to get clean." else
         "Recording ${length} of every ${every} minutes (${(100.0 * length / every).roundToInt()}% of the time). Longer samples give steadier HRV; more often costs more battery.",
         style = HL.type.small.copy(fontSize = 12.sp), color = c.inkSoft)
+}
+
+/** Seconds left and the share done of a running heart check, ticking each second. */
+@Composable
+private fun checkProgress(r: dev.heartline.app.HrvCheckUi): Pair<Long, Float> {
+    var now by androidx.compose.runtime.remember(r) { androidx.compose.runtime.mutableLongStateOf(System.currentTimeMillis()) }
+    androidx.compose.runtime.LaunchedEffect(r) { while (true) { now = System.currentTimeMillis(); kotlinx.coroutines.delay(1000) } }
+    val elapsed = (now / 1000 - r.startedAt).coerceIn(0, r.seconds.toLong())
+    return (r.seconds - elapsed) to (elapsed.toFloat() / r.seconds)
+}
+
+private fun mss(s: Long) = "%d:%02d".format(s / 60, s % 60)
+
+/**
+ * Across the top of every screen while an automatic heart check records: what it is, the time left, and a reminder to
+ * keep the wrist still, with a bar that fills as it runs. Tapping it opens the page that shows the result.
+ */
+@Composable
+fun HrvCheckBanner(controller: HeartlineController, onOpen: (night: Boolean) -> Unit) {
+    val run by controller.hrvCheck.collectAsStateWithLifecycle()
+    val r = run ?: return
+    val c = HL.colors
+    val (left, done) = checkProgress(r)
+    val beat by androidx.compose.animation.core.rememberInfiniteTransition(label = "beat").animateFloat(0.3f, 1f,
+        androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(550), androidx.compose.animation.core.RepeatMode.Reverse), label = "beat")
+    Column(Modifier.fillMaxWidth().background(c.ink).clickable(onClickLabel = "Open heart checks") { onOpen(r.night) }) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = Gutter, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            dev.heartline.ui.components.Dot(c.pulse.copy(alpha = beat), 9.dp)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(if (r.night) "Overnight heart check" else "Heart check running" + if (r.attempt > 0) ", try ${r.attempt + 1}" else "",
+                    style = HL.type.bodyStrong, color = c.paper)
+                Text(if (r.night) "Recording while you sleep" else "Keep your wrist still if you can", style = HL.type.small, color = c.paper.copy(alpha = 0.75f))
+            }
+            Text("${mss(left)} left", style = HL.type.label, color = c.paper)
+        }
+        Box(Modifier.fillMaxWidth().height(3.dp).background(c.paper.copy(alpha = 0.15f))) {
+            Box(Modifier.fillMaxWidth(done).height(3.dp).background(c.pulse))
+        }
+    }
+}
+
+/** Inside the daytime HRV card while a check records: a bar filling over its length, and the seconds left. */
+@Composable
+internal fun RunningCheck(controller: HeartlineController) {
+    val run by controller.hrvCheck.collectAsStateWithLifecycle()
+    val r = run?.takeIf { !it.night } ?: return
+    val c = HL.colors
+    val (left, done) = checkProgress(r)
+    Gap(10)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Recording now" + if (r.attempt > 0) ", try ${r.attempt + 1}" else "", style = HL.type.bodyStrong, color = c.pulse, modifier = Modifier.weight(1f))
+        Text("${mss(left)} left", style = HL.type.label, color = c.ink)
+    }
+    Gap(6)
+    Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(c.gridMajor)) {
+        Box(Modifier.fillMaxWidth(done).height(6.dp).background(c.pulse))
+    }
 }

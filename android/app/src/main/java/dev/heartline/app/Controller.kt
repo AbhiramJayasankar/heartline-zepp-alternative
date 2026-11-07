@@ -28,6 +28,8 @@ interface HeartlineController {
     val prefs: StateFlow<PrefsUi>
     /** Overnight HRV: settings, what it is doing now, and recent samples. */
     val overnight: StateFlow<OvernightUi>
+    /** An automatic heart check recording right now (overnight or daytime HRV), or null. */
+    val hrvCheck: StateFlow<HrvCheckUi?>
     fun setOvernight(enabled: Boolean)
     /** One free-text note, kept on the phone (meta "notes"). */
     val notes: StateFlow<String>
@@ -429,6 +431,8 @@ val SAMPLE_APPS = listOf("" to "Heartline", "com.whatsapp" to "WhatsApp", "org.t
 /** One automatic overnight sample: RMSSD when clean, else why it was set aside. [night] is the morning it belongs to. */
 data class OvernightSampleUi(val ts: Long, val night: java.time.LocalDate?, val rmssd: Double?, val hr: Double?, val breathing: Double?, val quality: Double, val usableS: Double, val reason: String?,
     val attempt: Int = 0, val lengthS: Int = 0)
+/** An automatic heart check in progress: [night] for overnight HRV, else daytime; [attempt] counts tries since the last clean one. */
+data class HrvCheckUi(val night: Boolean, val startedAt: Long, val seconds: Int, val attempt: Int)
 data class OvernightUi(val enabled: Boolean = false, val status: String = "Off", val samples: List<OvernightSampleUi> = emptyList(),
     val allDay: Boolean = false, val dayStatus: String = "Off", val daySamples: List<OvernightSampleUi> = emptyList(),
     val nightEvery: Int = 15, val nightLen: Int = 3, val dayEvery: Int = 30, val dayLen: Int = 2)

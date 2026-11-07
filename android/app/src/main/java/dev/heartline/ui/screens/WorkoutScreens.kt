@@ -32,6 +32,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -168,6 +170,19 @@ fun CaptureBanner(controller: HeartlineController, onOpen: () -> Unit) {
     }
 }
 
+/** A session's date as a small calendar leaf: weekday, a large day of the month, and the month. */
+@Composable
+internal fun DateChip(day: LocalDate) {
+    val c = HL.colors
+    val shape = RoundedCornerShape(12.dp)
+    Column(Modifier.width(54.dp).clip(shape).background(c.surface).border(1.dp, c.line, shape).padding(vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(day.format(java.time.format.DateTimeFormatter.ofPattern("EEE")), style = HL.type.label, color = c.pulse)
+        Text("${day.dayOfMonth}", style = HL.type.stat.copy(fontSize = 24.sp, lineHeight = 26.sp), color = c.ink)
+        Text(day.format(java.time.format.DateTimeFormatter.ofPattern("MMM")), style = HL.type.label, color = c.inkSoft)
+    }
+}
+
 /** Entry point on the Activity tab: start a capture and see past sessions. */
 @Composable
 fun CapturePanel(controller: HeartlineController, nav: Navigator) {
@@ -179,13 +194,25 @@ fun CapturePanel(controller: HeartlineController, nav: Navigator) {
     MutedText("Record everything the watch can measure for a session and get sets, reps, rest and recovery afterwards.")
     Gap(10)
     PillButton(if (run != null) "Capture running, open" else "Start a capture", { nav.push(Route.Capture) }, style = if (run != null) ButtonStyle.QUIET else ButtonStyle.PULSE)
+    Gap(6)
+    var deleting by remember { mutableStateOf<dev.heartline.app.CaptureItemUi?>(null) }
+    deleting?.let { d -> DeleteCaptureDialog(d.label, d.start, onDelete = { controller.deleteCapture(d.id); deleting = null }, onDismiss = { deleting = null }) }
     list.take(5).forEach { s ->
+        // A session that runs past midnight belongs to the evening it started, as in the gym log.
+        val day = dev.heartline.app.sessionDate(s.start, java.time.ZoneId.systemDefault())
+        val ago = java.time.temporal.ChronoUnit.DAYS.between(day, dev.heartline.app.sessionDate(System.currentTimeMillis() / 1000, java.time.ZoneId.systemDefault()))
         Row(Modifier.fillMaxWidth().clickable { nav.push(Route.CaptureResult(s.id)) }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            // The date first and large: which session is which is mostly a question of when.
+            DateChip(day)
+            Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(s.label, style = HL.type.bodyStrong, color = c.ink)
-                MutedText("${dateTimeOf(s.start)}, ${s.durationS / 60} min" + (s.sets?.let { ", $it sets" } ?: ""))
+                MutedText(listOfNotNull(when (ago) { 0L -> "Today"; 1L -> "Yesterday"; in 2L..6L -> "$ago days ago"; else -> null },
+                    dev.heartline.ui.components.epochClock(s.start.toDouble()), fmtHm(s.durationS / 60), s.sets?.let { "$it sets" }).joinToString(", "))
             }
-            Column(horizontalAlignment = Alignment.End) {
+            // An accidental recording (under 2 minutes, no sets) gets its Delete right here; any other is deleted from its page.
+            if (s.durationS < 120 && (s.sets ?: 0) == 0) TextButton({ deleting = s }) { Text("Delete", style = HL.type.label, color = c.pulse) }
+            else Column(horizontalAlignment = Alignment.End) {
                 Text("${fmtInt(s.avgHr)} bpm", style = HL.type.stat.copy(fontSize = 20.sp), color = c.ink)
                 s.load?.let { MutedText("load ${it.roundToInt()}") }
             }
@@ -197,8 +224,19 @@ fun CapturePanel(controller: HeartlineController, nav: Navigator) {
 // ---- Capture analysis ----
 
 @Composable
-fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Navigator) {
+fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Navigator, focus: String? = null) {
     val c = HL.colors
+    // Scrolls to [focus] (an exercise) once its heading is laid out: opened from another session's link, or coming back.
+    val scroll = androidx.compose.foundation.rememberScrollState()
+    val tops = remember { androidx.compose.runtime.mutableStateMapOf<String, Float>() }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val anchored = focus != null && tops.containsKey(focus)
+    LaunchedEffect(focus, anchored) {
+        if (!anchored) return@LaunchedEffect
+        delay(150)
+        val y = tops[focus] ?: return@LaunchedEffect
+        scroll.animateScrollTo((scroll.value + y - with(density) { 96.dp.toPx() }).roundToInt().coerceAtLeast(0))
+    }
     val result by produceState<CaptureAnalysisUi?>(null, id) { value = controller.captureDetail(id) }
     var confirm by remember { mutableStateOf(false) }
     val a = result
@@ -218,9 +256,13 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
         value = temps.takeIf { it.size >= 5 }?.let { it.min() to it.max() }
     }
     val ins = remember(base, prev, skin) { if (base == null || a == null) null else dev.heartline.app.sessionInsights(a, log, prev?.recovery ?: emptyList(), skin) }
-    Screen(a?.label ?: "Session", onBack = { nav.pop() }, subtitle = a?.let { "${dateTimeOf(it.start)}, ${fmtHm(it.durationS / 60)}" },
+    Screen(a?.label ?: "Session", onBack = { nav.pop() }, subtitle = a?.let { "${dateTimeOf(it.start)}, ${fmtHm(it.durationS / 60)}" }, scroll = scroll,
         trailing = { TextButton({ confirm = true }) { Text("Delete", color = c.inkSoft) } }) {
-        if (a == null) { MutedText("Analysing the recording…"); return@Screen }
+        if (a == null) {
+            MutedText("Analysing the recording…")
+            Gap(24); PillButton("Delete this recording", { confirm = true }, style = ButtonStyle.QUIET)
+            return@Screen
+        }
         val restLengths = a.rests.filter { r -> r.end - r.start <= 600 && a.cardio.none { it.start < r.end && it.end > r.start } }.map { it.end - it.start }.sorted()
         val medianRest = restLengths.getOrNull(restLengths.size / 2)
         StatGrid(listOf(
@@ -261,7 +303,16 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
         BaselineNote(a)
         ins?.let { Findings(it) }
         if (a.activities.isNotEmpty()) WatchWorkouts(a)
-        if (a.sets.isNotEmpty()) Exercises(a, ins)
+        if (a.sets.isNotEmpty()) Exercises(a, ins, anchor = { key -> androidx.compose.ui.Modifier.onGloballyPositioned { tops[key] = it.positionInRoot().y } },
+            openPrev = { e ->
+                // The same exercise in the session before: open its recording there. This page is kept in the back
+                // stack focused on the exercise, so Back returns to the same spot.
+                val prevCap = e.prev?.session?.let { dev.heartline.app.captureForSession(it, captures) }?.takeIf { it.id != id }
+                prevCap?.let { pc -> {
+                    if (nav.stack.isNotEmpty()) nav.stack[nav.stack.lastIndex] = Route.CaptureResult(id, e.exercise)
+                    nav.push(Route.CaptureResult(pc.id, e.prev!!.name))
+                } }
+            })
         ins?.let { RestRepsSection(it); HeartCost(it) }
         if (a.recovery.size >= 2) Recovery(a, medianRest, prev?.recovery ?: emptyList(), ins?.previous?.date)
         ins?.let { FloorSection(a, it) }
@@ -299,13 +350,23 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
         Gap(4)
         MutedText(a.hrSource)
         a.notes.forEach { Gap(4); MutedText(it) }
+        Gap(28)
+        PillButton("Delete this recording", { confirm = true }, style = ButtonStyle.QUIET)
+        Gap(20)
     }
-    if (confirm) androidx.compose.material3.AlertDialog(
-        onDismissRequest = { confirm = false }, containerColor = c.surface,
-        title = { Text("Delete this session?", style = HL.type.section, color = c.ink) },
-        text = { MutedText("The recording and its analysis are removed from this phone.") },
-        confirmButton = { TextButton({ controller.deleteCapture(id); confirm = false; nav.pop() }) { Text("Delete", color = c.pulse) } },
-        dismissButton = { TextButton({ confirm = false }) { Text("Cancel", color = c.inkSoft) } },
+    if (confirm) DeleteCaptureDialog(a?.label ?: "this session", a?.start, onDelete = { controller.deleteCapture(id); confirm = false; nav.pop() }, onDismiss = { confirm = false })
+}
+
+/** Asks before deleting a capture, naming which one: deleting can't be undone. */
+@Composable
+internal fun DeleteCaptureDialog(label: String, start: Long?, onDelete: () -> Unit, onDismiss: () -> Unit) {
+    val c = HL.colors
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss, containerColor = c.surface,
+        title = { Text("Delete $label?", style = HL.type.section, color = c.ink) },
+        text = { MutedText((start?.let { "Recorded ${dateTimeOf(it)}. " } ?: "") + "The recording and its analysis are removed from this phone. This can't be undone; your gym log is kept.") },
+        confirmButton = { TextButton(onDelete) { Text("Delete", color = c.pulse) } },
+        dismissButton = { TextButton(onDismiss) { Text("Cancel", color = c.inkSoft) } },
     )
 }
 
@@ -371,7 +432,8 @@ private fun WatchWorkouts(a: CaptureAnalysisUi) {
 }
 
 @Composable
-private fun Exercises(a: CaptureAnalysisUi, ins: dev.heartline.app.SessionInsights?) {
+private fun Exercises(a: CaptureAnalysisUi, ins: dev.heartline.app.SessionInsights?, anchor: (String) -> Modifier = { Modifier },
+                      openPrev: (dev.heartline.app.ExerciseInsight) -> (() -> Unit)? = { null }) {
     val c = HL.colors
     val logged = a.logTotal != null
     Gap(24); SectionTitle("Exercises and sets"); Gap(4)
@@ -388,7 +450,7 @@ private fun Exercises(a: CaptureAnalysisUi, ins: dev.heartline.app.SessionInsigh
         val color = dev.heartline.ui.components.groupColor(sets.first().group, c)
         val arcMax = sets.flatMap { s -> s.repDetail.map { minOf(it.arcDeg, 160.0) } }.maxOrNull() ?: 1.0
         Gap(18)
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(sets.first().exercise?.let(anchor) ?: Modifier, verticalAlignment = Alignment.CenterVertically) {
             dev.heartline.ui.components.Dot(color, 10.dp); Spacer(Modifier.width(8.dp))
             Text(sets.first().exercise ?: "Exercise ${exerciseLetter(gi)}", style = HL.type.section.copy(fontSize = 20.sp), color = c.ink)
         }
@@ -398,7 +460,7 @@ private fun Exercises(a: CaptureAnalysisUi, ins: dev.heartline.app.SessionInsigh
             sets.mapNotNull { it.tempoS }.takeIf { it.isNotEmpty() }?.let { "about %.1f s per rep".format(it.average()) },
             sets.mapNotNull { s -> s.repDetail.map { it.arcDeg }.sorted().let { r -> r.getOrNull(r.size / 2) } }.takeIf { it.isNotEmpty() }?.let { "wrist turns about ${it.average().roundToInt()}°" },
             sets.first().activity).joinToString(", "))
-        if (info != null && shown.add(info.exercise)) ExerciseVersus(info)
+        if (info != null && shown.add(info.exercise)) ExerciseVersus(info, openPrev(info))
         sets.forEach { s ->
             setNo++
             val rest = a.rests.firstOrNull { it.start >= s.end - 1 && it.start <= s.end + 5 }
