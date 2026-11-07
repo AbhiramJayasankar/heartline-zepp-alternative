@@ -137,6 +137,9 @@ class RealController(
                         j.optInt("distance_m").takeIf { it > 0 }, j.optInt("avg_hr").takeIf { it > 0 }) to (j.optLong("start", w.start) to j.optLong("end", w.start))
                 } }
                 val result = computeDaily(minutes, values, summaries, profile, 28, now, workouts = efforts.map { it.second } + loggedSpans(log))
+                // Workout captures score their load against the same resting heart rate, so it is kept for them.
+                result.trends.hrRestUsed?.let { kotlin.math.round(it).toInt().toString() }?.takeIf { it != db.meta.get(dev.heartline.service.HR_REST_KEY) }
+                    ?.let { db.meta.set(dev.heartline.service.HR_REST_KEY, it) }
                 // VO2max: outdoor runs and walks when there are any, else the heart-rate estimate from awake resting heart rate.
                 val awakeRest = result.days.takeLast(7).mapNotNull { it.awakeRestingHr }.takeIf { it.isNotEmpty() }?.average()
                 val vo2 = vo2max(efforts.map { it.first }, now.toEpochSecond(), awakeRest, maxHeartRate(profile), profile.sex,
@@ -161,11 +164,11 @@ class RealController(
                     values.map { HealthValue(it.type, it.ts, it.value) }, emptyList(),
                     Profile(p.age, p.sex?.name?.lowercase(), p.weightKg, p.heightCm, p.maxHr, p.restingHr), 2, date.atTime(23, 59).atZone(zone))
                 val d = daily.days.lastOrNull { it.date == date.toString() }
-                val maxHr = p.maxHr?.takeIf { it in 80..240 } ?: p.age?.takeIf { it in 1..120 }?.let { 220 - it } ?: 190
+                val maxHr = profileMaxHr(p.maxHr, p.age) ?: 190
                 val stride = p.heightCm?.takeIf { it > 0 }?.let { it / 100 * 0.415 } ?: 0.72
                 buildHealthDay(date, from, day, live.map { HrPoint(it.ts.toLong(), it.bpm) }, values, maxHr,
                     (d?.restingHr ?: p.restingHr?.toDouble())?.let { kotlin.math.round(it).toInt() }, d?.caloriesActive, stride,
-                    if (date == LocalDate.now(zone)) st?.distanceM else null).copy(awakeRestingHr = d?.awakeRestingHr?.let { kotlin.math.round(it).toInt() })
+                    if (date == LocalDate.now(zone)) st?.distanceM else null).copy(awakeRestingHr = d?.awakeRestingHr?.let { kotlin.math.round(it).toInt() }, naps = day.naps)
             }
         }
     }
@@ -180,14 +183,17 @@ class RealController(
             val sleepFrom = from - 86400
             val allRows = db.activity.range(sleepFrom, to)
             val daily = withContext(Dispatchers.Default) { computeDaily(analyticsMinutes(allRows), emptyList(), emptyList(), Profile(), 2, date.atTime(23, 59).atZone(zone)) }
+            // Workout load on the daily scale wants the same resting heart rate the daily figures use.
+            val dailyRest = dev.heartline.service.captureRest(db)
             val active = trends.value?.series?.firstOrNull { it.key == "active" }?.points?.firstOrNull { it.date == date }?.value?.toInt()
                 ?: daily.days.lastOrNull { it.date == date.toString() }?.activeMinutes ?: 0
             ActivityDayUi(date, minutes, minutes.sumOf { it.steps }, active,
                 minutes.count { it.state in setOf(MinuteState.SLEEP_DEEP, MinuteState.SLEEP_LIGHT, MinuteState.SLEEP_REM) },
                 minutes.count { it.state !in setOf(MinuteState.NOT_WORN, MinuteState.CHARGING) }, hr.minOrNull(), hr.takeIf { it.isNotEmpty() }?.average()?.toInt(), hr.maxOrNull(),
                 daily.days.lastOrNull { it.date == date.toString() }?.sleepUi(), workouts.map { workout ->
-                    workout.ui().withWorkoutDetail(details[workout.start], ProfileUi(age = profile.age, maxHr = profile.maxHr))
-                })
+                    workout.ui().withWorkoutDetail(details[workout.start], ProfileUi(age = profile.age, maxHr = profile.maxHr,
+                        sex = profile.sex?.name?.lowercase(), restingHr = profile.restingHr ?: dailyRest))
+                }, naps = daily.days.lastOrNull { it.date == date.toString() }?.naps.orEmpty())
         }
     }
     override suspend fun checkDetail(id: String): SessionUi? = withContext(Dispatchers.IO) {

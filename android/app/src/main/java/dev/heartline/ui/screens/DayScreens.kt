@@ -219,7 +219,7 @@ internal fun HeartDay(d: HealthDayUi, nav: Navigator) {
         }
     }
     Gap(24); SectionTitle("Time in each zone"); Gap(4)
-    MutedText("Zones are 50–90% of your maximum heart rate (set in your profile, or 220 minus your age).")
+    MutedText("Zones are 50–90% of your maximum heart rate (set in your profile, or 208 minus 0.7 times your age).")
     Gap(12); ZoneBars(d.hrZones)
     Gap(24); SectionTitle("Hour by hour"); Gap(4)
     MutedText("Bars are each hour's average; the thin line through each bar runs from its lowest to its highest reading.")

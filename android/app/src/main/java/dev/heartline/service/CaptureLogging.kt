@@ -23,5 +23,11 @@ internal fun loggedForCapture(log: List<LoggedSet>, s: CaptureSession): List<Log
  */
 internal suspend fun captureEngineKey(db: HeartlineDatabase, s: CaptureSession): Pair<String, List<LoggedCaptureSet>> {
     val logged = loggedForCapture(gymLogFromJson(db.meta.get(GYM_LOG_KEY)), s)
-    return (if (logged.isEmpty()) CAPTURE_ENGINE_VERSION else "$CAPTURE_ENGINE_VERSION+log${Integer.toHexString(logged.hashCode())}") to logged
+    // Load uses the resting heart rate the daily figures use, so a change to it re-scores the session.
+    val rest = captureRest(db)?.let { "+r$it" } ?: ""
+    return (if (logged.isEmpty()) CAPTURE_ENGINE_VERSION + rest else "$CAPTURE_ENGINE_VERSION$rest+log${Integer.toHexString(logged.hashCode())}") to logged
 }
+
+/** Meta key for the resting heart rate behind the daily load and strain (profile, else median awake resting), whole bpm. */
+internal const val HR_REST_KEY = "hr_rest_daily"
+internal suspend fun captureRest(db: HeartlineDatabase): Int? = db.meta.get(HR_REST_KEY)?.toIntOrNull()?.takeIf { it in 30..120 }

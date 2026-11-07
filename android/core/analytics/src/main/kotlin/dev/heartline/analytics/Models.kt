@@ -79,7 +79,13 @@ data class DayResult(
     val awakeRestingHr: Double? = null,
     /** Overnight HRV: the median RMSSD of the night's clean automatic samples (health type hrv_sleep). */
     val hrvSleep: Double? = null,
+    /** Daytime and evening sleep that started this day, kept out of the night's figures. */
+    val naps: List<Nap> = emptyList(),
 )
+
+/** A nap: [start]/[end] epoch seconds of the watch's sleep minutes, minutes asleep by stage, and heart rate while asleep. */
+data class Nap(val start: Long, val end: Long, val asleepMin: Int, val deepMin: Int, val lightMin: Int, val remMin: Int,
+               val lowHr: Int?, val avgHr: Int?)
 data class ReadinessFactor(
     val name: String, val impact: String, val detail: String,
     /** How far today is from the usual, in standard deviations (positive is better), its weight, and the points it moved readiness. */

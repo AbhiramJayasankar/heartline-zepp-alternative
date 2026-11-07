@@ -22,8 +22,11 @@ internal fun storedWorkoutDetails(fetches: List<RawFetch>): Map<Long, StoredWork
     }
 }
 
-internal fun workoutMaxHr(profile: ProfileUi): Int = profile.maxHr?.takeIf { it > 0 }
-    ?: profile.age?.takeIf { it in 1..120 }?.let { 220 - it } ?: 190
+internal fun workoutMaxHr(profile: ProfileUi): Int = profileMaxHr(profile.maxHr, profile.age) ?: 190
+
+/** Maximum heart rate everywhere in the app: the profile's, else 208 - 0.7 x age (Tanaka), as the daily load uses. */
+fun profileMaxHr(maxHr: Int?, age: Int?): Int? = maxHr?.takeIf { it in 80..240 }
+    ?: age?.takeIf { it in 1..120 }?.let { kotlin.math.round(208 - 0.7 * it).toInt() }
 
 /** HR records are change samples: hold each value until the next record, clipped to the workout.
  * Do not backfill the unobserved interval before the first sample. Last sample wins at duplicate times.
@@ -64,6 +67,36 @@ internal fun workoutZones(
 }
 
 internal fun edwardsTrimp(zones: List<ZoneTimeUi>): Double = zones.sumOf { it.seconds * it.zone.toDouble() } / 60.0
+
+/**
+ * Banister TRIMP over the HR track (each record held until the next, as for zones), on the scale of the daily load and
+ * strain: r = (hr - rest) / (max - rest) from half of max up, r x a x e^(b r) a minute.
+ */
+internal fun banisterLoad(track: List<TrackPoint>, durationS: Int, maxHr: Int, rest: Double, sex: String?,
+                          pauses: List<Int> = emptyList(), resumes: List<Int> = emptyList()): Double {
+    val a = if (sex == "female") 0.86 else 0.64
+    val b = if (sex == "female") 1.67 else 1.92
+    val spans = activeSpans(durationS, pauses, resumes)
+    val points = track.filter { it.t in 0..durationS }.associateBy { it.t }.values.sortedBy { it.t }
+    return points.withIndex().sumOf { (i, p) ->
+        val end = points.getOrNull(i + 1)?.t ?: durationS
+        val dt = spans.sumOf { (s, e) -> (minOf(end, e) - maxOf(p.t, s)).coerceAtLeast(0) }
+        if (p.hr !in 1..254 || p.hr < 0.5 * maxHr || maxHr <= rest) 0.0
+        else ((p.hr - rest) / (maxHr - rest)).coerceIn(0.0, 1.0).let { r -> r * a * kotlin.math.exp(b * r) } * dt / 60.0
+    }
+}
+
+/** The stretches between the workout's pauses and resumes, in seconds from its start. */
+private fun activeSpans(durationS: Int, pauses: List<Int>, resumes: List<Int>): List<Pair<Int, Int>> = buildList {
+    var active = true
+    var start = 0
+    for ((time, resumed) in (pauses.map { it to false } + resumes.map { it to true }).filter { it.first in 0..durationS }.sortedBy { it.first }) {
+        if (active && !resumed) add(start to time)
+        if (!active && resumed) start = time
+        active = resumed
+    }
+    if (active) add(start to durationS)
+}
 
 /** Evenly spaced original points, including both endpoints; no fabricated/interpolated values. */
 internal fun downsampleWorkoutSeries(points: List<SeriesPoint>, limit: Int = 600): List<SeriesPoint> {
@@ -136,7 +169,7 @@ internal fun WorkoutUi.withWorkoutDetail(raw: StoredWorkoutDetail?, profile: Pro
         }
         add("Heart-rate zones" to "Estimated from HR track, excluding recorded pauses; max HR ${workoutMaxHr(profile)} bpm")
         add("Minimum heart rate" to "Estimated from HR track")
-        add("Training load" to "Edwards TRIMP (zone minutes × zone number)")
+        add("Training load" to if (profile.restingHr != null) "Banister TRIMP, the same scale as the daily load and strain" else "Needs a resting heart rate (the daily figures supply one)")
     }
     return copy(route = raw?.route ?: route, detail = WorkoutDetailUi(
         activeS = s?.activeS,
@@ -145,7 +178,7 @@ internal fun WorkoutUi.withWorkoutDetail(raw: StoredWorkoutDetail?, profile: Pro
         maxSpeedKmh = s?.maxSpeedMs.positive()?.times(3.6), avgCadence = s?.avgCadence, maxCadence = s?.maxCadence,
         avgStrideCm = s?.avgStrideCm, ascentM = s?.ascentM, descentM = s?.descentM,
         minAltM = s?.minAltitudeM, maxAltM = s?.maxAltitudeM,
-        minHr = hr.filter { it.hr in 1..254 }.minOfOrNull { it.hr }, load = hr.takeIf { it.isNotEmpty() }?.let { edwardsTrimp(zones) },
+        minHr = hr.filter { it.hr in 1..254 }.minOfOrNull { it.hr }, load = hr.takeIf { it.isNotEmpty() }?.let { h -> profile.restingHr?.let { banisterLoad(h, durationS, workoutMaxHr(profile), it.toDouble(), profile.sex, d?.pauses.orEmpty(), d?.resumes.orEmpty()) } },
         zones = zones, speedKmh = d?.speedMs.orEmpty().series(3.6), cadence = d?.cadence.orEmpty().series(),
         altitude = d?.altitudeM.orEmpty().series(), extras = extras,
     ))

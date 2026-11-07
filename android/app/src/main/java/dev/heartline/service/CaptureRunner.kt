@@ -156,10 +156,12 @@ class CaptureRunner(
         }
         val p = settings.profile.value
         val (key, logged) = captureEngineKey(db, s)
+        val rest = captureRest(db)
         val result = withContext(Dispatchers.Default) {
             val parts = readCaptureFiles(folder, s)
             val analysis = analyzeCapture(mergeCapture(s, parts), hr,
-                Profile(p.age, p.sex?.name?.lowercase(), p.weightKg, p.heightCm, p.maxHr, p.restingHr), s.label, activities, logged)
+                Profile(p.age, p.sex?.name?.lowercase(), p.weightKg, p.heightCm, p.maxHr, p.restingHr), s.label, activities, logged,
+                hrRest = rest?.toDouble())
             val notes = analysis.notes + s.gaps.filter { (it.end ?: s.end ?: s.start) > it.start }.map {
                 "Raw stream gap from ${it.start - s.start} to ${(it.end ?: s.end ?: it.start) - s.start} seconds after capture start."
             } + listOfNotNull(s.error) + if (parts.size < s.files.size) listOf("Some recording files are missing; analysis uses the remaining data.") else emptyList()
@@ -177,6 +179,8 @@ class CaptureRunner(
 
     fun delete(id: String) { scope.launch { try { lock.withLock {
         check(session?.id != id) { "Stop the capture before deleting it" }
+        // Its AI name goes too, even when the session itself is already gone.
+        db.meta.delete(dev.heartline.app.CAPTURE_TITLE + id)
         val s = db.meta.get(CAPTURE_SESSION + id)?.let(::captureSession) ?: return@withLock
         for (name in s.files) {
             val file = captureFile(folder, name)

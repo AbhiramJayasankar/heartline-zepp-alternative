@@ -67,23 +67,49 @@ def sleep_blocks(minutes: list[dict]) -> list[dict]:
     return blocks
 
 
+NIGHT_JOIN_S = 2 * 3600   # blocks this close to the main one are the same night (a long wake in the small hours)
+
+
+def night_like(b: dict) -> bool:
+    """Sleep that can be a night: >= 3 h, or any part of it between midnight and 8:00. Naps are neither."""
+    if b["asleep"] >= 180:
+        return True
+    for ts in (b["start"], b["end"]):
+        mid = datetime.combine(datetime.fromtimestamp(ts).date(), datetime.min.time()).timestamp()
+        if b["start"] < mid + 8 * 3600 and b["end"] >= mid:
+            return True
+    return False
+
+
+def _gap(a: dict, b: dict) -> float:
+    return max(0, a["start"] - b["end"], b["start"] - a["end"])
+
+
 def night_for(blocks: list[dict], d: date, last_ts: float | None = None) -> tuple[dict | None, int]:
-    """Main sleep block ending in d's night window, plus total sleep minutes (naps included) in it.
-    No night if the main block is under MIN_NIGHT minutes. For the day still in progress (last_ts inside
-    the window, before noon), a night only counts once a block of >= 3 h has ended >= 30 min before the
-    latest data, so a night that is still going on is not scored as a short one."""
+    """Main night-like sleep block ending in d's night window, plus total sleep minutes of the blocks chained to
+    it within NIGHT_JOIN_S (naps are left out). No night if the main block is under MIN_NIGHT minutes. For the day
+    still in progress (last_ts inside the window, before noon), a night only counts once a block of >= 3 h has ended
+    >= 30 min before the latest data, so a night that is still going on is not scored as a short one."""
     lo = datetime.combine(d - timedelta(days=1), datetime.min.time()).timestamp() + NIGHT_START_H * 3600
     hi = lo + 86400
     inside = [b for b in blocks if lo <= b["end"] < hi]
-    if not inside:
+    nights = [b for b in inside if night_like(b)]
+    if not nights:
         return None, 0
-    main = max(inside, key=lambda b: b["asleep"])
+    main = max(nights, key=lambda b: b["asleep"])
     if main["asleep"] < MIN_NIGHT:
         return None, 0
     if last_ts is not None and lo <= last_ts < hi and datetime.fromtimestamp(last_ts).hour < 12:
         if main["asleep"] < 180 or last_ts - main["end"] < 1800:
             return None, 0
-    return main, sum(b["asleep"] for b in inside)
+    part, grew = [main], True
+    while grew:
+        grew = False
+        for b in inside:
+            if all(b is not p for p in part) and any(_gap(p, b) <= NIGHT_JOIN_S for p in part):
+                part.append(b)
+                grew = True
+    return main, sum(b["asleep"] for b in part)
 
 
 def sleep_score(asleep: int, efficiency: float, deep: int, rem: int) -> int:

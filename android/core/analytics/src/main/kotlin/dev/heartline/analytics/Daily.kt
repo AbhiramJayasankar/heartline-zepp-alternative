@@ -50,6 +50,7 @@ fun computeDaily(
     val hrv = hrvByDay(checks, zone)
     val byDay = minutes.groupBy { dayOf(it.ts, zone) }
     val blocks = sleepBlocks(minutes)
+    val naps = napsOf(blocks, zone)
     val first = byDay.keys.minOrNull() ?: today
     val rows = sortedMapOf<LocalDate, DayWork>()
     for (i in max(days, 35) - 1 downTo 0) {
@@ -71,7 +72,7 @@ fun computeDaily(
             strain = null, trimp = null, hrZones = hrMax?.takeIf { it != 0 && awakeHr.isNotEmpty() }?.let { zoneMinutes(awakeHr, it) },
             spo2Avg = ownHealth["spo2"]?.get(d), stressAvg = ownHealth["stress"]?.get(d),
             readiness = null, caloriesActive = null, sleepStart = main?.start, sleepEnd = main?.end, sleepOngoing = ongoing,
-            awakeRestingHr = awakeRestingHrFrom(ms), hrvSleep = ownHealth["hrv_sleep"]?.get(d),
+            awakeRestingHr = awakeRestingHrFrom(ms), hrvSleep = ownHealth["hrv_sleep"]?.get(d), naps = naps[d].orEmpty(),
         ), awakeHr)
     }
     // Heart rate reserve wants resting heart rate awake (Karvonen): the profile's, else the median of each day's calmest

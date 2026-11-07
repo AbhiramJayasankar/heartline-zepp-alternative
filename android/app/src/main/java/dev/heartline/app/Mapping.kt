@@ -40,7 +40,7 @@ fun DailyResult.todayUi(date: LocalDate): TodayUi {
         today.readinessFactors.map { Factor(if (it.name == "Resting heart rate") "Sleeping heart rate" else it.name, when (it.impact) { "positive" -> Impact.POSITIVE; "negative" -> Impact.NEGATIVE; else -> Impact.NEUTRAL }, it.detail,
             it.z, it.weight, it.points, it.value, it.usual, it.unit) },
         alerts.map { AlertUi(it.level == "warn" || it.level == "warning", it.title, it.detail) }, last?.sleepUi(), day?.steps, day?.activeMinutes,
-        day?.awakeRestingHr?.roundToInt())
+        day?.awakeRestingHr?.roundToInt(), day?.naps.orEmpty())
 }
 fun DailyResult.trendsUi(health: Map<String, Map<LocalDate, Double>>): TrendsUi {
     fun series(key: String, title: String, unit: String = "", baseline: Double? = null, bars: Boolean = false, accent: Boolean = false, value: (DayResult) -> Double?) =

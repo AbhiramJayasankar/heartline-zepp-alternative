@@ -98,7 +98,8 @@ class GymRichCaptureTest {
         assertEquals(delta(60), delta(120), 4.0); assertTrue(delta(180) > delta(120) + 3)
         assertTrue(result.recovery.all { it.n >= 5 })
         assertEquals(647, result.workS); assertEquals(4032, result.restS)
-        assertEquals(22, result.floor.size); assertEquals(88.0, result.floor.first().v, 0.0)
+        // 20: the treadmill and the five minutes of coming down after it aren't a floor between sets.
+        assertEquals(20, result.floor.size); assertEquals(88.0, result.floor.first().v, 0.0)
         val cardio = result.cardio.single()
         assertEquals("Treadmill", cardio.name); assertEquals("walking", cardio.kind)
         assertEquals(179.0, cardio.steadyHr!!.toDouble(), 3.0); assertEquals(184.0, cardio.peakHr!!.toDouble(), 2.0)

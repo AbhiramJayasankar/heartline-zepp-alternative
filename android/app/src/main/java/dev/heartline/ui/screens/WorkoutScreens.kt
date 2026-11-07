@@ -273,7 +273,8 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
             Triple("Load", a.load?.roundToInt()?.toString() ?: "–", null), Triple("Calories", fmtInt(a.calories), "kcal"), Triple("Steps", fmtInt(a.steps), null),
             Triple("Sets", if (a.sets.isEmpty()) "–" else a.sets.size.toString(), null),
             // With a log, its reps are the true count; the watch's own count is compared set by set below.
-            Triple("Reps", if (a.sets.isEmpty()) "–" else a.sets.sumOf { s -> s.loggedReps ?: s.reps.toDouble() }.let { if (it % 1.0 == 0.0) it.toInt().toString() else "%.1f".format(it) }, null),
+            // Logged partial reps (5.4) count as whole reps here; the sets below keep the partial.
+            Triple("Reps", if (a.sets.isEmpty()) "–" else a.sets.sumOf { s -> s.loggedReps?.let { kotlin.math.floor(it) } ?: s.reps.toDouble() }.roundToInt().toString(), null),
             Triple("Median rest", medianRest?.let { clock(it) } ?: "–", null),
             Triple("Under load", a.workS?.let { fmtHm(((it + 30) / 60)) } ?: "–", null),
             Triple("Work share", a.workS?.let { w -> a.restS?.takeIf { w + it > 0 }?.let { "${100 * w / (w + it)}" } } ?: "–", "%"),
@@ -305,22 +306,26 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
         }
         BaselineNote(a)
         ins?.let { Findings(it) }
-        if (a.activities.isNotEmpty()) WatchWorkouts(a)
+        AroundSession(controller, a, nav)
+        if (a.activities.isNotEmpty()) WatchWorkouts(controller, a, nav)
         if (a.sets.isNotEmpty()) Exercises(a, ins, anchor = { key -> androidx.compose.ui.Modifier.onGloballyPositioned { tops[key] = it.positionInRoot().y } },
             openPrev = { e ->
                 // The same exercise in the session before: open its recording there. This page is kept in the back
                 // stack focused on the exercise, so Back returns to the same spot.
-                val prevCap = e.prev?.session?.let { dev.heartline.app.captureForSession(it, captures) }?.takeIf { it.id != id }
-                prevCap?.let { pc -> {
+                // With no recording of it, the session in the gym log instead.
+                val prevSession = e.prev?.session
+                val prevCap = prevSession?.let { dev.heartline.app.captureForSession(it, captures) }?.takeIf { it.id != id }
+                prevSession?.let { ps -> {
                     if (nav.stack.isNotEmpty()) nav.stack[nav.stack.lastIndex] = Route.CaptureResult(id, e.exercise)
-                    nav.push(Route.CaptureResult(pc.id, e.prev!!.name))
+                    nav.push(prevCap?.let { Route.CaptureResult(it.id, e.prev!!.name) } ?: Route.GymLogAt("${ps.date}|${ps.name}"))
                 } }
             })
         ins?.let { RestRepsSection(it); HeartCost(it) }
         if (a.recovery.size >= 2) Recovery(a, medianRest, prev?.recovery ?: emptyList(), ins?.previous?.date)
         ins?.let { FloorSection(a, it) }
         if (a.logTotal != null) LogAndWatch(a, ins?.score)
-        a.cardio.forEach { CardioBlock(a, it) }
+        // A short walk between machines isn't cardio worth a section; the watch's cardio workouts and 5 minutes or more are.
+        a.cardio.filter { it.name != null || it.end - it.start >= 300 }.forEach { CardioBlock(a, it) }
         a.pulse?.let { PulseSection(it) }
         if (a.zones.isNotEmpty()) {
             Gap(24); SectionTitle("Heart-rate zones"); Gap(12); ZoneBars(a.zones)
@@ -402,9 +407,52 @@ private fun CompareRow(label: String, watch: String, sensors: String) {
     HorizontalDivider(color = c.line)
 }
 
+/** How the session sat in the rest of the day, each line opening the page it comes from. */
 @Composable
-private fun WatchWorkouts(a: CaptureAnalysisUi) {
+private fun AroundSession(controller: HeartlineController, a: CaptureAnalysisUi, nav: Navigator) {
+    val zone = java.time.ZoneId.systemDefault()
+    val trends by controller.trends.collectAsStateWithLifecycle()
+    val checks by controller.checks.collectAsStateWithLifecycle()
+    val day = dev.heartline.app.sessionDate(a.start, zone)
+    fun value(key: String, d: java.time.LocalDate) = trends?.series?.firstOrNull { it.key == key }?.points?.firstOrNull { it.date == d }?.value
+    val end = a.start + a.durationS
+    val rows = buildList<Triple<String, String, () -> Unit>> {
+        val readiness = value("readiness", day); val sleepH = value("sleep", day); val sleepScore = value("sleep_score", day)
+        if (readiness != null || sleepH != null) add(Triple("Going in",
+            listOfNotNull(readiness?.let { "readiness ${it.roundToInt()}" }, sleepH?.let { "${fmtHm((it * 60).roundToInt())} asleep the night before" + (sleepScore?.let { s -> ", score ${s.roundToInt()}" } ?: "") }).joinToString("; ").replaceFirstChar { it.uppercase() },
+        ) { nav.push(Route.Trend("readiness")) })
+        // The day's load is Banister TRIMP like this session's; strain is 21 x (1 - e^(-TRIMP/120)).
+        val strain = value("strain", day)
+        val dayLoad = strain?.takeIf { it < 21 }?.let { -120 * kotlin.math.ln(1 - it / 21) }
+        a.load?.let { l -> add(Triple("Load", if (dayLoad != null && dayLoad >= 1)
+            "${l.roundToInt()} of the day's ${dayLoad.roundToInt()}, strain ${"%.1f".format(strain)} of 21" + (if (l > dayLoad * 1.05) ". The day's figure uses minute averages, so it can read below a session's" else "")
+            else "${l.roundToInt()}, on the same scale as the day's load and strain") { nav.push(Route.Trend("strain")) }) }
+        // The first heart check within three hours of finishing: how far heart rate and HRV had come back.
+        checks.filter { it.start >= end && it.start <= end + 3 * 3600 && it.rmssd != null }.minByOrNull { it.start }?.let { k ->
+            add(Triple("Heart check after", "HRV ${k.rmssd!!.roundToInt()} ms at ${k.hr?.roundToInt() ?: "–"} bpm, ${((k.start - end) / 60).coerceAtLeast(0)} min after you finished") { nav.push(Route.CheckResult(k.id)) })
+        }
+        val next = day.plusDays(1)
+        val rhr = value("rhr", next); val usual = trends?.series?.firstOrNull { it.key == "rhr" }?.baseline; val hrvNight = value("hrv_sleep", next)
+        if (rhr != null) add(Triple("The night after",
+            "sleeping heart rate ${rhr.roundToInt()} bpm" + (usual?.let { " (usual ${it.roundToInt()})" } ?: "") + (hrvNight?.let { ", overnight HRV ${it.roundToInt()} ms" } ?: "")
+        ) { nav.push(Route.Trend("rhr")) })
+        add(Triple("Heart rate that day", "the session shaded among the rest of ${day.format(java.time.format.DateTimeFormatter.ofPattern("EEE d MMM"))}") {
+            nav.push(dev.heartline.ui.screens.dayRoute(DayMetric.HEART, day.toEpochDay())) })
+    }
+    Gap(24); SectionTitle("Around this session"); Gap(4)
+    MutedText("How the session sat in the rest of your day. Each line opens the page it comes from.")
+    Gap(6)
+    rows.forEach { (title, detail, go) -> NavRow(title, detail, go) }
+}
+
+@Composable
+private fun WatchWorkouts(controller: HeartlineController, a: CaptureAnalysisUi, nav: Navigator) {
     val c = HL.colors
+    // The watch's own workout pages (laps, zones, its HR track): matched by overlap, since the capture clips their times.
+    val day = java.time.Instant.ofEpochSecond(a.start).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+    val watchDay by produceState<List<dev.heartline.app.WorkoutUi>>(emptyList(), a.id) {
+        value = withTimeoutOrNull(5000) { (controller.activityDay(day).first().workouts + controller.activityDay(day.plusDays(1)).first().workouts) } ?: emptyList()
+    }
     Gap(24); SectionTitle("The watch's own workouts"); Gap(4)
     MutedText("What the watch logged for the workouts you started on it, beside what the raw sensors measured over the same minutes. The sensors see individual sets and reps; the watch adds names, distance and its calorie estimate.")
     a.activities.forEach { w ->
@@ -425,12 +473,19 @@ private fun WatchWorkouts(a: CaptureAnalysisUi) {
         HorizontalDivider(color = c.line)
         CompareRow("Average HR", fmtInt(w.avgHr), if (hr.isEmpty()) "–" else fmtInt(hr.average().roundToInt()))
         CompareRow("Max HR", fmtInt(w.maxHr), if (hr.isEmpty()) "–" else fmtInt(hr.max().roundToInt()))
+        // A strength workout's sensor figure is time in sets; a short walk inside it isn't its active time.
         CompareRow("Active time", w.activeS?.let { clock(it.toDouble()) } ?: "–",
-            when { cardio.isNotEmpty() -> clock(cardio.sumOf { it.end - it.start }); sets.isNotEmpty() -> clock(sets.sumOf { it.end - it.start }) + " in sets"; else -> "–" })
+            when { sets.isNotEmpty() -> clock(sets.sumOf { it.end - it.start }) + " in sets"; cardio.isNotEmpty() -> clock(cardio.sumOf { it.end - it.start }); else -> "–" })
         CompareRow("Steps", fmtInt(w.steps), if (steps > 0) fmtInt(steps) else "–")
         if (w.distanceM != null && w.distanceM > 0) CompareRow("Distance", "%.2f km".format(w.distanceM / 1000.0), "–")
         CompareRow("Calories", w.calories?.let { "$it kcal" } ?: "–", "–")
         if (sets.isNotEmpty()) CompareRow("Sets / reps", "–", "${sets.size} / ${sets.sumOf { it.reps }}")
+        val abs = a.start + w.start; val absEnd = a.start + w.end
+        watchDay.firstOrNull { it.type == w.type && it.start < absEnd && it.start + it.durationS > abs }?.let { ww ->
+            NavRow("The watch's ${w.type.lowercase()} workout", "its own page: heart-rate track, zones and splits") {
+                nav.push(Route.Workout(ww.start, java.time.Instant.ofEpochSecond(ww.start).atZone(java.time.ZoneId.systemDefault()).toLocalDate().toEpochDay()))
+            }
+        }
     }
 }
 
@@ -594,7 +649,18 @@ private fun CardioBlock(a: CaptureAnalysisUi, k: dev.heartline.app.CardioUi) {
     Gap(10)
     val notes = listOfNotNull(
         k.riseTauS?.let { "Rise time is how quickly heart rate settled towards its plateau (a time constant). Fitter hearts settle in under a minute; $it s is where regular cardio shows up first." },
-        k.drop60?.let { if (it > 12) "Heart rate fell $it bpm in the first minute after stopping, comfortably above the 12 bpm warning level." else "Heart rate fell only $it bpm in the first minute after stopping; 12 or less is worth keeping an eye on." },
+        // The 12 bpm check means something only after real effort with a rest after it, not when a set started straight away.
+        k.drop60?.let { d ->
+            val nextSet = a.sets.firstOrNull { it.start >= k.end - 5 }?.start?.minus(k.end)
+            val effort = k.peakHr != null && a.zones.firstOrNull { it.zone == 2 }?.let { k.peakHr >= it.lowBpm } != false
+            val moved = if (d >= 0) "fell $d bpm" else "rose ${-d} bpm"
+            when {
+                nextSet != null && nextSet < 90 -> "A set started ${nextSet.roundToInt()} s after this, so the minute after it isn't a recovery measure."
+                !effort -> "Heart rate $moved in the first minute after; the effort was too light for that to say much about recovery."
+                d > 12 -> "Heart rate fell $d bpm in the first minute after stopping, comfortably above the 12 bpm warning level."
+                else -> "Heart rate $moved in the first minute after stopping; under 12 bpm after a hard effort is worth keeping an eye on."
+            }
+        },
         if (k.distanceM != null || k.speedKmh != null) "Distance and speed come from the watch's workout; heart rate, cadence and timing from the raw sensors." else null,
     )
     notes.forEach { MutedText(it); Gap(4) }
@@ -679,8 +745,9 @@ fun WorkoutScreen(controller: HeartlineController, route: Route.Workout, nav: Na
             Triple("Duration", fmtHm(w.durationS / 60), null), Triple("Active", d.activeS?.let { fmtHm(it / 60) } ?: "–", null), Triple("Calories", fmtInt(w.calories), "kcal"),
             Triple("Distance", w.distanceM?.takeIf { it > 0 }?.let { "%.2f".format(it / 1000.0) } ?: "–", "km"), Triple("Avg pace", pace(d.avgPaceSPerKm), "/km"), Triple("Best pace", pace(d.bestPaceSPerKm), "/km"),
             Triple("Avg speed", one(d.avgSpeedKmh), "km/h"), Triple("Max speed", one(d.maxSpeedKmh), "km/h"), Triple("Steps", fmtInt(w.steps), null),
-            Triple("Cadence", fmtInt(d.avgCadence), "spm"), Triple("Max cadence", fmtInt(d.maxCadence), "spm"), Triple("Stride", fmtInt(d.avgStrideCm), "cm"),
-            Triple("Ascent", d.ascentM?.roundToInt()?.toString() ?: "–", "m"), Triple("Descent", d.descentM?.roundToInt()?.toString() ?: "–", "m"), Triple("Load", d.load?.roundToInt()?.toString() ?: "–", null),
+            // A zero from the watch on a gym workout means "not measured"; those tiles are left out.
+            Triple("Cadence", fmtInt(d.avgCadence?.takeIf { it > 0 }), "spm"), Triple("Max cadence", fmtInt(d.maxCadence?.takeIf { it > 0 }), "spm"), Triple("Stride", fmtInt(d.avgStrideCm?.takeIf { it > 0 }), "cm"),
+            Triple("Ascent", d.ascentM?.takeIf { it > 0 }?.roundToInt()?.toString() ?: "–", "m"), Triple("Descent", d.descentM?.takeIf { it > 0 }?.roundToInt()?.toString() ?: "–", "m"), Triple("Load", d.load?.roundToInt()?.toString() ?: "–", null),
             Triple("Training effect", one(d.trainingEffect), null), Triple("Recovery", d.recoveryHours?.let { "$it h" } ?: "–", null),
         ))
         // A capture recorded over this workout has far finer data: offer it here.

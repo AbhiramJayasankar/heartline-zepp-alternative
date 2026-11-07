@@ -203,6 +203,8 @@ data class HealthDayUi(
     val minutes: List<MinuteUi>, val sleep: SleepNightUi?, val workouts: List<WorkoutUi>,
     /** Lowest 10-minute median while awake and still ([restingHr] is the sleeping value). */
     val awakeRestingHr: Int? = null,
+    /** Naps that started this day. */
+    val naps: List<dev.heartline.analytics.Nap> = emptyList(),
     /** Temperature readings left out of skin temperature: off the wrist, settling after putting it on, or a one-off spike. */
     val temperatureSetAside: List<SeriesPoint> = emptyList(),
 )
@@ -347,6 +349,8 @@ data class TodayUi(
     val activeMinutes: Int?,
     /** Lowest 10-minute median while awake and still, today. */
     val awakeRestingHr: Int? = null,
+    /** Naps today; they charge body battery but stay out of the night's sleep. */
+    val napsToday: List<dev.heartline.analytics.Nap> = emptyList(),
 )
 
 data class DayPoint(val date: LocalDate, val value: Double?)
@@ -369,6 +373,8 @@ data class WorkoutUi(val start: Long, val durationS: Int, val type: String, val 
 data class ActivityDayUi(
     val date: LocalDate, val minutes: List<MinuteUi>, val steps: Int, val activeMinutes: Int, val sleepMinutes: Int,
     val wornMinutes: Int, val hrMin: Int?, val hrAvg: Int?, val hrMax: Int?, val sleep: SleepNightUi?, val workouts: List<WorkoutUi>,
+    /** Naps that started this day (the watch's sleep minutes away from the night). */
+    val naps: List<dev.heartline.analytics.Nap> = emptyList(),
 )
 
 enum class RhythmStatus { REGULAR, IRREGULAR, POSSIBLE_AF, INSUFFICIENT }

@@ -29,18 +29,20 @@ class WorkoutCaptureTest {
         assertEquals(10.0, rec.start, 0.0); assertEquals(1, rec.acc.size); assertEquals(1, rec.gyro.size)
     }
 
-    @Test fun fiveKnownZonesProduceEdwardsMinutesAndFiveSecondHrBins() {
-        val r = analyzeCapture(recording(300, ::still), hr(300) { 100 + it / 60 * 20 }, Profile(maxHr = 200), "zones")
+    @Test fun fiveKnownZonesProduceBanisterLoadAndFiveSecondHrBins() {
+        val r = analyzeCapture(recording(300, ::still), hr(300) { 100 + it / 60 * 20 }, Profile(maxHr = 200), "zones", hrRest = 60.0)
         assertEquals(listOf(60, 60, 60, 60, 60), r.zones.map { it.seconds })
         assertEquals(listOf(100, 120, 140, 160, 180), r.zones.map { it.lowBpm })
-        assertEquals(15.0, r.load!!, 1e-8); assertEquals(140, r.avgHr); assertEquals(100, r.minHr); assertEquals(180, r.maxHr)
+        // Banister TRIMP per second, as the daily load sums it per minute: r = (hr - 60) / 140, r x 0.64 x e^(1.92 r).
+        assertEquals(6.6823388227, r.load!!, 1e-6); assertEquals(140, r.avgHr); assertEquals(100, r.minHr); assertEquals(180, r.maxHr)
         assertEquals(60, r.hr.size); assertEquals(5.0, r.hr[1].t, 0.0); assertNull(r.calories)
         assertEquals(0, r.steps); assertTrue(r.sets.isEmpty()); assertTrue(r.segments.all { it.kind == "rest" })
     }
 
-    @Test fun maxHrUses220MinusAgeThen190Fallback() {
+    @Test fun maxHrUsesTanakaThen190Fallback() {
         val rec = recording(60, ::still)
-        assertEquals(100, analyzeCapture(rec, hr(60) { 100 }, Profile(age = 20), "").zones.first().lowBpm)
+        // 208 - 0.7 x 20 = 194, as the daily figures use; zone 1 starts at half of it.
+        assertEquals(97, analyzeCapture(rec, hr(60) { 100 }, Profile(age = 20), "").zones.first().lowBpm)
         assertEquals(95, analyzeCapture(rec, hr(60) { 100 }, Profile(), "").zones.first().lowBpm)
     }
 
@@ -55,8 +57,10 @@ class WorkoutCaptureTest {
     }
 
     @Test fun hrGapsAndInvalidValuesAreNotFilledWithPpgOrCountedAsLoad() {
-        val r = analyzeCapture(recording(60, ::still), listOf(epoch to 150, epoch + 20 to 0, epoch + 30 to 255, epoch + 55 to 150), Profile(maxHr = 200), "gap")
-        assertEquals(10, r.zones.sumOf { it.seconds }); assertEquals(.5, r.load!!, 1e-8)
+        val r = analyzeCapture(recording(60, ::still), listOf(epoch to 150, epoch + 20 to 0, epoch + 30 to 255, epoch + 55 to 150), Profile(maxHr = 200), "gap", hrRest = 60.0)
+        assertEquals(10, r.zones.sumOf { it.seconds }); assertEquals(0.2356061769, r.load!!, 1e-8)
+        // Without a resting heart rate there is no load to give, rather than one on another scale.
+        assertNull(analyzeCapture(recording(60, ::still), hr(60) { 150 }, Profile(maxHr = 200), "").load)
         assertEquals(2, r.hr.size); assertTrue(r.notes.any { "missing intervals" in it })
         val empty = analyzeCapture(recording(60, ::still), emptyList(), Profile(), "")
         assertNull(empty.avgHr); assertNull(empty.load); assertNull(empty.calories); assertTrue(empty.hr.isEmpty())

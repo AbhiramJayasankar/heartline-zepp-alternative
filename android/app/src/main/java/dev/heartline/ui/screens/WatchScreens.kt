@@ -443,11 +443,11 @@ fun ProfileScreen(controller: HeartlineController, nav: Navigator) {
     Screen("Your profile", onBack = { nav.pop() }, subtitle = "Used for heart rate zones, VO2max, fitness age and calories. Stays on this phone.",
         icon = dev.heartline.ui.Icons.person, tint = HL.colors.sleepDeep) {
         // What the numbers give, live as you type.
-        val maxHr = p.maxHr ?: p.age?.let { 220 - it }
+        val maxHr = dev.heartline.app.profileMaxHr(p.maxHr, p.age)
         val bmi = if (p.weightKg != null && p.heightCm != null && p.heightCm!! > 0) p.weightKg!! / ((p.heightCm!! / 100) * (p.heightCm!! / 100)) else null
         dev.heartline.ui.components.Card(padding = 16.dp) {
             dev.heartline.ui.components.FactGrid(listOf(
-                dev.heartline.ui.components.FactItem("Max heart rate", maxHr?.toString() ?: "–", "bpm", note = if (p.maxHr != null) "as set" else "220 minus age"),
+                dev.heartline.ui.components.FactItem("Max heart rate", maxHr?.toString() ?: "–", "bpm", note = if (p.maxHr != null) "as set" else "208 − 0.7 × age"),
                 dev.heartline.ui.components.FactItem("BMI", bmi?.let { "%.1f".format(it) } ?: "–", note = bmi?.let { when { it < 18.5 -> "under"; it < 25 -> "healthy range"; it < 30 -> "over"; else -> "high" } }),
                 dev.heartline.ui.components.FactItem("Zone 2", maxHr?.let { "${(it * 0.6).toInt()}–${(it * 0.7).toInt()}" } ?: "–", "bpm", note = "easy aerobic"),
             ))

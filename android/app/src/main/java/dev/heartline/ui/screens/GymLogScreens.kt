@@ -21,6 +21,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -89,16 +91,25 @@ private val dayFmt = DateTimeFormatter.ofPattern("EEE d MMM")
 
 /** Every gym log imported: sessions newest first, each opening to its sets. */
 @Composable
-fun GymLogScreen(controller: HeartlineController, nav: Navigator) {
+fun GymLogScreen(controller: HeartlineController, nav: Navigator, focus: String? = null) {
     val c = HL.colors
     val log by controller.gymLog.collectAsStateWithLifecycle()
     val result by controller.gymImport.collectAsStateWithLifecycle()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> if (uris.isNotEmpty()) controller.importGymLog(uris) }
     val sessions = remember(log) { sessionsOf(log) }
     val captures by controller.captures.collectAsStateWithLifecycle()
-    var open by rememberSaveable { mutableStateOf<String?>(null) }
+    var open by rememberSaveable { mutableStateOf(focus) }
+    // Opened from a recording's exercise link: scroll to that session once it is laid out.
+    val scroll = androidx.compose.foundation.rememberScrollState()
+    var focusTop by remember { mutableStateOf<Float?>(null) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    androidx.compose.runtime.LaunchedEffect(focusTop) {
+        val y = focusTop ?: return@LaunchedEffect
+        kotlinx.coroutines.delay(150)
+        scroll.animateScrollTo((scroll.value + y - with(density) { 96.dp.toPx() }).toInt().coerceAtLeast(0))
+    }
     Screen("Gym log", onBack = { nav.pop() }, subtitle = "Sets, loads and treadmill settings from your workout logs.",
-        icon = dev.heartline.ui.Icons.activity, tint = c.warn) {
+        icon = dev.heartline.ui.Icons.activity, tint = c.warn, scroll = scroll) {
         PillButton("Import log files", { picker.launch(arrayOf("text/*", "application/json", "application/octet-stream", "*/*")) })
         Gap(8)
         MutedText("CSV or JSON workout logs. You can pick several at once; a set already here is kept once, with the copy that has times.")
@@ -108,7 +119,9 @@ fun GymLogScreen(controller: HeartlineController, nav: Navigator) {
         Heading("Sessions")
         sessions.forEach { s ->
             val id = "${s.date}|${s.name}"
-            Column(Modifier.fillMaxWidth().clickable(onClickLabel = if (open == id) "Hide sets" else "Show sets", role = Role.Button) { open = if (open == id) null else id }
+            Column(Modifier.fillMaxWidth()
+                .then(if (id == focus && focusTop == null) Modifier.onGloballyPositioned { focusTop = it.positionInRoot().y } else Modifier)
+                .clickable(onClickLabel = if (open == id) "Hide sets" else "Show sets", role = Role.Button) { open = if (open == id) null else id }
                 .padding(vertical = 12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (s.date != java.time.LocalDate.MIN) { DateChip(s.date); androidx.compose.foundation.layout.Spacer(Modifier.width(14.dp)) }
@@ -118,6 +131,7 @@ fun GymLogScreen(controller: HeartlineController, nav: Navigator) {
                             s.start?.let { a -> s.end?.let { b -> "${timeOf(a)} to ${timeOf(b)}" } } ?: "no times in the log",
                             "${s.workingSets} working sets").joinToString(", "))
                     }
+                    if (s.volumeKg > 0) androidx.compose.foundation.layout.Spacer(Modifier.width(12.dp))
                     if (s.volumeKg > 0) Column(horizontalAlignment = Alignment.End) {
                         Text("${fmtInt(s.volumeKg.roundToInt())} kg", style = HL.type.bodyStrong, color = c.ink)
                         MutedText("volume")

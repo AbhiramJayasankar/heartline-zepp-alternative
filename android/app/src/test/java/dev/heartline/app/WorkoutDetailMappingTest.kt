@@ -73,9 +73,10 @@ class WorkoutDetailMappingTest {
         assertEquals(listOf(613, 0, 0, 1, 0), zones.map { it.seconds })
         assertEquals(617 / 60.0, edwardsTrimp(zones), 0.0)
         val mapped = workout(1000).withWorkoutDetail(StoredWorkoutDetail(null,
-            WorkoutDetailsExt(hr = track, pauses = listOf(633)), emptyList()), ProfileUi(maxHr = 200))
+            WorkoutDetailsExt(hr = track, pauses = listOf(633)), emptyList()), ProfileUi(maxHr = 200, restingHr = 60))
         assertEquals(zones, mapped.detail!!.zones)
-        assertEquals(edwardsTrimp(zones), mapped.detail!!.load!!, 0.0)
+        // Banister over the same active seconds: 613 s at 100 bpm and 1 s at 160 before the pause, none after it.
+        assertEquals(3.2634507910, mapped.detail!!.load!!, 1e-8)
     }
 
     @Test fun repeatedPauseResumeEventsAndEventsOutsideWorkoutAreHandled() {
@@ -144,8 +145,9 @@ class WorkoutDetailMappingTest {
         val hr = byteArrayOf(1, 1, 75, 0, 0, 0, 0, 0)
         val data = storedWorkoutDetails(listOf(raw("workout_details", 1000.0, hr), raw("workouts", 1.0, summary(2000))))
         assertNull(data.getValue(1000).summary)
-        val d = workout().withWorkoutDetail(data[1000], ProfileUi()).detail!!
+        val d = workout().withWorkoutDetail(data[1000], ProfileUi(restingHr = 60)).detail!!
         assertEquals(75, d.minHr); assertNotNull(d.load)
+        assertNull(workout().withWorkoutDetail(data[1000], ProfileUi()).detail!!.load) // no resting heart rate, no load
         assertNull(data.getValue(2000).details)
         assertEquals(0, workout().withWorkoutDetail(data[2000], ProfileUi()).detail!!.activeS)
         assertTrue(storedWorkoutDetails(listOf(raw("workout_details", null, hr), raw("workouts", 1000.0, byteArrayOf(1)))).isEmpty())
@@ -172,10 +174,10 @@ class WorkoutDetailMappingTest {
 
     @Test fun changingProfileRecomputesZonesAndLoadAndPreservesBasicWorkoutFields() {
         val base = workout(60, listOf(HrPoint(1000, 150)))
-        val younger = base.withWorkoutDetail(null, ProfileUi(maxHr = 200))
-        val older = base.withWorkoutDetail(null, ProfileUi(maxHr = 180))
-        assertEquals(3.0, younger.detail!!.load!!, 0.0)
-        assertEquals(4.0, older.detail!!.load!!, 0.0)
+        val younger = base.withWorkoutDetail(null, ProfileUi(maxHr = 200, restingHr = 60))
+        val older = base.withWorkoutDetail(null, ProfileUi(maxHr = 180, restingHr = 60))
+        assertEquals(1.4136370613, younger.detail!!.load!!, 1e-8)
+        assertEquals(2.0259339922, older.detail!!.load!!, 1e-8)
         assertEquals(base, younger.copy(detail = null))
         assertEquals(base, older.copy(detail = null))
     }

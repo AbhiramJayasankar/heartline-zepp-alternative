@@ -178,6 +178,11 @@ fun OverviewScreen(controller: HeartlineController, nav: Navigator, onTab: (Tab)
                         Text("${timeOf(night.start)} – ${timeOf(night.end)}" + (if (ended != date) ", ${shortDate(ended)}" else "") + (if (night.ongoing) ", so far" else ""), style = HL.type.small, color = c.inkSoft)
                         Gap(8); StagesBar(night)
                     } else MutedText("No night synced yet")
+                    // Today's naps, kept apart from the night.
+                    t?.napsToday?.takeIf { it.isNotEmpty() }?.let { naps ->
+                        Gap(6)
+                        Text("+ ${if (naps.size == 1) "nap" else "${naps.size} naps"} ${hm(naps.sumOf { it.asleepMin })}, ${timeOf(naps.last().start)}", style = HL.type.small, color = c.hue(Area.SLEEP))
+                    }
                 }
                 Tile("Heart", c.pulse, Modifier.weight(1f).fillMaxHeight(), { onTab(Tab.HEART) }) {
                     BigValue(restingNow?.first?.roundToInt()?.toString() ?: "–", "bpm", size = 28)

@@ -42,7 +42,9 @@ data class CaptureResult(
 
 /** HR_MEASURE is authoritative. No PPG substitution and no interpolation across a missing HR interval. */
 fun analyzeCapture(rec: Recording, hr: List<Pair<Double, Int>>, profile: Profile, label: String,
-    activities: List<CaptureActivity> = emptyList(), logged: List<LoggedCaptureSet> = emptyList()): CaptureResult {
+    activities: List<CaptureActivity> = emptyList(), logged: List<LoggedCaptureSet> = emptyList(),
+    /** Resting heart rate the daily figures use (profile, else median awake resting); load needs it to match strain. */
+    hrRest: Double? = null): CaptureResult {
     val samples = hr.filter { it.first.isFinite() && it.second in 25..240 && it.first >= rec.start }
         .sortedBy { it.first }.distinctBy { it.first }
     val duration = rec.captureDurationS ?: maxOf(rec.durationS, rec.accArrivalT.maxOrNull() ?: 0.0,
@@ -67,7 +69,9 @@ fun analyzeCapture(rec: Recording, hr: List<Pair<Double, Int>>, profile: Profile
         return samples.getOrNull(index)?.takeIf { epoch - it.first < 5 }?.second
     }
     val valid = seconds.filter { it > 0 }
-    val maxHr = profile.maxHr?.takeIf { it in 80..240 } ?: profile.age?.takeIf { it in 1..120 }?.let { 220 - it } ?: 190
+    // The same maximum as the daily figures (profile, else 208 - 0.7 x age), so zones and load agree across the app.
+    val maxHr = profile.maxHr?.takeIf { it in 80..240 } ?: profile.copy(maxHr = null).let(::hrMaxOf)?.takeIf { it in 80..240 } ?: 190
+    val rest = (profile.restingHr?.takeIf { it in 30..120 }?.toDouble() ?: hrRest)?.takeIf { it in 30.0..120.0 }
     val zones = (1..5).map { z ->
         CaptureZone(z, ceil(maxHr * (z + 4) / 10.0).toInt(), if (z == 5) null else ceil(maxHr * (z + 5) / 10.0).toInt(),
             valid.count { captureZone(it, maxHr) == z })
@@ -75,6 +79,7 @@ fun analyzeCapture(rec: Recording, hr: List<Pair<Double, Int>>, profile: Profile
     val motion = captureMotion(rec, duration)
     val segments = motion.segments.map { it.copy(avgHr = avg(it.start, it.end)) }
     val cardio = captureCardio(segments, activities, seconds)
+    val longCardio = cardio.filter { it.end - it.start >= 300 }
     // With a gym log the logged sets are the sets: their times and names from the log, reps and tempo from the wrist.
     val inLog = logged.filter { it.end > 0 && it.start < duration && it.end > it.start }
     val merge = if (inLog.isEmpty()) null else mergeLoggedSets(rec, motion.sets, inLog)
@@ -122,12 +127,16 @@ fun analyzeCapture(rec: Recording, hr: List<Pair<Double, Int>>, profile: Profile
     val pulse = capturePulse(rec, seconds)
     return CaptureResult(label, rec.start, duration, valid.takeIf { it.isNotEmpty() }?.average()?.roundToInt(),
         valid.maxOrNull(), valid.minOrNull(), zones,
-        valid.takeIf { it.isNotEmpty() }?.sumOf { captureZone(it, maxHr) / 60.0 }, calories,
+        // Banister TRIMP per second (the daily load sums it per minute), so a session's load is its share of the day's.
+        valid.takeIf { it.isNotEmpty() && rest != null }?.let { banisterTrimp(it, rest!!, maxHr, profile.sex) / 60.0 }, calories,
         if (motion.points.isEmpty()) null else segments.filter { it.cadenceSpm != null }.sumOf { (it.end - it.start) * it.cadenceSpm!! / 60 }.roundToInt(),
         (0 until n step 5).mapNotNull { a -> avg(a.toDouble(), min(duration, a + 5.0))?.let { CapturePoint(a.toDouble(), it.toDouble()) } },
         motion.points, segments, sets, rests, "Watch live HR (HR_MEASURE)", notes, activities,
         captureRecovery(sets, cardio, seconds), (0 until n step 300).mapNotNull { a ->
-            hrs(a.toDouble(), min(duration, a + 300.0)).takeIf { it.isNotEmpty() }?.let {
+            // The floor between sets: five minutes or more of steady cardio (a treadmill block) isn't rest, nor are the
+            // five minutes of coming down after it, so both are left out.
+            (a until min(n, a + 300)).filter { t -> seconds[t] > 0 && longCardio.none { t >= it.start && t < it.end + 300 } }.map { seconds[it] }
+                .takeIf { it.size >= 30 }?.let {
                 CapturePoint(a.toDouble(), percentile(it.map(Int::toDouble).toDoubleArray(), 10.0)) }
         }, if (motion.points.isEmpty()) null else sets.sumOf { it.end - it.start }.roundToInt(),
         if (motion.points.isEmpty()) null else sets.zipWithNext().sumOf { (a, b) ->

@@ -35,6 +35,9 @@ internal class CaptureController(
                 }.sortedByDescending { it.start }
             }
             nameCaptures(facts, meta)
+            // Names whose recording is gone (deleted while a name was on its way) are dropped.
+            if (naming?.isActive != true) meta.keys.filter { it.startsWith(CAPTURE_TITLE) && (CAPTURE_SESSION + it.removePrefix(CAPTURE_TITLE)) !in meta }
+                .forEach { db.meta.delete(it) }
         } }
     }
     fun start(label: String, minutes: Int) {
@@ -98,6 +101,7 @@ internal class CaptureController(
                     }
                 }.onFailure { db.events.add("warn", "Naming a workout capture with AI failed: ${it.message}") }.getOrNull()
                 val title = ai ?: old?.optString("title")?.takeIf { old.optString("basis") == f.basis && old.optBoolean("ai") && it.isNotBlank() } ?: localTitle(f)
+                if (db.meta.get(CAPTURE_SESSION + id) == null) continue // deleted while the AI answered
                 db.meta.set(CAPTURE_TITLE + id, JSONObject().put("title", title).put("basis", f.basis).put("ai", ai != null || empty).put("tried", now).toString())
             }
         }

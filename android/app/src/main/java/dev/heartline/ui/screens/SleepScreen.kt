@@ -98,6 +98,23 @@ fun SleepScreen(controller: HeartlineController, nav: Navigator) {
                 usualMin = sleepSeries?.points?.dropLast(1)?.mapNotNull { it.value }?.takeIf { it.isNotEmpty() }?.average()?.let { (it * 60).roundToInt() },
                 spo2Points = (day!!.spo2 + (eve?.spo2 ?: emptyList())).filter { it.t >= night.start && it.t <= night.end }.sortedBy { it.t })
 
+            day?.naps?.takeIf { it.isNotEmpty() }?.let { naps ->
+                Heading(if (naps.size == 1) "Nap" else "Naps")
+                Card(padding = 14.dp) {
+                    naps.forEachIndexed { i, n ->
+                        if (i > 0) { Gap(10); androidx.compose.material3.HorizontalDivider(color = c.line); Gap(10) }
+                        Row(Modifier.fillMaxWidth()) {
+                            dev.heartline.ui.components.Fact("Time", "${dev.heartline.ui.components.epochClock(n.start.toDouble())}–${dev.heartline.ui.components.epochClock(n.end.toDouble())}", Modifier.weight(1.3f))
+                            dev.heartline.ui.components.Fact("Asleep", hm(n.asleepMin), Modifier.weight(1f))
+                            dev.heartline.ui.components.Fact("Lowest HR", n.lowHr?.let { "$it bpm" } ?: "–", Modifier.weight(1f))
+                        }
+                        if (n.deepMin + n.remMin > 0) { Gap(4); MutedText("${hm(n.lightMin)} light, ${hm(n.deepMin)} deep, ${hm(n.remMin)} REM" + (n.avgHr?.let { ", average $it bpm" } ?: "") + ".") }
+                    }
+                    Gap(8)
+                    MutedText("The watch marks naps as sleep on its own. They add to body battery but are kept out of the night's hours and sleep score, so a late nap doesn't count as the next night.")
+                }
+            }
+
             if (day != null) OvernightCard(controller, date, night, nav)
 
             // ---- Two weeks ----
