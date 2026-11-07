@@ -61,6 +61,26 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         /** After a sample that isn't clean: try again this many times, this far apart. */
         const val RETRIES = 2
         const val RETRY_S = 120
+        /**
+         * Raw recordings of automatic samples are deleted after this long. Everything the app uses is kept in the sample
+         * row first (see [extract]): all HRV numbers, rhythm, breathing and every beat-to-beat interval. Only re-running
+         * beat detection or breathing with a future algorithm needs the raw file.
+         */
+        const val KEEP_RAW_S = 3 * 86_400L
+
+        /** What a sample keeps once its raw recording is gone: every number the app shows, plus the beat-to-beat intervals. */
+        fun extract(r: dev.heartline.analytics.SessionResult, into: JSONObject): JSONObject {
+            fun n(v: Double?) = v?.takeIf { it.isFinite() } ?: JSONObject.NULL
+            val h = r.hrv
+            return into.put("hr", n(r.hrBpm)).put("resp", n(r.respiratoryRate)).put("quality", r.signalQuality).put("usable_s", r.usableS)
+                .put("rmssd", n(h.rmssdMs)).put("duration_s", r.durationS).put("beats", r.beats)
+                .put("hrv", JSONObject().put("mean_rr", n(h.meanRrMs)).put("sdnn", n(h.sdnnMs)).put("rmssd", n(h.rmssdMs)).put("pnn50", n(h.pnn50))
+                    .put("sd1", n(h.sd1Ms)).put("sd2", n(h.sd2Ms)).put("lf", n(h.lf)).put("hf", n(h.hf)).put("lf_hf", n(h.lfHf)).put("stress_index", n(h.stressIndex)))
+                .put("rhythm", r.rhythm.status).put("ectopic", r.rhythm.ectopicBeats).put("irregularity", n(r.rhythm.irregularity))
+                .put("resp_parts", JSONObject().put("riiv", n(r.respiration.riiv)).put("riav", n(r.respiration.riav)).put("rifv", n(r.respiration.rifv)))
+                // Beat-to-beat intervals: [seconds from start, interval ms, 1 if ectopic]. Enough to recompute any HRV measure.
+                .put("rr", org.json.JSONArray(r.rr.map { org.json.JSONArray().put(Math.round(it.t * 100) / 100.0).put(Math.round(it.rrMs * 10) / 10.0).put(if (it.ectopic) 1 else 0) }))
+        }
         /** What the overnight engine is doing now, for the Sleep page. */
         val status = MutableStateFlow("Off")
         /** What daytime sampling is doing now, for the Heart page. */
@@ -79,9 +99,16 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
     private var asleepNoted: LocalDate? = null
     private var nightStartedBattery: LocalDate? = null
 
+    private var lastPrune = 0L
+
     suspend fun run() {
         while (true) {
             try { tick() } catch (e: CancellationException) { throw e } catch (e: Exception) { status.value = "Error: ${e.message}" }
+            val now = System.currentTimeMillis() / 1000
+            if (now - lastPrune >= 3600) {
+                lastPrune = now
+                try { prune(now) } catch (e: CancellationException) { throw e } catch (e: Exception) { app.db.events.add("error", "Pruning HRV sample recordings failed: ${e.message}") }
+            }
             delay(60_000)
         }
     }
@@ -222,8 +249,7 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
             result.usableS < need -> "only ${result.usableS.roundToInt()} s of clean beats (needs $need)"
             else -> null
         }
-        val extra = JSONObject().put("file", f.name).put("hr", result.hrBpm ?: JSONObject.NULL).put("resp", result.respiratoryRate ?: JSONObject.NULL)
-            .put("quality", result.signalQuality).put("usable_s", result.usableS).put("rmssd", result.hrv.rmssdMs ?: JSONObject.NULL)
+        val extra = extract(result, JSONObject().put("file", f.name))
             .put("night", night.toString()).put("reason", reason ?: JSONObject.NULL).put("attempt", attempt).put("length_s", seconds).toString()
         app.db.health.upsert(listOf(HealthPoint(type, ts, if (clean) result.hrv.rmssdMs else null, extra)))
         app.db.events.add("info", (if (type == SAMPLE) "Overnight" else "Daytime") + " HRV sample at ${clock(ts)}${if (attempt > 0) " (retry $attempt)" else ""}: " + if (clean) "RMSSD ${result.hrv.rmssdMs?.roundToInt()} ms, " +
@@ -240,6 +266,32 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         }
         status.value = "Asleep; sample taken at ${clock(ts)}"
         return clean
+    }
+
+    /**
+     * Deletes raw recordings of automatic samples older than [KEEP_RAW_S]. A sample saved before its intervals were kept
+     * is re-analysed first so its row gets them; a recording that can't be read is left alone.
+     */
+    private suspend fun prune(now: Long) {
+        var deleted = 0; var bytes = 0L
+        for (type in listOf(SAMPLE, DAY_SAMPLE)) for (p in app.db.health.series(type, 0.0, (now - KEEP_RAW_S).toDouble())) {
+            val j = runCatching { JSONObject(p.extra ?: "{}") }.getOrNull() ?: continue
+            val name = j.optString("file").takeIf { it.isNotEmpty() } ?: continue
+            val f = java.io.File(rawDir, java.io.File(name).name)
+            if (!f.isFile) continue
+            if (!j.has("rr")) {
+                val r = runCatching { withContext(Dispatchers.Default) { analyzeSession(readRecording(f), f.name) } }.getOrNull() ?: continue
+                app.db.health.upsert(listOf(HealthPoint(type, p.ts, p.value, extract(r, j).toString())))
+            }
+            val size = f.length()
+            if (f.delete()) {
+                deleted++; bytes += size
+                java.io.File(rawDir, f.nameWithoutExtension + ".wav").delete()
+                app.db.recordings.delete(f.name)
+            }
+        }
+        if (deleted > 0) app.db.events.add("info", "Deleted $deleted automatic HRV recording${if (deleted > 1) "s" else ""} older than ${KEEP_RAW_S / 86_400} days " +
+            "(${bytes / 1_000_000} MB); their HRV, breathing and beat intervals stay saved")
     }
 
     private fun clock(ts: Long): String = Instant.ofEpochSecond(ts).atZone(zone).toLocalTime().let { "%02d:%02d".format(it.hour, it.minute) }
