@@ -307,7 +307,7 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
                         r.first().exercise?.let(::shortExercise) ?: "Exercise ${exerciseLetter(i)}") }, named = true, inReadout = false) },
                 a.motion.takeIf { it.isNotEmpty() }?.let { m -> ChartLane("Motion", 24.dp, bars = m, barWidth = motionStep, barColor = c.inkSoft.copy(alpha = 0.85f),
                     readout = { t -> m.lastOrNull { it.t <= t && t < it.t + motionStep }?.let { p -> "%.2f g".format(p.v) } }) },
-                a.segments.takeIf { it.isNotEmpty() }?.let { sg -> ChartLane("Doing", 10.dp, spans = sg.map { s -> ChartSpan(s.start, s.end, segmentColor(s.kind, c), s.kind.replaceFirstChar { it.uppercase() }) }) },
+                a.segments.takeIf { it.isNotEmpty() }?.let { sg -> ChartLane("Task", 10.dp, spans = sg.map { s -> ChartSpan(s.start, s.end, segmentColor(s.kind, c), s.kind.replaceFirstChar { it.uppercase() }) }) },
                 a.activities.takeIf { it.isNotEmpty() }?.let { ws -> ChartLane("Watch", 16.dp, spans = ws.map { w -> ChartSpan(w.start, w.end, c.ink.copy(alpha = 0.12f), w.type) }, named = true) },
             )
             InteractiveChart(
