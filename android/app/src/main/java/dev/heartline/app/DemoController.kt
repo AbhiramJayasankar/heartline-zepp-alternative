@@ -243,6 +243,9 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override fun stopCapture() { captureRun.value = null }
     override suspend fun captureDetail(id: String): CaptureAnalysisUi? = demoCapture()
     override fun deleteCapture(id: String) = captures.update { l -> l.filter { it.id != id } }
+    override suspend fun captureCoach(id: String, facts: String, refresh: Boolean) = CoachUi(
+        "A steady session: every working set reached its target and rests stayed near three minutes. The last set of each lift was the hardest.",
+        listOf("Bench press: stay at the same load and aim for one more rep on the last set."), "demo", System.currentTimeMillis() / 1000)
     override val probe = MutableStateFlow<List<String>>(emptyList())
     override val watchReadback = MutableStateFlow<List<Pair<String, String>>>(emptyList())
     override val overnight = MutableStateFlow(OvernightUi())

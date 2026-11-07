@@ -168,6 +168,8 @@ interface HeartlineController {
     fun stopCapture()
     suspend fun captureDetail(id: String): CaptureAnalysisUi?
     fun deleteCapture(id: String)
+    /** A short AI coach's note on a capture from the page's own numbers ([facts]); throws with a readable message. */
+    suspend fun captureCoach(id: String, facts: String, refresh: Boolean = false): CoachUi
 
     /** Tries the raw-stream mask bits nobody has mapped yet; one line of results per bit. */
     val probe: StateFlow<List<String>>

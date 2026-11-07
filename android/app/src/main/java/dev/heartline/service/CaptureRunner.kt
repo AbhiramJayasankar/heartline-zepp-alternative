@@ -180,7 +180,7 @@ class CaptureRunner(
     fun delete(id: String) { scope.launch { try { lock.withLock {
         check(session?.id != id) { "Stop the capture before deleting it" }
         // Its AI name goes too, even when the session itself is already gone.
-        db.meta.delete(dev.heartline.app.CAPTURE_TITLE + id)
+        db.meta.delete(dev.heartline.app.CAPTURE_TITLE + id); db.meta.delete(dev.heartline.app.CAPTURE_COACH + id)
         val s = db.meta.get(CAPTURE_SESSION + id)?.let(::captureSession) ?: return@withLock
         for (name in s.files) {
             val file = captureFile(folder, name)

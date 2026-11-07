@@ -106,6 +106,33 @@ internal class CaptureController(
             }
         }
     }
+    /**
+     * The coach's note for a capture, from [facts] (the page's own numbers). Kept per capture and written again only when
+     * the facts change (a log corrected, say) or [refresh] asks; throws with a readable message when it can't be written.
+     */
+    suspend fun coach(id: String, facts: String, refresh: Boolean): CoachUi = withContext(Dispatchers.IO) {
+        val basis = Integer.toHexString(facts.hashCode())
+        if (!refresh) coachFromJson(db.meta.get(CAPTURE_COACH + id))?.takeIf { it.second == basis }?.let { return@withContext it.first }
+        val key = SpeechConfig.parse(db.meta.get(SpeechConfig.KEY)).geminiKey
+        check(key.isNotBlank()) { "Add a Gemini key under Watch, Alexa, Voice to get a coach's note." }
+        val model = InsightsSettings.parse(db.meta.get(InsightsSettings.KEY)).geminiModel
+        suspend fun ask(m: String) = GeminiText().generate(key, m, COACH_SYSTEM, facts, json = true, temperature = 0.3, maxTokens = 2048)
+        // As for workout names: when the main model is overloaded, slow or out of its daily free quota (429; each model
+        // has its own), the newest flash-lite model.
+        val reply = try { ask(model) } catch (e: CancellationException) { throw e } catch (e: Exception) {
+            val busy = e.message?.let { m -> "503" in m || "429" in m || "timeout" in m.lowercase() || "timed out" in m.lowercase() } == true
+            val lite = if (busy) runCatching { GeminiText().listModels(key).firstOrNull { it.contains("flash-lite") && it != model } }.getOrNull() else null
+            try { lite?.let { ask(it) } ?: throw e } catch (e2: CancellationException) { throw e2 } catch (e2: Exception) {
+                val m = e2.message.orEmpty()
+                // The raw API message is long and full of links; say what happened and when it clears.
+                if ("429" in m) error("Gemini's free daily limit is used up" + (Regex("""retry in (\d+)h(\d+)m""").find(m)?.let { r -> ", for about ${r.groupValues[1]} h ${r.groupValues[2]} min more" } ?: "") + ". The coach's note will be written once it resets.")
+                throw e2
+            }
+        }
+        val (note, next) = parseCoach(reply.text) ?: error("The coach's reply didn't come back in the expected shape; try again.")
+        CoachUi(note, next, reply.model, System.currentTimeMillis() / 1000).also { db.meta.set(CAPTURE_COACH + id, coachJson(it, basis)) }
+    }
+
     fun delete(id: String) { scope.launch {
         try { ensureService().captureRunner.delete(id) }
         catch (e: CancellationException) { throw e }

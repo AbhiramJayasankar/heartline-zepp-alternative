@@ -96,6 +96,19 @@ data class ChartBars(val points: List<SeriesPoint>, val width: Double, val color
 data class ChartRange(val t: Double, val low: Double, val high: Double, val color: Color)
 /** A horizontal value band (heart-rate zone, stress band). */
 data class ChartBand(val low: Double, val high: Double, val color: Color)
+/**
+ * A thin track under the plot on the chart's own time axis, so it lines up with the plot and zooms and scrubs with it.
+ * [bars] draws a column chart of values from t to t + [barWidth] (scaled to the lane's largest value); [spans] draws
+ * coloured stretches, with each span's label written inside it when it fits if [named]. [label] sits in the right
+ * gutter beside the lane; touching the chart adds the lane's value to the readout ([readout], or the span's label).
+ */
+data class ChartLane(
+    val label: String, val height: Dp, val bars: List<SeriesPoint> = emptyList(), val barWidth: Double = 5.0,
+    val barColor: Color = Color.Gray, val spans: List<ChartSpan> = emptyList(), val named: Boolean = false,
+    val readout: ((Double) -> String?)? = null, val inReadout: Boolean = true,
+)
+private val LANE_GAP = 5.dp
+
 /** A shaded stretch of x (sleep, workout, set), optionally labelled in the readout when touched. */
 data class ChartSpan(val start: Double, val end: Double, val color: Color, val label: String? = null)
 
@@ -122,13 +135,15 @@ fun InteractiveChart(
     title: String? = LocalChartTitle.current ?: "Chart",
     fullscreen: Boolean = false,
     ranges: List<ChartRange> = emptyList(),
+    lanes: List<ChartLane> = emptyList(),
 ) {
     val c = HL.colors
     val tm = rememberTextMeasurer()
     var expanded by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    val lanesH = lanes.fold(0.dp) { acc, l -> acc + l.height + LANE_GAP }
     if (expanded) FullscreenChart(title ?: "Chart", { expanded = false }) { h ->
-        InteractiveChart(lines, xStart, xEnd, Modifier, h, yMin, yMax, bars, bands, spans, xLabel, readoutX, minSpan,
-            "Touch or drag for exact values. Pinch to zoom, double-tap to zoom out.", null, title, fullscreen = true, ranges = ranges)
+        InteractiveChart(lines, xStart, xEnd, Modifier, (h - lanesH).coerceAtLeast(160.dp), yMin, yMax, bars, bands, spans, xLabel, readoutX, minSpan,
+            "Touch or drag for exact values. Pinch to zoom, double-tap to zoom out.", null, title, fullscreen = true, ranges = ranges, lanes = lanes)
     }
     var view by remember(xStart, xEnd) { mutableStateOf(xStart to xEnd) }
     var selected by remember(xStart, xEnd) { mutableStateOf<Double?>(null) }
@@ -151,6 +166,10 @@ fun InteractiveChart(
                         lines.forEach { l -> nearest(l.points, sel, l.gap)?.let { p -> ReadoutValue(l.color, l.label, l.format(p.v) + if (l.unit.isEmpty()) "" else " ${l.unit}") } }
                         bars.forEach { b -> b.points.firstOrNull { sel >= it.t && sel < it.t + b.width }?.let { p -> ReadoutValue(b.color, b.label, b.format(p.v) + if (b.unit.isEmpty()) "" else " ${b.unit}") } }
                         spans.firstOrNull { sel >= it.start && sel < it.end && it.label != null }?.let { s -> ReadoutValue(s.color.copy(alpha = 1f), s.label!!, "") }
+                        lanes.filter { it.inReadout }.forEach { lane ->
+                            val span = lane.spans.firstOrNull { sel >= it.start && sel < it.end && it.label != null }
+                            (lane.readout?.invoke(sel) ?: span?.label)?.let { v -> ReadoutValue((span?.color ?: lane.barColor).copy(alpha = 1f), lane.label, v) }
+                        }
                     }
                 }
             }
@@ -172,7 +191,7 @@ fun InteractiveChart(
         }
         Spacer(Modifier.height(4.dp))
         Canvas(
-            Modifier.fillMaxWidth().height(height)
+            Modifier.fillMaxWidth().height(height + lanesH)
                 .pointerInput(xStart, xEnd) {
                     detectTapGestures(
                         onDoubleTap = { view = xStart to xEnd; selected = null },
@@ -220,7 +239,10 @@ fun InteractiveChart(
                 },
         ) {
             widthPx = size.width
-            val right = size.width - rightPad; val top = 4.dp.toPx(); val bottom = size.height - 18.dp.toPx()
+            // The plot, then the lanes on the same time axis, then the time labels under everything.
+            val lanesPx = lanesH.toPx()
+            val right = size.width - rightPad; val top = 4.dp.toPx(); val bottom = size.height - lanesPx - 18.dp.toPx()
+            val axisY = bottom + lanesPx
             val (a, b) = view
             fun x(t: Double) = leftPad + ((t - a) / (b - a)).toFloat() * (right - leftPad)
             val visible = lines.filter { it.axis }.flatMap { l -> l.points.filter { it.t in a..b }.map { it.v } } +
@@ -322,12 +344,45 @@ fun InteractiveChart(
                 if (pts.size <= 40 && !l.dashed) pts.forEach { p -> drawCircle(l.color, 2.5.dp.toPx(), Offset(x(p.t), y(p.v))) }
                 if (pts.size == 1) drawCircle(l.color, l.width.toPx() * 1.5f, Offset(x(pts[0].t), y(pts[0].v)))
             }
-            // X labels at a round step for the visible span.
+            // Lanes: each a track the plot's width, under it, on the same x.
+            var laneTop = bottom + LANE_GAP.toPx()
+            lanes.forEach { lane ->
+                val lh = lane.height.toPx()
+                drawRect(c.line.copy(alpha = 0.45f), Offset(leftPad, laneTop), Size(right - leftPad, lh))
+                if (lane.bars.isNotEmpty()) {
+                    val vis = lane.bars.filter { it.t + lane.barWidth >= a && it.t <= b }
+                    // Scaled to the 95th percentile, so one jolt doesn't flatten the rest; taller values are clipped.
+                    val maxV = vis.map { it.v }.sorted().let { v -> if (v.isEmpty()) 1.0 else v[((v.size - 1) * 0.95).toInt()] }.coerceAtLeast(1e-9)
+                    vis.forEach { p ->
+                        val x1 = x(p.t).coerceAtLeast(leftPad); val x2 = x(p.t + lane.barWidth).coerceAtMost(right)
+                        val hh = (p.v / maxV).toFloat().coerceIn(0f, 1f) * lh
+                        if (x2 > x1) drawRect(lane.barColor, Offset(x1, laneTop + lh - hh), Size(max(x2 - x1, 1f), hh))
+                    }
+                }
+                lane.spans.forEach { s ->
+                    val x1 = x(s.start).coerceAtLeast(leftPad); val x2 = x(s.end).coerceAtMost(right)
+                    if (x2 <= x1) return@forEach
+                    drawRect(s.color, Offset(x1, laneTop), Size(max(x2 - x1, 1.5f), lh))
+                    if (lane.named && s.label != null) {
+                        drawRect(s.color.copy(alpha = 1f), Offset(x1, laneTop), Size(1.5.dp.toPx(), lh))
+                        // The whole name if it fits, else its first word, else that word cut short; the readout always has the whole one.
+                        val word = s.label.substringBefore(' ')
+                        (listOf(s.label, word) + (word.length - 1 downTo 3).map { word.take(it) + "…" }).distinct().firstOrNull { t ->
+                            tm.measure(t, axisStyle).size.let { it.width < x2 - x1 - 6.dp.toPx() && it.height <= lh + 2.dp.toPx() }
+                        }?.let { t -> label(tm, t, x1 + 4.dp.toPx(), laneTop + (lh - tm.measure(t, axisStyle).size.height) / 2, c.ink) }
+                    }
+                }
+                val lr = tm.measure(lane.label, axisStyle)
+                if (lr.size.width <= rightPad - 4.dp.toPx()) label(tm, lane.label, right + 4.dp.toPx(), laneTop + (lh - lr.size.height) / 2, c.inkSoft)
+                laneTop += lh + LANE_GAP.toPx()
+            }
+            // X labels at a round step for the visible span. Times of day round to the clock; a relative axis (seconds
+            // into a recording, small numbers) rounds from zero.
             val span = b - a
             val maxTicks = ((right - leftPad) / 64.dp.toPx()).toInt().coerceIn(3, 14)
             val step = listOf(60.0, 300.0, 600.0, 900.0, 1800.0, 3600.0, 7200.0, 10800.0, 21600.0, 43200.0, 86400.0, 7 * 86400.0)
                 .firstOrNull { span / it <= maxTicks } ?: (30 * 86400.0)
-            val zoneOffset = ZoneId.systemDefault().rules.getOffset(Instant.ofEpochSecond(a.toLong())).totalSeconds
+            val zoneOffset = if (xStart < 1e8) 0 else ZoneId.systemDefault().rules.getOffset(Instant.ofEpochSecond(a.toLong())).totalSeconds
             var t = ceil((a + zoneOffset) / step) * step - zoneOffset
             while (t <= b) {
                 val px = x(t); val text = xLabel(t)
@@ -335,14 +390,15 @@ fun InteractiveChart(
                 // Keep edge labels inside the chart instead of half off it.
                 val lx = (px - w / 2f).coerceIn(0f, right - w.toFloat())
                 drawLine(c.line.copy(alpha = 0.7f), Offset(px, top), Offset(px, bottom), 1f)
-                drawLine(c.line, Offset(px, bottom), Offset(px, bottom + 3.dp.toPx()), 1f)
-                label(tm, text, lx, bottom + 9.dp.toPx(), c.inkSoft)
+                if (lanes.isNotEmpty()) drawLine(c.ink.copy(alpha = 0.18f), Offset(px, bottom), Offset(px, axisY), 1f)
+                drawLine(c.line, Offset(px, axisY), Offset(px, axisY + 3.dp.toPx()), 1f)
+                label(tm, text, lx, axisY + 9.dp.toPx(), c.inkSoft)
                 t += step
             }
-            // Crosshair and the value dots.
+            // Crosshair (through the lanes too) and the value dots.
             selected?.let { s ->
                 if (s in a..b) {
-                    drawLine(c.ink.copy(alpha = 0.55f), Offset(x(s), top), Offset(x(s), bottom), 1.2.dp.toPx())
+                    drawLine(c.ink.copy(alpha = 0.55f), Offset(x(s), top), Offset(x(s), axisY), 1.2.dp.toPx())
                     lines.filter { it.width.value > 0f }.forEach { l -> nearest(l.points, s, l.gap)?.let { p -> drawCircle(c.paper, 5.dp.toPx(), Offset(x(p.t), y(p.v))); drawCircle(l.color, 3.5.dp.toPx(), Offset(x(p.t), y(p.v))) } }
                 }
             }
