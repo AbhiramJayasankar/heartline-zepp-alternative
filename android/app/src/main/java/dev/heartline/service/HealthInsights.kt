@@ -76,12 +76,13 @@ data class InsightReport(
 /**
  * Which AI writes the insights. [provider] "gemini" (the owner's AI Studio key) or "openrouter" (the Alexa brain's
  * keys); each has a model and fallbacks tried in order; [useOther] lets the other provider step in when all of them
- * fail. [auto] writes new insights each day at [autoHour] (retrying through the day if the models are busy).
+ * fail. [auto] writes new insights each day at [autoHour] (retrying through the day if the models are busy); it is off
+ * until the user turns it on, so nothing is sent to a model unless they ask.
  */
 data class InsightsSettings(
     val provider: String = GEMINI, val geminiModel: String = GeminiText.DEFAULT_MODEL, val openRouterModel: String = "",
     val geminiFallbacks: List<String> = emptyList(), val openRouterFallbacks: List<String> = emptyList(),
-    val useOther: Boolean = true, val auto: Boolean = true, val autoHour: Int = 9,
+    val useOther: Boolean = true, val auto: Boolean = false, val autoHour: Int = 9,
 ) {
     fun json(): String = JSONObject().put("provider", provider).put("gemini_model", geminiModel).put("openrouter_model", openRouterModel)
         .put("gemini_fallbacks", JSONArray(geminiFallbacks)).put("openrouter_fallbacks", JSONArray(openRouterFallbacks))
@@ -95,7 +96,7 @@ data class InsightsSettings(
             val o = JSONObject(text ?: "{}")
             InsightsSettings(o.optString("provider").takeIf { it == GEMINI || it == OPENROUTER } ?: GEMINI,
                 o.optString("gemini_model").trim().ifEmpty { GeminiText.DEFAULT_MODEL }, o.optString("openrouter_model").trim(),
-                list(o, "gemini_fallbacks"), list(o, "openrouter_fallbacks"), o.optBoolean("use_other", true), o.optBoolean("auto", true),
+                list(o, "gemini_fallbacks"), list(o, "openrouter_fallbacks"), o.optBoolean("use_other", true), o.optBoolean("auto", false),
                 o.optInt("auto_hour", 9).coerceIn(0, 23))
         }.getOrDefault(InsightsSettings())
     }

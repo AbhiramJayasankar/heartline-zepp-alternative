@@ -19,7 +19,7 @@
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
-> **Status: 0.3.0.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
+> **Status: 0.3.1.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
 > Other Huami/Zepp watches of the same generation (GTR 2, GTS 2, GTS 2e) speak a similar protocol but are untested.
 
 ## Highlights
@@ -132,7 +132,8 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
 **AI insights**
 - Gemini 3.8 Flash with your AI Studio key, or an OpenRouter model with the Alexa brain's keys (switchable on the
   page). Two weeks of readiness, trends, sleep, heart rate, activity, stress, SpO2, temperature and gym captures go
-  in; ranked findings with the numbers and one thing to try come out. Nothing is sent until you ask.
+  in; ranked findings with the numbers and one thing to try come out. Nothing is sent until you ask: daily
+  insights are off unless you switch them on in the page's settings.
 
 **Your data stays yours**
 - Everything is stored in a local database on the phone. Export it, back it up, or share it with other apps through

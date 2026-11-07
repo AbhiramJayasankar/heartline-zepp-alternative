@@ -3,6 +3,7 @@ package dev.heartline.service
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -46,7 +47,11 @@ class InsightsTest {
     @Test fun settingsDefaultToGemini() {
         assertEquals(InsightsSettings.GEMINI, InsightsSettings.parse(null).provider)
         assertEquals(GeminiText.DEFAULT_MODEL, InsightsSettings.parse("{}").geminiModel)
-        assertTrue(InsightsSettings.parse(null).auto)
+        // Daily insights are opt-in: nothing goes to a model until the user asks or turns them on.
+        assertFalse(InsightsSettings.parse(null).auto)
+        assertFalse(InsightsSettings.parse("{}").auto)
+        assertFalse(InsightsSettings().auto)
+        assertTrue(InsightsSettings.parse(InsightsSettings(auto = true).json()).auto)
         val s = InsightsSettings(InsightsSettings.OPENROUTER, "gemini-x", "a/b", listOf("g2"), listOf("c/d"), useOther = false, auto = false, autoHour = 7)
         assertEquals(s, InsightsSettings.parse(s.json()))
     }
