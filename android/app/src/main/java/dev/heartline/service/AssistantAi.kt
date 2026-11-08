@@ -214,9 +214,12 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
             ✓ ★ ♥ ♪ (not ✔ ✗ ❤ • or ₹: write Rs). Whenever the answer is several items that each have a value or detail (a
             ranking or top 10, heights, prices, scores, a schedule, times, a forecast by day, steps with timings), call
             show_list to show it as a table, even if they say "list" and not "table"; only items with nothing beside them
-            (tips, a shopping list) go in the text, one per line starting with "- " or a number. The watch has
-            only these emoji: ${WatchAssistant.EMOJI_SHOWN}; others vanish, so use one of these now and then if it fits,
-            never others. Keep it short (at most 300 characters)
+            (tips, a shopping list) go in the text, one per line starting with a fitting emoji or symbol, "- " or a number.
+            The watch draws only these emoji: ${WatchAssistant.EMOJI_SHOWN}, and these symbols: ${WatchAssistant.SYMBOLS_SHOWN}
+            ° → ↑ ↓ ▲ ▼ ■ ● ○ ① ② ③; anything else vanishes. Use them generously, they make the small screen lively and
+            easy to scan: open most replies with one emoji that fits, start listed items with a matching one (✓ done,
+            ▲ ▼ up and down, ★ a highlight, ♥ heart, ☀ ☁ weather, ♪ music, ① ② ③ steps), and add one where it fits the
+            mood. Never use any other emoji. Keep it short (at most 300 characters)
             unless they ask for something long, like a story or a detailed explanation: then write it in full, never refuse
             because of the screen; a long reply continues as watch notifications. After showing a card, a few words are enough.
             A question at the end makes the watch listen again, so ask one only when you need their answer (never offers like
