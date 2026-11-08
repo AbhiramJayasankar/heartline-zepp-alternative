@@ -18,26 +18,27 @@ data class AlexaSettings(
     /** auto (none, a little when the model insists), off, low, medium or high. */
     val reasoning: String = "auto",
     val temperature: Double = 0.3,
-    val maxTokens: Int = 4000,
-    val reasoningMaxTokens: Int = 6000,
-    /** OpenRouter requests per question: each tool round is one. */
-    val maxRounds: Int = 6,
-    val answerTimeoutS: Int = 90,
+    val maxTokens: Int = 16_000,
+    val reasoningMaxTokens: Int = 32_000,
+    /** Requests per question: each tool round is one. Short questions take one or two; research can take many. */
+    val maxRounds: Int = 25,
+    /** The whole answer, however many requests; after [watchWaitS] it comes as notifications, so this can be long. */
+    val answerTimeoutS: Int = 900,
     /** Earlier questions and answers sent along, and the pause after which a new conversation starts. */
     val memoryTurns: Int = 6,
     val memoryMinutes: Int = 2,
-    val maxAnswerChars: Int = 20_000,
+    val maxAnswerChars: Int = 100_000,
     /** Bytes of the answer on the reply screen; the rest goes out as notifications. */
     val replyBytes: Int = WatchAssistant.REPLY_TEXT,
     /** How long the watch is kept on "Thinking" before it's told the answer will come as a notification. */
     val watchWaitS: Int = 34,
-    val maxNotifications: Int = 25,
+    /** Notifications per answer, about 150 words each; the GTR 2e keeps at least 12 (2026-11-09). */
+    val maxNotifications: Int = 100,
     /** Open the mic again after an answer that ends with a question. */
     val listenAgain: Boolean = true,
     val geminiModel: String = GeminiSpeech.MODEL,
     val languages: List<String> = GeminiSpeech.LANGUAGES,
     val vocabulary: List<String> = GeminiSpeech.VOCABULARY,
-    val geminiTimeoutS: Int = (GeminiSpeech.TIMEOUT_MS / 1000).toInt(),
     val webResults: Int = WebSearch.RESULTS,
     /** Questions kept: their recordings and their entries in the conversation log. */
     val keepTurns: Int = 30,
@@ -51,16 +52,16 @@ data class AlexaSettings(
         reasoning = reasoning.takeIf { it in REASONING } ?: "auto",
         fallbackModels = fallbackModels.map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(5),
         temperature = temperature.coerceIn(0.0, 2.0),
-        maxTokens = maxTokens.coerceIn(200, 32_000), reasoningMaxTokens = reasoningMaxTokens.coerceIn(500, 64_000),
-        maxRounds = maxRounds.coerceIn(1, 12), answerTimeoutS = answerTimeoutS.coerceIn(15, 300),
+        maxTokens = maxTokens.coerceIn(200, 64_000), reasoningMaxTokens = reasoningMaxTokens.coerceIn(500, 64_000),
+        maxRounds = maxRounds.coerceIn(1, 40), answerTimeoutS = answerTimeoutS.coerceIn(15, 1800),
         memoryTurns = memoryTurns.coerceIn(0, 20), memoryMinutes = memoryMinutes.coerceIn(0, 120),
-        maxAnswerChars = maxAnswerChars.coerceIn(500, 50_000),
+        maxAnswerChars = maxAnswerChars.coerceIn(500, 200_000),
         replyBytes = replyBytes.coerceIn(100, WatchAssistant.REPLY_TEXT), watchWaitS = watchWaitS.coerceIn(5, 38),
-        maxNotifications = maxNotifications.coerceIn(0, 60),
+        maxNotifications = maxNotifications.coerceIn(0, 150),
         geminiModel = geminiModel.trim().ifEmpty { GeminiSpeech.MODEL },
         languages = languages.map { it.trim() }.filter { it.isNotEmpty() }.ifEmpty { GeminiSpeech.LANGUAGES },
         vocabulary = vocabulary.map { it.trim() }.filter { it.isNotEmpty() },
-        geminiTimeoutS = geminiTimeoutS.coerceIn(5, 30), webResults = webResults.coerceIn(1, 10), keepTurns = keepTurns.coerceIn(1, 200),
+        webResults = webResults.coerceIn(1, 10), keepTurns = keepTurns.coerceIn(1, 200),
     )
 
     fun json(): String = JSONObject()
@@ -70,15 +71,20 @@ data class AlexaSettings(
         .put("max_rounds", maxRounds).put("answer_timeout_s", answerTimeoutS).put("memory_turns", memoryTurns).put("memory_minutes", memoryMinutes)
         .put("max_answer_chars", maxAnswerChars).put("reply_bytes", replyBytes).put("watch_wait_s", watchWaitS)
         .put("max_notifications", maxNotifications).put("listen_again", listenAgain).put("gemini_model", geminiModel)
-        .put("languages", JSONArray(languages)).put("vocabulary", JSONArray(vocabulary)).put("gemini_timeout_s", geminiTimeoutS)
-        .put("web_results", webResults).put("keep_turns", keepTurns).toString()
+        .put("languages", JSONArray(languages)).put("vocabulary", JSONArray(vocabulary))
+        .put("web_results", webResults).put("keep_turns", keepTurns).put("limits", LIMITS).toString()
 
     companion object {
         const val KEY = "alexa_settings"
         val REASONING = listOf("auto", "off", "low", "medium", "high")
+        /** Version of the defaults below; saved settings from before it that still hold an old default get the new one. */
+        const val LIMITS = 2
+        private val OLD_DEFAULTS = mapOf("max_tokens" to 4000, "reasoning_max_tokens" to 6000, "max_rounds" to 6, "answer_timeout_s" to 90,
+            "max_answer_chars" to 20_000, "max_notifications" to 25)
 
         fun parse(text: String?): AlexaSettings = runCatching {
             val o = JSONObject(text ?: "{}")
+            if (o.optInt("limits", 1) < LIMITS) OLD_DEFAULTS.forEach { (k, v) -> if (o.has(k) && o.optInt(k) == v) o.remove(k) }
             val d = AlexaSettings()
             fun strings(name: String, default: List<String>) = o.optJSONArray(name)?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: default
             AlexaSettings(
@@ -95,7 +101,7 @@ data class AlexaSettings(
                 watchWaitS = o.optInt("watch_wait_s", d.watchWaitS), maxNotifications = o.optInt("max_notifications", d.maxNotifications),
                 listenAgain = o.optBoolean("listen_again", d.listenAgain), geminiModel = o.optString("gemini_model", d.geminiModel),
                 languages = strings("languages", d.languages), vocabulary = strings("vocabulary", d.vocabulary),
-                geminiTimeoutS = o.optInt("gemini_timeout_s", d.geminiTimeoutS), webResults = o.optInt("web_results", d.webResults),
+                webResults = o.optInt("web_results", d.webResults),
                 keepTurns = o.optInt("keep_turns", d.keepTurns),
             ).clamped()
         }.getOrDefault(AlexaSettings())

@@ -20,7 +20,8 @@ class SpeechEndpointer(
     private val endSilenceFrames: Int = 75,
     private val minSpeechFrames: Int = 15,
     private val noSpeechFrames: Int = 350,
-    private val maxFrames: Int = 750,
+    /** 29 s: just under the watch's own 30 s, so a long, detailed question is heard in full. */
+    private val maxFrames: Int = 1450,
     private val skipFrames: Int = 20,
 ) {
     enum class State { WAITING, SPEAKING, DONE, NOTHING_SAID, TOO_LONG }

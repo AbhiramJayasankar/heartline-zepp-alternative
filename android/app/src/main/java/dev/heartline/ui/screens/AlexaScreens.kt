@@ -247,8 +247,7 @@ private fun VoicePage(controller: HeartlineController, nav: Navigator) {
         Gap(6)
         ListSetting("Languages", "Language codes Gemini listens for, one per line, such as en-IN.", s.languages) { v -> controller.updateAlexaSettings { it.copy(languages = v) } }
         ListSetting("Words to expect", "Names and terms Gemini should recognise, one per line.", s.vocabulary) { v -> controller.updateAlexaSettings { it.copy(vocabulary = v) } }
-        NumberSetting("Time limit", "Seconds to wait for Gemini's words (5 to 30). Longer leaves less of the watch's ~40 s for the answer.", s.geminiTimeoutS, 5..30) { v ->
-            controller.updateAlexaSettings { it.copy(geminiTimeoutS = v) } }
+        MutedText("The time limit and retries are under AI models, Voice to text.")
     }
 }
 
@@ -268,14 +267,14 @@ private fun BrainPage(controller: HeartlineController, nav: Navigator) {
         }
         Gap(12)
         DecimalSetting("Temperature", "0 is the most predictable, 2 the most varied (0 to 2).", s.temperature, 0.0..2.0) { v -> controller.updateAlexaSettings { it.copy(temperature = v) } }
-        NumberSetting("Longest reply in tokens", "Without reasoning (200 to 32,000). A 1,000-word story is about 1,400.", s.maxTokens, 200..32_000) { v ->
+        NumberSetting("Longest reply in tokens", "Without reasoning (200 to 64,000). A 1,000-word story is about 1,400. A model that refuses this many is asked again with 8,192.", s.maxTokens, 200..64_000) { v ->
             controller.updateAlexaSettings { it.copy(maxTokens = v) } }
         NumberSetting("Longest reply with reasoning", "Tokens, thinking included (500 to 64,000).", s.reasoningMaxTokens, 500..64_000) { v ->
             controller.updateAlexaSettings { it.copy(reasoningMaxTokens = v) } }
-        NumberSetting("Requests per question", "Each round of tool calls is one request (1 to 12).", s.maxRounds, 1..12) { v -> controller.updateAlexaSettings { it.copy(maxRounds = v) } }
-        NumberSetting("Time limit", "Seconds for the whole answer (15 to 300). After the watch stops waiting, it comes as a notification.", s.answerTimeoutS, 15..300) { v ->
+        NumberSetting("Requests per question", "Each round of tool calls is one request (1 to 40). A simple question takes one or two; research takes more.", s.maxRounds, 1..40) { v -> controller.updateAlexaSettings { it.copy(maxRounds = v) } }
+        NumberSetting("Time limit", "Seconds for the whole answer (15 to 1,800). After the watch stops waiting, it comes as notifications. Each request's own limit is under AI models.", s.answerTimeoutS, 15..1800) { v ->
             controller.updateAlexaSettings { it.copy(answerTimeoutS = v) } }
-        NumberSetting("Longest answer kept", "Characters (500 to 50,000); longer answers are cut.", s.maxAnswerChars, 500..50_000) { v ->
+        NumberSetting("Longest answer kept", "Characters (500 to 200,000); longer answers are cut. A 5,000-word story is about 30,000.", s.maxAnswerChars, 500..200_000) { v ->
             controller.updateAlexaSettings { it.copy(maxAnswerChars = v) } }
         Gap(16)
         SectionTitle("Memory")
@@ -400,7 +399,7 @@ private fun WatchPage(controller: HeartlineController, nav: Navigator) {
     Screen("On the watch", onBack = { nav.pop() }, subtitle = "How answers reach the watch. Measured on the GTR 2e: a reply shows about 2,045 bytes, and a notification takes 1,024 bytes (1,025 restarts the watch).") {
         NumberSetting("Reply length", "Bytes on the reply screen (100 to 2,000); the rest goes out as notifications of up to 960 bytes.", s.replyBytes, 100..2000) { v ->
             controller.updateAlexaSettings { it.copy(replyBytes = v) } }
-        NumberSetting("Most notifications", "Per answer (0 to 60); a longer answer ends \"(cut short)\".", s.maxNotifications, 0..60) { v ->
+        NumberSetting("Most notifications", "Per answer (0 to 150), about 150 words each; a longer answer ends \"(cut short)\".", s.maxNotifications, 0..150) { v ->
             controller.updateAlexaSettings { it.copy(maxNotifications = v) } }
         NumberSetting("Wait before \"Still thinking\"", "Seconds (5 to 38). The watch gives up at about 40 s, so a slower answer comes as a notification.", s.watchWaitS, 5..38) { v ->
             controller.updateAlexaSettings { it.copy(watchWaitS = v) } }

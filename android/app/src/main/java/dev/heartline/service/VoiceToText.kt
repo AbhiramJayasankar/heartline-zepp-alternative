@@ -18,7 +18,7 @@ class VoiceToText(private val store: AiStore, private val live: GeminiSpeech = G
         val catalog = store.catalog()
         val out = store.router.run(AiSection.VOICE) { t ->
             val isLive = catalog.of(t.ref)?.live ?: ("live" in t.model)
-            if (isLive) live.transcribe(pcm, t.key, settings.copy(geminiModel = t.model)).let { it.text }
+            if (isLive) live.transcribe(pcm, t.key, settings.copy(geminiModel = t.model), t.timeoutMs.toLong()).let { it.text }
             else {
                 val system = "Write down exactly what the speaker says, in the language they speak (expected: ${settings.languages.joinToString()}). " +
                     "Write numbers and times as digits and leave out filler words. Words that may come up: ${settings.vocabulary.joinToString()}. " +

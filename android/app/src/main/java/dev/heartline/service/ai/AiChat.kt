@@ -87,14 +87,28 @@ class AiClients(private val http: Transport = Http.default) : ChatApi {
  */
 class OpenAiApi(private val http: Transport) : ChatApi {
     private val mustReason = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val tokenCap = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
     override suspend fun chat(p: AiProvider, key: String, model: String, req: ChatRequest, timeoutMs: Int): ChatReply {
         val effort = req.reasoning ?: if (model in mustReason) "low" else null
-        return try { send(p, key, model, req, effort, timeoutMs) } catch (e: AiError) {
-            if (effort != null || !e.message.orEmpty().contains("Reasoning is mandatory", true)) throw e
-            mustReason += model
-            send(p, key, model, req, "low", timeoutMs)
+        val r = tokenCap[model]?.let { req.capped(it) } ?: req
+        return try { send(p, key, model, r, effort, timeoutMs) } catch (e: AiError) {
+            val m = e.message.orEmpty()
+            when {
+                effort == null && m.contains("Reasoning is mandatory", true) -> { mustReason += model; send(p, key, model, r, "low", timeoutMs) }
+                TOKEN_LIMIT.containsMatchIn(m) && maxOf(r.maxTokens, r.reasoningMaxTokens) > SAFE_TOKENS ->
+                    { tokenCap[model] = SAFE_TOKENS; send(p, key, model, r.capped(SAFE_TOKENS), effort, timeoutMs) }
+                else -> throw e
+            }
         }
+    }
+
+    private fun ChatRequest.capped(n: Int) = copy(maxTokens = minOf(maxTokens, n), reasoningMaxTokens = minOf(reasoningMaxTokens, n))
+
+    private companion object {
+        /** A budget every chat model takes; used when one refuses Heartline's larger default. */
+        const val SAFE_TOKENS = 8192
+        val TOKEN_LIMIT = Regex("max_tokens|max_completion_tokens|maximum context length|max(imum)? (output|completion) tokens", RegexOption.IGNORE_CASE)
     }
 
     private suspend fun send(p: AiProvider, key: String, model: String, req: ChatRequest, effort: String?, timeoutMs: Int): ChatReply {

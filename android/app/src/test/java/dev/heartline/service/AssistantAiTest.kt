@@ -109,7 +109,7 @@ class AssistantAiTest {
         val (cut, _) = brain { _, _, _ -> HttpReply(200, """{"model":"m","choices":[{"finish_reason":"length","message":{"content":null}}]}""") }
         assertTrue(runCatching { cut.converse("hi", context, emptyList(), Runner()) }.exceptionOrNull()!!.message!!.contains("ran out of tokens before it answered"))
         val (loop, _) = brain { _, _, _ -> calls("get_sleep" to "{}") }
-        assertEquals("m kept calling tools without answering (6 rounds)", runCatching { loop.converse("hi", context, emptyList(), Runner()) }.exceptionOrNull()?.message)
+        assertEquals("m kept calling tools without answering (25 rounds)", runCatching { loop.converse("hi", context, emptyList(), Runner()) }.exceptionOrNull()?.message)
     }
 
     @Test fun anotherKeyTakesOverWhenOneIsOutOfQuota() = runBlocking {

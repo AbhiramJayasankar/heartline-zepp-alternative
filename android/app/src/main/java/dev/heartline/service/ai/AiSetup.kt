@@ -1,5 +1,6 @@
 package dev.heartline.service.ai
 
+import dev.heartline.service.GeminiSpeech
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -93,9 +94,12 @@ data class RetryPolicy(
             o.optBoolean("other_keys", d.otherKeys), o.optInt("timeout_s", d.timeoutS)).clamped()
 
         /** Heartline's defaults per section: the assistant and voice are waited on at the watch, so they move on sooner. */
+        /** Time limits Heartline used before (each request is whole, not streamed, so a thinking model needs room). */
+        val OLD_TIMEOUTS = mapOf(AiSection.ASSISTANT to 40, AiSection.VOICE to 12)
+
         fun default(s: AiSection) = when (s) {
-            AiSection.ASSISTANT -> RetryPolicy(busyRetries = 1, retryWaitsS = listOf(2), waitForLimitS = 5, badAnswerRetries = 0, timeoutS = 40)
-            AiSection.VOICE -> RetryPolicy(busyRetries = 1, retryWaitsS = listOf(1), waitForLimitS = 3, badAnswerRetries = 0, timeoutS = 12)
+            AiSection.ASSISTANT -> RetryPolicy(busyRetries = 1, retryWaitsS = listOf(2), waitForLimitS = 5, badAnswerRetries = 0, timeoutS = 180)
+            AiSection.VOICE -> RetryPolicy(busyRetries = 1, retryWaitsS = listOf(1), waitForLimitS = 3, badAnswerRetries = 0, timeoutS = (GeminiSpeech.TIMEOUT_MS / 1000).toInt())
             AiSection.INSIGHTS -> RetryPolicy(busyRetries = 2, retryWaitsS = listOf(6, 20), waitForLimitS = 45, badAnswerRetries = 1, timeoutS = 180)
             AiSection.COACH -> RetryPolicy(busyRetries = 2, retryWaitsS = listOf(5, 15), waitForLimitS = 30, badAnswerRetries = 1, timeoutS = 120)
             AiSection.TITLES -> RetryPolicy(busyRetries = 1, retryWaitsS = listOf(5), waitForLimitS = 20, badAnswerRetries = 1, timeoutS = 60)
@@ -111,11 +115,17 @@ data class SectionSetup(val main: ModelRef? = null, val fallback1: ModelRef? = n
     fun with(level: Int, ref: ModelRef?) = when (level) { 0 -> copy(main = ref); 1 -> copy(fallback1 = ref); else -> copy(fallback2 = ref) }
 
     fun json(): JSONObject = JSONObject().put("main", main?.id ?: "").put("fallback1", fallback1?.id ?: "").put("fallback2", fallback2?.id ?: "")
-        .put("policy", policy.json())
+        .put("policy", policy.json().put("limits", LIMITS))
 
     companion object {
-        fun parse(o: JSONObject?, s: AiSection) = SectionSetup(ModelRef.parse(o?.optString("main")), ModelRef.parse(o?.optString("fallback1")),
-            ModelRef.parse(o?.optString("fallback2")), RetryPolicy.parse(o?.optJSONObject("policy"), RetryPolicy.default(s)))
+        const val LIMITS = 2
+        fun parse(o: JSONObject?, s: AiSection): SectionSetup {
+            val saved = o?.optJSONObject("policy")
+            var policy = RetryPolicy.parse(saved, RetryPolicy.default(s))
+            if (saved != null && saved.optInt("limits", 1) < LIMITS && policy.timeoutS == RetryPolicy.OLD_TIMEOUTS[s])
+                policy = policy.copy(timeoutS = RetryPolicy.default(s).timeoutS)
+            return SectionSetup(ModelRef.parse(o?.optString("main")), ModelRef.parse(o?.optString("fallback1")), ModelRef.parse(o?.optString("fallback2")), policy)
+        }
     }
 }
 

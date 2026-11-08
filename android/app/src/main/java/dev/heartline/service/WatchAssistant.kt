@@ -399,7 +399,8 @@ class WatchAssistant(
             val title = watchText(args.optString("title")).ifEmpty { "Heartline" }.take(24)
             val parts = notificationChunks(body)
             val n = if (dryRun) parts.size else try { actions.sendToWatch(title, parts) } catch (e: Exception) { return "Error: ${e.message}" }
-            return done("sending it to the watch as $n notification${if (n == 1) "" else "s"}" + if (n < parts.size) " (the last ${parts.size - n} are over the limit)" else "")
+            val words = body.split(Regex("\\s+")).count { it.isNotBlank() }
+            return done("sending it to the watch as $n notification${if (n == 1) "" else "s"} ($words words)" + if (n < parts.size) " (the last ${parts.size - n} are over the limit)" else "")
         }
 
         private suspend fun phone(action: String, args: JSONObject): String {
@@ -547,7 +548,8 @@ class WatchAssistant(
                 "schedule, a forecast by day, prices, steps with timings) even if they say list; it replaces the text reply, so put " +
                 "everything in it. weather: the weather card, whenever they ask about the weather in general. things_to_ask: what " +
                 "they can ask, when they ask what you can do. notifications: long text (a story, recipe, explanation or summary) sent " +
-                "as watch notifications to read later, split as needed; put the whole text in it and reply in a few words.",
+                "as watch notifications to read later. Heartline splits it into as many notifications as it needs, so there is no " +
+                "length limit: put the whole text in it at the full length asked for, and reply in a few words.",
                 obj(action("show_on_watch", "table, weather, things_to_ask or notifications"),
                     "title" to prop("string", "table or notifications: short heading; optional"),
                     "subtitle" to prop("string", "table: second line under the title; optional"),

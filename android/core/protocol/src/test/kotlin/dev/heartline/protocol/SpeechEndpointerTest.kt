@@ -44,8 +44,11 @@ class SpeechEndpointerTest {
 
     @Test fun capsLongTalk() {
         val e = SpeechEndpointer()
-        run(e, -10f to 20, -63f to 10, -40f to 900)
+        // 32 s of talk: 200 ms syllables with 200 ms gaps, like speech, so it never goes quiet for 1.5 s.
+        val talk = Array(80) { listOf(-35f to 10, -60f to 10) }.flatMap { it }.toTypedArray()
+        run(e, -10f to 20, -63f to 10, *talk)
         assertEquals(SpeechEndpointer.State.TOO_LONG, e.state)
+        assertEquals(1450, e.frames)
     }
 
     @Test fun ignoresTheStartTone() {

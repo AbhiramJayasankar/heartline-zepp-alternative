@@ -30,13 +30,12 @@ data class SpeechConfig(val geminiKey: String = "") {
  * digits, fillers dropped), then activityStart, the audio in 100 ms chunks, activityEnd; the final text arrives as
  * serverContent.inputTranscription. The key goes in the URL's key parameter, as the Live API documents; it's never logged.
  */
-class GeminiSpeech(private val client: OkHttpClient = OkHttpClient.Builder().readTimeout(30, TimeUnit.SECONDS).build()) {
+class GeminiSpeech(private val client: OkHttpClient = OkHttpClient.Builder().readTimeout(0, TimeUnit.SECONDS).build()) {
     /**
-     * [settings] gives the model, languages, vocabulary and time limit. Throws IllegalStateException (not a
-     * cancellation) when Gemini sends nothing back in time.
+     * [settings] gives the model, languages and vocabulary; [limit] is the Voice to text section's time limit (AI models).
+     * Throws IllegalStateException (not a cancellation) when Gemini sends nothing back in time.
      */
-    suspend fun transcribe(pcm: ShortArray, key: String, settings: AlexaSettings = AlexaSettings()): Transcript {
-        val limit = settings.geminiTimeoutS * 1000L
+    suspend fun transcribe(pcm: ShortArray, key: String, settings: AlexaSettings = AlexaSettings(), limit: Long = TIMEOUT_MS): Transcript {
         return try { transcribeWithin(pcm, key, settings, limit) }
         catch (e: kotlinx.coroutines.TimeoutCancellationException) { throw IllegalStateException("Gemini sent no words back within ${limit / 1000} s") }
     }
@@ -93,8 +92,8 @@ class GeminiSpeech(private val client: OkHttpClient = OkHttpClient.Builder().rea
     companion object {
         const val URL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
         const val MODEL = "models/gemini-3.5-transcribe-live"
-        /** Leaves OpenRouter most of the ~40 s the watch waits on "Thinking". */
-        const val TIMEOUT_MS = 12_000L
+        /** The Voice to text section's default time limit; a 29 s question took Gemini about 10 s (2026-11-09). */
+        const val TIMEOUT_MS = 30_000L
         val LANGUAGES = listOf("en-IN", "en-US")
         /** Words Gemini should expect. */
         val VOCABULARY = listOf("Alexa", "timer", "alarm", "reminder", "heart rate", "steps")
