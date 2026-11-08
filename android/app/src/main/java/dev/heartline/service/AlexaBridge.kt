@@ -79,6 +79,10 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
                         if (orphanAt > 0) { db.events.add("info", "Alexa: the stuck session ended %d ms after sending ${ORPHAN_STOPS[orphanStep - 1]}".format(ended - orphanAt)); orphanAt = 0; orphanStep = 0 }
                         if (active) finish()
                     }
+                    Alexa.CAPABILITIES_RESPONSE -> {
+                        if (m.payload.size > 1) voiceVersion = m.payload[1].toInt() and 255
+                        db.events.add("info", "Alexa: the watch's voice version is $voiceVersion")
+                    }
                     else -> db.events.add("info", "Alexa message: " + m.payload.take(160).joinToString("") { "%02x".format(it) } +
                         " \"" + String(m.payload, 1, m.payload.size - 1, Charsets.UTF_8).filter { it in ' '..'~' }.take(200) + "\"")
                 }
@@ -89,6 +93,8 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
     /** The watch's own reply limit (its ttsTextLimit), 0 when it sends none (the GTR 2e sends 0). */
     private var watchReplyLimit = 0
     private var settingsLogged = false
+    /** The watch's voice version from its `21 version languages` answer; the GTR 2e says 2. */
+    private var voiceVersion = 2
 
     private suspend fun begin(payload: ByteArray) {
         // The start carries the watch's Alexa settings as JSON after 4 bytes.
@@ -355,7 +361,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
     private suspend fun sendPendingDeletes() {
         val pending = AlexaDeletes.pending(folder).takeIf { it.isNotEmpty() } ?: return
         AlexaDeletes.clear(folder)
-        pending.forEach { (kind, token) -> watch.send2021(Endpoint2021.ALEXA, Alexa.deleteAlert(kind, token)) }
+        pending.forEach { (kind, token) -> watch.send2021(Endpoint2021.ALEXA, Alexa.deleteAlert(kind, token, voiceVersion)) }
         scope.launch {
             delay(6000)
             val slots = runCatching { watch.readAlarmSwitches() }.getOrNull()?.joinToString { "${it.slot} ${if (it.on) "on" else "off"}" } ?: "not read"

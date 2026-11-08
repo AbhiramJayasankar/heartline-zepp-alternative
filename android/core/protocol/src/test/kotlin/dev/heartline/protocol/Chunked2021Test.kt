@@ -51,7 +51,9 @@ class Chunked2021Test {
     }
 
     @Test fun deleteNamesTheKindAndToken() {
-        assertContentEquals(hex("08 02 00 06000000 02 01 01 61 31 00"), Alexa.deleteAlert(Alexa.ALERT_ALARM, "a1"))
+        assertContentEquals(hex("08 02 00 05000000 02 01 61 31 00"), Alexa.deleteAlert(Alexa.ALERT_ALARM, "a1"))
+        assertContentEquals(hex("08 02 00 06000000 02 01 01 61 31 00"), Alexa.deleteAlert(Alexa.ALERT_ALARM, "a1", version = 3))
+        assertContentEquals(hex("08 02 00 08000000 02 01 02 61 00 62 63 00"), Alexa.deleteAlerts(Alexa.ALERT_ALARM, listOf("a", "bc")))
     }
 
     @Test fun alarmCarriesLocalTimeAndDays() {
