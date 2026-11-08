@@ -683,9 +683,18 @@ class WatchAssistant(
                     return (if (head.isNullOrEmpty()) q else head + "\n\n" + q) to rest
                 }
             }
-            val note = " (continued in notifications)"
+            val note = " (full reply in notifications)"
             val cut = cutAt(text, limit - note.length, bytes = true)
             return (text.substring(0, cut).trimEnd() + note) to notificationChunks(text.substring(cut))
+        }
+
+        /**
+         * What a reply sends: the part the reply screen shows and, when it doesn't all fit, the whole reply again as
+         * notifications, so it can be read from the start in one place (the owner's wish, 2026-11-09).
+         */
+        fun replyAndNotifications(text: String?, limit: Int = REPLY_TEXT, keepLast: Boolean = false): Pair<String?, List<String>> {
+            val (shown, rest) = splitReply(text, limit, keepLast)
+            return shown to if (rest.isEmpty() || text == null) emptyList() else notificationChunks(text)
         }
 
         /** [text] in pieces that fit a watch notification, cut at sentences or words. */

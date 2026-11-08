@@ -149,10 +149,19 @@ class WatchAssistantTest {
         listOf("[listen]", "Follow-ups").forEach { assertTrue(it, system().contains(it)) }
     }
 
+    @Test fun aReplyThatOverflowsGoesToNotificationsInFull() {
+        val story = (1..60).joinToString(" ") { "Sentence number $it of the story goes on." }
+        val (shown, parts) = WatchAssistant.replyAndNotifications(story, 700)
+        assertTrue(shown!!.endsWith("(full reply in notifications)"))
+        assertEquals(story, parts.joinToString(" "))
+        assertTrue(parts.first().startsWith("Sentence number 1 of"))
+        assertEquals("Short." to emptyList<String>(), WatchAssistant.replyAndNotifications("Short.", 700))
+    }
+
     @Test fun aLongReplyThatAsksKeepsTheQuestionOnScreen() {
         val story = (1..60).joinToString(" ") { "Sentence number $it of the story goes on." } + "\nShall I go on with part two?"
         val (shown, rest) = WatchAssistant.splitReply(story, 700, keepLast = true)
-        assertTrue(shown!!.endsWith("(continued in notifications)\n\nShall I go on with part two?"))
+        assertTrue(shown!!.endsWith("(full reply in notifications)\n\nShall I go on with part two?"))
         assertTrue(shown.toByteArray().size <= 700)
         assertFalse(rest.joinToString(" ").contains("Shall I go on"))
         assertTrue(rest.isNotEmpty())
@@ -270,9 +279,9 @@ class WatchAssistantTest {
         val story = (1..120).joinToString(" ") { "Sentence number $it of the story goes here." }
         val (shown, rest) = WatchAssistant.splitReply(story, 700)
         assertTrue(shown!!.length <= 700)
-        assertTrue(shown.endsWith(". (continued in notifications)"))
+        assertTrue(shown.endsWith(". (full reply in notifications)"))
         assertTrue(rest.all { it.toByteArray().size <= WatchAssistant.NOTIFICATION_TEXT })
-        assertEquals(story, (shown.removeSuffix(" (continued in notifications)") + " " + rest.joinToString(" ")))
+        assertEquals(story, (shown.removeSuffix(" (full reply in notifications)") + " " + rest.joinToString(" ")))
         assertEquals("Short." to emptyList<String>(), WatchAssistant.splitReply("Short.", 700))
         assertEquals(null to emptyList<String>(), WatchAssistant.splitReply(null, 700))
         val word = "x".repeat(500) // no spaces at all still splits
