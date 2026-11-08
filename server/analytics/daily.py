@@ -267,6 +267,11 @@ def fitness_age(vo2: float | None, sex: str | None) -> int | None:
 
 # ---- main --------------------------------------------------------------------
 
+def _cap(z: float) -> float:
+    """How far one signal can move readiness: z-scores beyond ±2 count as 2."""
+    return min(2.0, max(-2.0, z))
+
+
 def _z(value, base: list[float], floor: float) -> float | None:
     if value is None or len(base) < 3:
         return None
@@ -355,22 +360,25 @@ def compute(minutes: list[dict], profile: dict, days: int, today: date | None = 
         zs = []
         z = _z(row["resting_hr"], [p["resting_hr"] for p in prev if p["resting_hr"]], 2.0)
         if z is not None:
+            z = _cap(z)
             zs.append((-z, 0.30))
             factors.append(("Resting heart rate", -z, f"{row['resting_hr']} bpm vs your usual "
                             f"{round(mean(p['resting_hr'] for p in prev if p['resting_hr']))}"))
-        base_hrv = [p["hrv_rmssd"] for p in prev if p["hrv_rmssd"]]
-        z = _z(row["hrv_rmssd"], base_hrv, 0.1 * mean(base_hrv) if base_hrv else 1.0)
+        # HRV on a log scale (ln RMSSD): readings skew high. Spread at least 0.1, about 10%.
+        base_hrv = [math.log(p["hrv_rmssd"]) for p in prev if p["hrv_rmssd"] and p["hrv_rmssd"] > 0]
+        z = _z(math.log(row["hrv_rmssd"]) if row["hrv_rmssd"] and row["hrv_rmssd"] > 0 else None, base_hrv, 0.1)
         if z is not None:
+            z = _cap(z)
             zs.append((z, 0.35))
-            factors.append(("HRV", z, f"Awake RMSSD {row['hrv_rmssd']:.0f} ms vs your usual {mean(base_hrv):.0f}"))
+            factors.append(("HRV", z, f"Awake RMSSD {row['hrv_rmssd']:.0f} ms vs your usual {math.exp(mean(base_hrv)):.0f}"))
         if row["sleep_score"] is not None:
-            z = (row["sleep_score"] - 70) / 15
+            z = _cap((row["sleep_score"] - 70) / 15)
             zs.append((z, 0.25))
             factors.append(("Sleep", z, f"sleep score {row['sleep_score']}, "
                             f"{row['sleep_minutes'] // 60} h {row['sleep_minutes'] % 60} min asleep"))
         y = rows.get(d - timedelta(days=1), (None,))[0]
         if y and y["strain"] is not None:
-            z = -(y["strain"] - 14) / 4 if y["strain"] > 14 else 0.0
+            z = _cap(-(y["strain"] - 14) / 4 if y["strain"] > 14 else 0.0)
             zs.append((z, 0.10))
             factors.append(("Yesterday's strain", z, f"strain {y['strain']}"))
         if zs and any(name in ("Resting heart rate", "Sleep") for name, *_ in factors):

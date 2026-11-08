@@ -144,7 +144,9 @@ fun ReadinessScreen(controller: HeartlineController, focus: String?, nav: Naviga
             }
             Gap(10)
             MutedText("The maths: each signal becomes a z-score, how many standard deviations today sits from your last 28 days " +
-                "(at least 2 bpm and 10% of your HRV, so a very steady month doesn't exaggerate small changes). Readiness is " +
+                "(at least 2 bpm and 10% of your HRV, so a very steady month doesn't exaggerate small changes). HRV is compared on a " +
+                "log scale, since its readings skew high. A z-score counts for at most 2 either way, so no single signal can swing the " +
+                "day on its own: HRV moves readiness by at most about 10 points. Readiness is " +
                 "70 + 15 × the weighted average of those z-scores, so a day one standard deviation better on everything scores 85, " +
                 "one worse scores 55. Weights: HRV 35%, sleeping heart rate 30%, sleep 25%, yesterday's strain 10%; signals missing " +
                 "today are left out and the rest share their weight.")
@@ -373,5 +375,6 @@ private fun zWords(z: Double, key: String): String {
     if (size < 0.3) return "Right at your usual (z ${"%+.1f".format(z)})."
     val dir = if (z > 0) "better than" else "worse than"
     val unit = if (key == "sleep" || key == "strain") "" else " your usual"
+    if (size >= 1.999) return "Well $dir${unit.ifEmpty { " an ordinary day" }}: 2 standard deviations or more, the most one signal can count (z ${"%+.1f".format(z)})."
     return "${how.replaceFirstChar { it.uppercase() }} $dir${unit.ifEmpty { " an ordinary day" }}: ${"%.1f".format(size)} standard deviations (z ${"%+.1f".format(z)})."
 }

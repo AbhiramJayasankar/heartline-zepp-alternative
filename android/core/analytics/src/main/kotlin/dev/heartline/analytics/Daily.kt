@@ -29,13 +29,22 @@ fun hrvByDay(checks: List<CheckSummary>, zone: ZoneId = ZoneId.systemDefault(), 
         .groupBy({ it.first }, { it.second })
         .mapValues { (_, values) -> rounded(median(values.toDoubleArray()), 1) }
 
-/** Overnight HRV against earlier nights: how far from the usual in its spread (at least 10% of it), and how many nights the usual rests on. */
+/**
+ * HRV is compared on a log scale, ln(RMSSD), as in the training literature (Plews, Buchheit): readings skew high, so one
+ * high morning would stretch a plain average and its spread. The spread is at least 0.1, about 10%.
+ */
+internal const val HRV_LN_FLOOR = 0.1
+/** How far one signal can move readiness: z-scores beyond ±2 count as 2. */
+internal const val Z_CAP = 2.0
+
+/** Overnight HRV against earlier nights: z on the log scale, the usual as a geometric mean, and how many nights it rests on. */
 internal data class NightHrv(val value: Double, val usual: Double, val z: Double, val nights: Int)
 internal fun nightHrv(value: Double?, base: List<Double>): NightHrv? {
     if (value == null || value <= 0 || base.isEmpty()) return null
-    val usual = average(base)
-    val sd = if (base.size >= 2) sqrt(variance(base.toDoubleArray())) else 0.0
-    return NightHrv(value, usual, (value - usual) / max(sd, 0.1 * usual), base.size)
+    val logs = base.map { ln(it) }
+    val mu = average(logs)
+    val sd = if (logs.size >= 2) sqrt(variance(logs.toDoubleArray())) else 0.0
+    return NightHrv(value, exp(mu), (ln(value) - mu) / max(sd, HRV_LN_FLOOR), base.size)
 }
 /** Overnight HRV and readiness: full weight once three earlier nights set the usual, a third of it per night before. */
 internal fun nightShare(nights: Int): Double = min(1.0, nights / 3.0)
@@ -119,7 +128,8 @@ fun computeDaily(
         val row = work.row
         val prev = rows.filterKeys { it >= d.minusDays(28) && it < d }.values.map { it.row }
         val zs = arrayListOf<Pair<Double, Double>>()
-        fun factor(name: String, z: Double, weight: Double, detail: String, value: Double? = null, usual: Double? = null, unit: String = "") {
+        fun factor(name: String, zRaw: Double, weight: Double, detail: String, value: Double? = null, usual: Double? = null, unit: String = "") {
+            val z = zRaw.coerceIn(-Z_CAP, Z_CAP)
             zs.add(z to weight)
             work.factors.add(ReadinessFactor(name, if (z > 0.3) "positive" else if (z < -0.3) "negative" else "neutral", detail, z, weight,
                 value = value, usual = usual, unit = unit))
@@ -136,9 +146,10 @@ fun computeDaily(
             "Overnight RMSSD ${rounded(night.value).toLong()} ms vs your usual ${rounded(night.usual).toLong()}" +
                 (if (night.nights < 3) " from ${night.nights} earlier night${if (night.nights == 1) "" else "s"}, so it counts for less until there are 3" else ""),
             night.value, night.usual, "ms")
-        val baseHrv = prev.mapNotNull { it.hrvRmssd?.takeIf { v -> v != 0.0 } }
-        if (night == null) zScore(row.hrvRmssd, baseHrv, if (baseHrv.isNotEmpty()) 0.1 * average(baseHrv) else 1.0)?.let { z ->
-            factor("HRV", z, 0.35, "Awake RMSSD ${rounded(row.hrvRmssd!!).toLong()} ms vs your usual ${rounded(average(baseHrv)).toLong()}", row.hrvRmssd, average(baseHrv), "ms")
+        val baseHrv = prev.mapNotNull { it.hrvRmssd?.takeIf { v -> v > 0 } }.map { ln(it) }
+        if (night == null) zScore(row.hrvRmssd?.takeIf { it > 0 }?.let { ln(it) }, baseHrv, HRV_LN_FLOOR)?.let { z ->
+            val usual = exp(average(baseHrv))
+            factor("HRV", z, 0.35, "Awake RMSSD ${rounded(row.hrvRmssd!!).toLong()} ms vs your usual ${rounded(usual).toLong()}", row.hrvRmssd, usual, "ms")
         }
         // The sleep score's HRV part is left out here: HRV already counts on its own.
         if (row.sleepScore != null) work.sleepBase?.let { score -> factor("Sleep", (score - 70) / 15.0, 0.25,

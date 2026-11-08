@@ -36,6 +36,8 @@ class AutoHrvTest {
         val f = r.today.readinessFactors.single { it.name == "HRV" }
         assertTrue(f.detail.startsWith("Awake RMSSD 70 ms vs your usual 50"), f.detail)
         assertEquals(0.35, f.weight)
+        assertEquals(2.0, f.z) // ln(70/50) / 0.1 = 3.4, counted as 2
+        assertEquals(15 * 2 * 0.35 / r.today.readinessFactors.sumOf { it.weight }, f.points, 1e-9)
     }
 
     @Test fun overnightHrvCountsFromTheSecondNightAtAThirdOfItsWeight() {
@@ -44,7 +46,7 @@ class AutoHrvTest {
         val f = r.today.readinessFactors.single { it.name == "HRV" }
         assertTrue(f.detail.startsWith("Overnight RMSSD 66 ms vs your usual 60 from 1 earlier night"), f.detail)
         assertEquals(0.35 / 3, f.weight, 1e-9)
-        assertEquals(1.0, f.z, 1e-9) // one night: the spread is 10% of the usual
+        assertEquals(Math.log(66.0 / 60.0) / 0.1, f.z, 1e-9) // one night: the spread is the 0.1 floor on the log scale
         // The first night has nothing to compare with.
         assertNull(r.days.single { it.date == last.minusDays(1).toString() }.sleepHrv)
     }
