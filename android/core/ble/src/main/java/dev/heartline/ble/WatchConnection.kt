@@ -407,7 +407,7 @@ class WatchConnection(
         actions.withLock { c.write(Uuids.ALERT_LEVEL, ALERT_FIND) }; delay(3000)
         actions.withLock { c.write(Uuids.ALERT_LEVEL, ALERT_OFF) }
     }
-    suspend fun notify(title: String, body: String, kind: NotificationKind = NotificationKind.MESSAGE, app: String = "Heartline", icon: Int = WatchIcon.APP) {
+    suspend fun notify(title: String, body: String, kind: NotificationKind = NotificationKind.MESSAGE, app: String = "Heartline", icon: Int = WatchIcon.GENERIC) {
         val c = requireClient()
         actions.withLock { chunks(c, notificationPayload(title, body, kind, app, icon)) }
         if (kind == NotificationKind.CALL) {

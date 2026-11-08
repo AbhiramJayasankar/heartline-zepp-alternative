@@ -25,6 +25,16 @@ object WatchIcon {
     const val ALARM_CLOCK = 10; const val APP = 11; const val INSTAGRAM = 12; const val CHAT_BLUE = 13; const val CALENDAR = 21
     const val MESSENGER = 22; const val VIBER = 23; const val LINE = 24; const val TELEGRAM = 25; const val KAKAOTALK = 26
     const val SKYPE = 27; const val VKONTAKTE = 28; const val HANGOUTS = 30; const val EMAIL = 34
+    /**
+     * Zepp's HMAlertApp.GENERIC, for apps without their own icon; Heartline's own notifications use it. APP (11) shows
+     * as "App" on the GTR 2e. Tested 2026-11-08: 0xFF a generic app icon, 5 Mi Fit, 17 a star, 35 a cloud.
+     */
+    const val GENERIC = 0xFF
+    /**
+     * Zepp's HMAlertApp.CARE: the watch shows it as a full-screen nudge with a small heart, not as a notification
+     * (the Mi Band friend nudge; tested 2026-11-08). Not used yet.
+     */
+    const val CARE = 36
 }
 
 /** Icon for an Android package, following Gadgetbridge's app-to-icon mapping; unknown apps get the generic icon. */
