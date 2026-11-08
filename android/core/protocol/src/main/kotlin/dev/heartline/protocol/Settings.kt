@@ -239,7 +239,7 @@ fun settingCommand(key: String, value: Any, current: Map<String, Any?> = emptyMa
             bytes(6, 0x21, 0, if (on) 1 else 0) + (pin ?: "0000").toByteArray(Charsets.US_ASCII) + bytes(0)
         }
         // HuamiService.WEAR_LOCATION_LEFT_WRIST / RIGHT_WRIST, written to the user-settings characteristic.
-        "wear_location" -> if (v == "right") bytes(0x20, 0, 0, 0x82) else bytes(0x20, 0, 0, 2)
+        "wear_location" -> if (v == "right") bytes(0x20, 0, 0, 0x82) else bytes(0x20, 0, 0, 2)  // GTR 2e: wearLocation2021
         // HuamiSupport.setFitnessGoal: 10 00 00, the goal as u16, 00 00.
         "step_goal" -> integer(v).toInt().let { bytes(0x10, 0, 0, it and 255, (it shr 8) and 255, 0, 0) }
         "time_24h" -> bytes(6, 2, 0, b(v))

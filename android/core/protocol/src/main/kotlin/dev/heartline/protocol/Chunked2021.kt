@@ -6,7 +6,32 @@ package dev.heartline.protocol
  * `03 | flags | handle | count`, and the first chunk adds `u32 length | u16 endpoint`. Flags: 0x01 first, 0x02 last,
  * 0x04 needs an ack, 0x08 encrypted. Acks are `04 handle 01 count`, written to 0017 (see [chunked2021Ack]).
  */
-object Endpoint2021 { const val ALEXA = 0x0011 }
+object Endpoint2021 {
+    const val ALEXA = 0x0011
+    /** Zepp's UserInfoModule (module 23): user info, step goal and wear location on watches without characteristic 0008. */
+    const val USER_INFO = 0x0017
+}
+
+/**
+ * A UserInfoModule write (Zepp 6.3.1 UserInfoParserKt.toBleBytes): 01, a little-endian u32 of flags, then each flagged
+ * field in flag order. The watch answers 02 01 when it took it.
+ */
+private fun userInfo2021(flags: Int, fields: ByteArray): ByteArray =
+    byteArrayOf(1, flags.toByte(), (flags shr 8).toByte(), (flags shr 16).toByte(), (flags shr 24).toByte()) + fields
+/** Worn on the right or left wrist: (way << 7) | wear, wear 2 = wrist, way 1 = right (FLAG_SENSOR_LOCATION 0x20). */
+fun wearLocation2021(right: Boolean): ByteArray = userInfo2021(0x20, byteArrayOf(if (right) 0x82.toByte() else 0x02))
+/** Daily step goal as a little-endian u32 (FLAG_STEP_GOAL 0x10). */
+fun stepGoal2021(goal: Int): ByteArray = userInfo2021(0x10, byteArrayOf(goal.toByte(), (goal shr 8).toByte(), (goal shr 16).toByte(), (goal shr 24).toByte()))
+/**
+ * Birth date, sex, height and weight (flags 0x0F) from a classic 4F user-info command ([userInfoCommand]): its bytes 3..11
+ * are the same fields in the same order and encoding (year u16, month, day, sex 0/1/2, height u16 cm, weight × 200 u16).
+ */
+fun userInfo2021FromClassic(classic: ByteArray): ByteArray {
+    require(classic.size >= 12 && classic[0] == 0x4F.toByte())
+    return userInfo2021(0x0F, classic.copyOfRange(3, 12))
+}
+/** Whether a UserInfoModule reply says the watch took the write. */
+fun userInfo2021Accepted(reply: ByteArray?): Boolean = reply != null && reply.size >= 2 && reply[0] == 2.toByte() && reply[1] == 1.toByte()
 
 fun chunked2021Frames(endpoint: Int, payload: ByteArray, handle: Int, mtu: Int = 23): List<ByteArray> {
     val frames = ArrayList<ByteArray>()

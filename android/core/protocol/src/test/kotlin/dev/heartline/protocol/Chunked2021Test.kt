@@ -68,4 +68,18 @@ class Chunked2021Test {
         assertContentEquals(hex("08 01 00"), w.copyOfRange(0, 3))
         assertContentEquals(hex("fd030000 740e0000"), w.copyOfRange(7, 15))
     }
+
+    @Test fun userInfoModuleWritesFlagsThenFields() {
+        assertContentEquals(hex("01 20000000 02"), wearLocation2021(right = false))
+        assertContentEquals(hex("01 20000000 82"), wearLocation2021(right = true))
+        assertContentEquals(hex("01 10000000 10270000"), stepGoal2021(10000))
+        val classic = userInfoCommand(1999, 4, 7, "male", 175, 70.0, 1234)
+        assertContentEquals(hex("01 0f000000 cf07 04 07 00 af00 b036"), userInfo2021FromClassic(classic))
+    }
+
+    @Test fun userInfoModuleAcceptsOnlyTwoOne() {
+        assertEquals(true, userInfo2021Accepted(hex("0201")))
+        assertEquals(false, userInfo2021Accepted(hex("0202")))
+        assertEquals(false, userInfo2021Accepted(null))
+    }
 }

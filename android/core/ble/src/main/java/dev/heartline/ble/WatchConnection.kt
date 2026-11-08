@@ -424,6 +424,18 @@ class WatchConnection(
         val c = requireClient()
         chunks(c, musicPayload(music), 3); chunks(c, musicVolumePayload(volumePercent), 3)
     }
+    /**
+     * A UserInfoModule write on the 2021 channel (endpoint 0x17), for watches without characteristic 0008 (the GTR 2e):
+     * waits up to 4 s for the watch's answer and fails unless it is 02 01.
+     */
+    private suspend fun userInfo2021(payload: ByteArray, what: String) = coroutineScope {
+        val reply = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(4000) { chunked2021.first { it.endpoint == Endpoint2021.USER_INFO } }
+        }
+        send2021(Endpoint2021.USER_INFO, payload)
+        val answer = reply.await()?.payload
+        check(userInfo2021Accepted(answer)) { "The watch didn't accept $what (${answer?.joinToString("") { "%02x".format(it) } ?: "no answer"})" }
+    }
     /** Sends one message on the 2021 chunked channel. Not under the action lock, so replies are not stuck behind a sync. */
     suspend fun send2021(endpoint: Int, payload: ByteArray) {
         val c = requireClient()
@@ -444,7 +456,14 @@ class WatchConnection(
         val valid = validateSetting(key, value)
         val (target, cmd) = settingCommand(key, valid, persistence.settingValues())
         if (target == SettingTarget.HR) c.write(Uuids.HR_CONTROL, cmd, true)
-        else if (target == SettingTarget.USER) c.write(Uuids.USER_SETTINGS, cmd, true)
+        else if (target == SettingTarget.USER) {
+            if (c.has(Uuids.USER_SETTINGS)) c.write(Uuids.USER_SETTINGS, cmd, true)
+            else userInfo2021(when (key) {
+                "wear_location" -> wearLocation2021(valid == "right")
+                "step_goal" -> stepGoal2021((valid as Number).toInt())
+                else -> error("No 2021 user-info form for $key")
+            }, key)
+        }
         else route(setOf(Uuids.CONFIG)) { channel ->
             c.enableNotification(Uuids.CONFIG)
             try {
@@ -497,7 +516,8 @@ class WatchConnection(
     /** Height, weight, age and sex for the watch's own calorie, distance and heart-rate zone estimates ([userInfoCommand]). */
     suspend fun writeUserInfo(command: ByteArray) = actions.withLock {
         require(command.isNotEmpty() && command[0] == 0x4F.toByte())
-        requireClient().write(Uuids.USER_SETTINGS, command, true)
+        val c = requireClient()
+        if (c.has(Uuids.USER_SETTINGS)) c.write(Uuids.USER_SETTINGS, command, true) else userInfo2021(userInfo2021FromClassic(command), "user info")
         log("info", "Sent user info to the watch")
     }
     suspend fun writeAlarm(command: ByteArray) = actions.withLock {

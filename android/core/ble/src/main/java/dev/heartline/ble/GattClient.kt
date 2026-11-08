@@ -118,6 +118,8 @@ class GattClient(private val context: Context) : AutoCloseable {
         .filter { !it.uuid.toString().startsWith("00001530") }
         .flatMap { s -> s.characteristics.filter { it.properties and (BluetoothGattCharacteristic.PROPERTY_NOTIFY or BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0 }.map { s.uuid to it.uuid } }
     private fun requireGatt() = gatt ?: error("GATT is not connected")
+    /** Whether the connected watch has [uuid] (the GTR 2e has no 0008 user-settings characteristic, for one). */
+    fun has(uuid: UUID): Boolean = gatt?.services?.any { s -> s.characteristics.any { it.uuid == uuid } } == true
     private fun characteristic(uuid: UUID): BluetoothGattCharacteristic = requireGatt().services.asSequence()
         .flatMap { it.characteristics.asSequence() }.firstOrNull { it.uuid == uuid } ?: error("Missing characteristic $uuid")
     override fun close() {
