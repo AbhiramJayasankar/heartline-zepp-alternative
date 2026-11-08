@@ -74,7 +74,7 @@ class WatchService : Service() {
             override suspend fun phoneStatus() = phone.status()
         }
         val workoutNow = { captureRunner.run.value?.let { r -> "${r.label}, ${r.seconds / 60} of ${r.plannedS / 60} minutes" + (r.hr?.let { ", heart rate $it" } ?: "") } }
-        AlexaBridge(scope, watch, app.db, java.io.File(filesDir, "alexa"), GeminiSpeech(),
+        AlexaBridge(scope, watch, app.db, java.io.File(filesDir, "alexa"), VoiceToText(app.ai),
             watchAssistant(this, app.db, app.settings, app.realController, alexaActions, workoutNow)).start()
         // The offline Vosk model unpacked by older versions (about 70 MB).
         scope.launch(Dispatchers.IO) { java.io.File(filesDir, "vosk-en").takeIf { it.exists() }?.deleteRecursively() }
@@ -177,6 +177,10 @@ class WatchService : Service() {
      * watch writes that log in batches of 50 events (one every 30-40 s), so a start can reach the phone up to about
      * 30 minutes late (2026-11-04); a start up to an hour old with no end yet still begins a capture. With auto capture on, a fresh start begins a capture named after the workout, and the
      * matching end stops a capture this started.
+     *
+     * Each start begins at most one capture, ever: the start's time is saved, so restarting Heartline (or deleting the
+     * capture) doesn't begin another for the same workout. A workout discarded on the watch logs no end, and before
+     * this every restart within the hour started a fresh capture for it (2026-11-09).
      */
     private suspend fun followWatchWorkouts() {
         val since = System.currentTimeMillis() / 1000.0 - 60 * 60
@@ -186,8 +190,10 @@ class WatchService : Service() {
             val name = runCatching { org.json.JSONObject(last.extra ?: "{}").optString("type", "Workout") }.getOrDefault("Workout")
             val start = runCatching { org.json.JSONObject(last.extra ?: "{}").optString("event") }.getOrNull() == "start"
             if (app.db.meta.get(AUTO_CAPTURE) != "true") return@collect
-            if (start && now - last.ts < 60 * 60 && captureRunner.run.value == null && autoCaptureStartedAt != last.ts) {
+            val handled = app.db.meta.get(AUTO_CAPTURE_HANDLED)?.toLongOrNull()
+            if (start && now - last.ts < 60 * 60 && captureRunner.run.value == null && autoCaptureStartedAt != last.ts && handled != last.ts) {
                 autoCaptureStartedAt = last.ts
+                app.db.meta.set(AUTO_CAPTURE_HANDLED, last.ts.toString())
                 runCatching { captureRunner.start(name, 180) }
                     .onSuccess { app.db.events.add("info", "Started a capture for the watch's $name, ${(now - last.ts) / 60} min after it began") }
                     .onFailure { app.db.events.add("warn", "Auto capture did not start: ${it.message}") }
@@ -244,6 +250,8 @@ class WatchService : Service() {
     companion object {
         /** meta key: start a capture when a workout is opened on the watch. */
         const val AUTO_CAPTURE = "auto_capture_watch_workouts"
+        /** The watch workout start (epoch seconds) that already began a capture. */
+        const val AUTO_CAPTURE_HANDLED = "auto_capture_handled_start"
         const val IDLE = "dev.heartline.IDLE"
         private const val CHANNEL = "watch_connection"
         private const val ID = 1

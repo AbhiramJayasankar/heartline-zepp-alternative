@@ -67,9 +67,10 @@ class WatchAssistantTest {
     /** The tool results the model was given in the last request. */
     private fun toolResults(): List<String> = bodies.last().getJSONArray("messages").let { m -> (0 until m.length()).map { m.getJSONObject(it) }.filter { it.optString("role") == "tool" }.map { it.getString("content") } }
 
+    private fun fakeAi(reply: (String) -> dev.heartline.service.ai.HttpReply) = dev.heartline.service.ai.FakeAi(dev.heartline.service.ai.FakeAi.setup(listOf("sk-test"))) { _, _, _, b -> reply(b!!) }
     private fun assistant() = WatchAssistant(
-        AssistantAi { _, _, body -> bodies += JSONObject(body); replies.removeFirstOrNull() ?: say("(no more replies)") },
-        { AssistantAiConfig(key) }, { WatchAssistant.Facts("72 bpm at 3:39 PM", 4200, health = "Readiness: 62 out of 100") }, weather, store, actions, data, { now }, { alexa })
+        AssistantAi(fakeAi { body -> bodies += JSONObject(body); dev.heartline.service.ai.HttpReply(200, replies.removeFirstOrNull() ?: say("(no more replies)")) }.store),
+        { key.isNotEmpty() }, { WatchAssistant.Facts("72 bpm at 3:39 PM", 4200, health = "Readiness: 62 out of 100") }, weather, store, actions, data, { now }, { alexa })
 
     private var alexa = AlexaSettings()
 
@@ -83,7 +84,6 @@ class WatchAssistantTest {
         val tools = body.getJSONArray("tools").let { t -> (0 until t.length()).map { t.getJSONObject(it).getJSONObject("function") } }
         assertFalse(tools.any { it.getString("name") == "timers_and_reminders" })
         assertEquals("Sleep data.", tools.first { it.getString("name") == "get_sleep" }.getString("description"))
-        assertEquals(listOf(AssistantAiConfig.DEFAULT_MODEL, "x/y"), body.getJSONArray("models").let { m -> (0 until m.length()).map { m.getString(it) } })
         assertEquals(0.7, body.getDouble("temperature"), 0.0)
         assertEquals(900, body.getInt("max_tokens"))
         // A tool that's off isn't run even if the model calls it.
@@ -139,11 +139,11 @@ class WatchAssistantTest {
     }
 
     @Test fun failuresAreToldToTheWatch() = runBlocking {
-        val a = WatchAssistant(AssistantAi { _, _, _ -> throw AssistantAi.OpenRouterError("OpenRouter 429: Rate limit exceeded") },
-            { AssistantAiConfig(key) }, { WatchAssistant.Facts() }, weather, store, actions, data, { now })
-        assertEquals("OpenRouter isn't working: OpenRouter 429: Rate limit exceeded", a.answer("hello").text)
+        val a = WatchAssistant(AssistantAi(fakeAi { dev.heartline.service.ai.HttpReply(429, """{"error":{"message":"Rate limit exceeded","code":429}}""") }.store),
+            { true }, { WatchAssistant.Facts() }, weather, store, actions, data, { now })
+        assertEquals("The AI isn't working: a/main: OpenRouter 429: Rate limit exceeded", a.answer("hello").text)
         key = ""
-        assertTrue(assistant().answer("hello").text!!.startsWith("Add an OpenRouter key"))
+        assertTrue(assistant().answer("hello").text!!.startsWith("Choose a model with a key"))
         assertEquals("I didn't hear any words. Try again.", assistant().answer(" ").text)
     }
 

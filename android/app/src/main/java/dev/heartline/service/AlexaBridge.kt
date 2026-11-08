@@ -42,7 +42,7 @@ import java.io.File
  * ends the bridge works through [STOPS], moving on whenever voice is still arriving 3 s later.
  */
 class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchConnection, private val db: HeartlineDatabase, private val folder: File,
-                  private val gemini: GeminiSpeech, private val assistant: WatchAssistant) {
+                  private val speech: VoiceToText, private val assistant: WatchAssistant) {
     private var voice = ByteArrayOutputStream()
     private var packets = 0
     private var decoder: MicDecoder? = null
@@ -268,6 +268,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
                 return
             }
             val answer = u.answer
+            sendPendingDeletes()
             answer.frames.forEach { watch.send2021(Endpoint2021.ALEXA, it) }
             val limit = if (watchReplyLimit > 0) minOf(watchReplyLimit, s.replyBytes) else s.replyBytes
             val (shown, rest) = WatchAssistant.splitReply(answer.text?.let { WatchAssistant.watchText(it) }, limit)
@@ -292,17 +293,15 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
     /** What was said, and the answer to it; failures become an answer saying what went wrong. */
     private suspend fun understand(audio: ShortArray, s: AlexaSettings): Understood {
         val audioS = audio.size / 16_000.0
-        val key = SpeechConfig.parse(db.meta.get(SpeechConfig.KEY)).geminiKey
-        if (key.isBlank()) return Understood(WatchAssistant.Answer("Add a Gemini key in Heartline (Watch, Alexa) so I can hear you.", error = "no Gemini key"), null, audioS, null)
         val t0 = System.currentTimeMillis()
         // A timeout is a CancellationException too, but it's a failure to report, not this job being cancelled
         // (rethrowing it ended the turn in silence, and the watch said "I didn't hear you clearly", 2026-11-06).
-        val heard = try { gemini.transcribe(audio, key, s) } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-            db.events.add("warn", "Alexa: Gemini sent nothing back in ${System.currentTimeMillis() - t0} ms")
-            return Understood(WatchAssistant.Answer("Gemini didn't send back any words in time. Try again.", error = "Gemini sent nothing back"), null, audioS, System.currentTimeMillis() - t0)
+        val heard = try { speech.transcribe(audio, s) } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            db.events.add("warn", "Alexa: voice to text sent nothing back in ${System.currentTimeMillis() - t0} ms")
+            return Understood(WatchAssistant.Answer("I didn't get any words back in time. Try again.", error = "voice to text sent nothing back"), null, audioS, System.currentTimeMillis() - t0)
         } catch (e: CancellationException) { throw e } catch (e: Exception) {
-            db.events.add("warn", "Alexa: Gemini failed after ${System.currentTimeMillis() - t0} ms: ${e.message}")
-            return Understood(WatchAssistant.Answer("Gemini isn't working: ${e.message}", error = "Gemini: ${e.message}"), null, audioS, System.currentTimeMillis() - t0)
+            db.events.add("warn", "Alexa: voice to text failed after ${System.currentTimeMillis() - t0} ms: ${e.message}")
+            return Understood(WatchAssistant.Answer("Voice to text isn't working: ${e.message}", error = "voice to text: ${e.message}"), null, audioS, System.currentTimeMillis() - t0)
         }
         val speechMs = System.currentTimeMillis() - t0
         db.events.add("info", "Alexa heard (${secs(audio.size / 16L)} s audio, $speechMs ms): \"${heard.text}\"")
@@ -352,6 +351,18 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         withContext(Dispatchers.IO) { runCatching { d.close() } }
     }
 
+    /** Sends the queued alert deletes with this answer: the watch only acts on Alexa deletes sent inside a conversation. */
+    private suspend fun sendPendingDeletes() {
+        val pending = AlexaDeletes.pending(folder).takeIf { it.isNotEmpty() } ?: return
+        AlexaDeletes.clear(folder)
+        pending.forEach { (kind, token) -> watch.send2021(Endpoint2021.ALEXA, Alexa.deleteAlert(kind, token)) }
+        scope.launch {
+            delay(6000)
+            val slots = runCatching { watch.readAlarmSwitches() }.getOrNull()?.joinToString { "${it.slot} ${if (it.on) "on" else "off"}" } ?: "not read"
+            db.events.add("info", "Alexa: asked the watch to remove ${pending.size} alert${if (pending.size == 1) "" else "s"} (${pending.joinToString { it.second }}); alarm slots now: $slots")
+        }
+    }
+
     /** Milliseconds as seconds with one decimal, for log lines (kept out of format strings that hold text). */
     private fun secs(ms: Long) = "%.1f".format(java.util.Locale.ROOT, ms / 1000.0)
 
@@ -361,4 +372,20 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         val ORPHAN_STOPS = listOf("triggered (06)", "a card", "a simple reply", "an error (0f)", "end (02)")
         val STOPS = listOf("triggered (06)", "an error (0f)")
     }
+}
+
+/** Alerts to remove from the watch, kept as "kind token" lines in the Alexa folder until the next Alexa conversation sends them. */
+object AlexaDeletes {
+    const val FILE = "pending-deletes"
+    fun queue(folder: File, kind: Int, token: String) {
+        if (pending(folder).any { it.second == token }) return
+        folder.mkdirs(); File(folder, FILE).appendText("$kind $token\n")
+    }
+    fun pending(folder: File): List<Pair<Int, String>> = runCatching {
+        File(folder, FILE).takeIf { it.isFile }?.readLines().orEmpty().mapNotNull { l ->
+            val parts = l.trim().split(" ", limit = 2)
+            if (parts.size == 2) parts[0].toIntOrNull()?.let { it to parts[1].trim() } else null
+        }
+    }.getOrDefault(emptyList())
+    fun clear(folder: File) { File(folder, FILE).delete() }
 }

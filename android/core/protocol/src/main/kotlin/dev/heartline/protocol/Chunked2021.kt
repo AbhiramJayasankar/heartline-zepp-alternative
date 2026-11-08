@@ -161,12 +161,23 @@ object Alexa {
         return complex(3, b.toByteArray())
     }
 
-    /** An alarm at [localEpochSec] (wall-clock time as seconds), repeating on [days] (0 once). [token] identifies it. */
-    fun alarm(token: String, localEpochSec: Long, days: Int = 0): ByteArray = alert(1, ALERT_ALARM, token, z("") + z("") + u32(localEpochSec) + u32(0) + u32(days.toLong()))
-    fun reminder(token: String, localEpochSec: Long, label: String, days: Int = 0): ByteArray =
-        alert(1, ALERT_REMINDER, token, z(label) + z(label) + u32(localEpochSec) + u32(0) + u32(days.toLong()))
+    /**
+     * An alarm at [localEpochSec] (wall-clock time as seconds), repeating on [days] (0 once). [token] identifies it.
+     * Voice version 3 and up (the GTR 2e) end it with an enabled byte, as Zepp's NormalV3Parameter does; without it the
+     * watch stores the alarm switched off, so it never rings.
+     */
+    fun alarm(token: String, localEpochSec: Long, days: Int = 0, enabled: Boolean = true): ByteArray =
+        alert(1, ALERT_ALARM, token, z("") + z("") + u32(localEpochSec) + u32(0) + u32(days.toLong()) + bytes(if (enabled) 1 else 0))
+    fun reminder(token: String, localEpochSec: Long, label: String, days: Int = 0, enabled: Boolean = true): ByteArray =
+        alert(1, ALERT_REMINDER, token, z(label) + z(label) + u32(localEpochSec) + u32(0) + u32(days.toLong()) + bytes(if (enabled) 1 else 0))
     fun timer(token: String, hours: Int, minutes: Int, seconds: Int): ByteArray = alert(1, ALERT_TIMER, token, bytes(hours, minutes, seconds))
-    fun deleteAlert(kind: Int, token: String): ByteArray = alert(2, kind, token, ByteArray(0))
+    /**
+     * Deletes alerts by token. Voice version 3 and up (the GTR 2e reports supportDeleteAlert) want a count before the
+     * tokens, as Zepp's AlertContent sends it; without the count the watch acks the frames and keeps the alert.
+     */
+    fun deleteAlerts(kind: Int, tokens: List<String>): ByteArray =
+        complex(2, bytes(2, kind, tokens.size) + tokens.fold(ByteArray(0)) { acc, t -> acc + z(t) })
+    fun deleteAlert(kind: Int, token: String): ByteArray = deleteAlerts(kind, listOf(token))
 
     private fun alert(op: Int, kind: Int, token: String, details: ByteArray) = complex(2, bytes(op, kind) + z(token) + details)
     private fun complex(subtype: Int, body: ByteArray) = bytes(REPLY_COMPLEX, subtype and 255, subtype shr 8) + u32(body.size.toLong()) + body

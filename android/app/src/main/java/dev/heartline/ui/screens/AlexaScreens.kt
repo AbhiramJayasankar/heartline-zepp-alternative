@@ -71,8 +71,8 @@ fun AlexaScreen(controller: HeartlineController, nav: Navigator) {
     val c = HL.colors
     val s by controller.alexaSettings.collectAsStateWithLifecycle()
     val turns by controller.alexaTurns.collectAsStateWithLifecycle()
-    val ai by controller.assistantAi.collectAsStateWithLifecycle()
-    val speech by controller.speech.collectAsStateWithLifecycle()
+    val aiSetup by controller.aiSetup.collectAsStateWithLifecycle()
+    val cat by controller.aiCatalog.collectAsStateWithLifecycle()
     val web by controller.webSearch.collectAsStateWithLifecycle()
     val alerts by controller.alexaAlerts.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -80,10 +80,11 @@ fun AlexaScreen(controller: HeartlineController, nav: Navigator) {
     var result by remember { mutableStateOf<String?>(null) }
     var asking by remember { mutableStateOf(false) }
     Screen("Alexa", onBack = { nav.pop() },
-        subtitle = "Press the watch's Alexa button and speak. Gemini writes down what you said, an OpenRouter model answers using Heartline's tools, and the answer shows on the watch.") {
-        val missing = listOfNotNull("a Gemini key".takeIf { speech.geminiKeyEnd == null }, "an OpenRouter key".takeIf { ai.keyEnd == null })
+        subtitle = "Press the watch's Alexa button and speak. One model writes down what you said, another answers using Heartline's tools, and the answer shows on the watch.") {
+        val missing = listOfNotNull("voice to text".takeIf { !aiSetup.ready(dev.heartline.service.ai.AiSection.VOICE) },
+            "the watch assistant".takeIf { !aiSetup.ready(dev.heartline.service.ai.AiSection.ASSISTANT) })
         if (missing.isNotEmpty()) {
-            Text("Alexa can't answer until you add ${missing.joinToString(" and ")}.", style = HL.type.bodyStrong, color = c.warn)
+            Text("Alexa can't answer until ${missing.joinToString(" and ")} ${if (missing.size > 1) "have" else "has"} a model with a key (AI models).", style = HL.type.bodyStrong, color = c.warn)
             Gap(12)
         }
         SectionTitle("Last question")
@@ -92,8 +93,10 @@ fun AlexaScreen(controller: HeartlineController, nav: Navigator) {
         Gap(20)
         SectionTitle("Set up")
         NavGroup {
-            NavRow("Voice", speech.geminiKeyEnd?.let { "Gemini key ending in $it, ${s.geminiModel.removePrefix("models/")}" } ?: "No Gemini key") { nav.push(Route.AlexaPage(AlexaPages.VOICE)) }
-            NavRow("Brain", listOfNotNull(ai.model, ai.keyEnd?.let { "key ending in $it" } ?: "no key", ai.key2End?.let { "second key ending in $it" }, ai.key3End?.let { "third key ending in $it" }).joinToString(", ")) { nav.push(Route.AlexaPage(AlexaPages.BRAIN)) }
+            fun chain(sec: dev.heartline.service.ai.AiSection) = aiSetup.section(sec).chain.map { r -> cat.of(r)?.name ?: r.model.substringAfterLast('/') }
+                .let { l -> if (l.isEmpty()) "No model chosen" else l.first() + if (l.size > 1) ", then ${l.size - 1} fallback${if (l.size > 2) "s" else ""}" else "" }
+            NavRow("Voice", chain(dev.heartline.service.ai.AiSection.VOICE) + "; languages and words to expect") { nav.push(Route.AlexaPage(AlexaPages.VOICE)) }
+            NavRow("Brain", chain(dev.heartline.service.ai.AiSection.ASSISTANT) + "; reasoning, length and memory") { nav.push(Route.AlexaPage(AlexaPages.BRAIN)) }
             NavRow("Web search", listOfNotNull("Tavily".takeIf { web.tavilyEnd != null }, "Exa".takeIf { web.exaEnd != null }).joinToString(" and ").ifEmpty { "Off: no key" }) { nav.push(Route.AlexaPage(AlexaPages.WEB)) }
         }
         Gap(20)
@@ -237,13 +240,11 @@ private fun PlayButton(uri: android.net.Uri) {
 @Composable
 private fun VoicePage(controller: HeartlineController, nav: Navigator) {
     val s by controller.alexaSettings.collectAsStateWithLifecycle()
-    Screen("Voice", onBack = { nav.pop() }, subtitle = "Gemini turns each question's recording into words. Only the final words are used.") {
-        SpeechSection(controller)
+    Screen("Voice", onBack = { nav.pop() }, subtitle = "A model turns each question's recording into words. Only the final words are used.") {
+        AiChainCard(controller, dev.heartline.service.ai.AiSection.VOICE, nav)
         Gap(24)
         SectionTitle("Recognition")
         Gap(6)
-        TextSetting("Model", "Gemini's Live API model that transcribes. Heartline's: ${dev.heartline.service.GeminiSpeech.MODEL.removePrefix("models/")}",
-            s.geminiModel.removePrefix("models/")) { v -> controller.updateAlexaSettings { it.copy(geminiModel = v) } }
         ListSetting("Languages", "Language codes Gemini listens for, one per line, such as en-IN.", s.languages) { v -> controller.updateAlexaSettings { it.copy(languages = v) } }
         ListSetting("Words to expect", "Names and terms Gemini should recognise, one per line.", s.vocabulary) { v -> controller.updateAlexaSettings { it.copy(vocabulary = v) } }
         NumberSetting("Time limit", "Seconds to wait for Gemini's words (5 to 30). Longer leaves less of the watch's ~40 s for the answer.", s.geminiTimeoutS, 5..30) { v ->
@@ -254,14 +255,11 @@ private fun VoicePage(controller: HeartlineController, nav: Navigator) {
 @Composable
 private fun BrainPage(controller: HeartlineController, nav: Navigator) {
     val s by controller.alexaSettings.collectAsStateWithLifecycle()
-    Screen("Brain", onBack = { nav.pop() }, subtitle = "The OpenRouter model reads the instructions and your question, calls tools as it needs, and writes the answer.") {
-        OpenRouterKeys(controller)
+    Screen("Brain", onBack = { nav.pop() }, subtitle = "The model reads the instructions and your question, calls tools as it needs, and writes the answer.") {
+        AiChainCard(controller, dev.heartline.service.ai.AiSection.ASSISTANT, nav)
         Gap(24)
-        SectionTitle("Models")
+        SectionTitle("How it answers")
         Gap(6)
-        ListSetting("Fallback models", "Tried in order when the model fails, such as when it's busy. OpenRouter uses the first two.", s.fallbackModels) { v ->
-            controller.updateAlexaSettings { it.copy(fallbackModels = v) } }
-        Gap(8)
         Text("Reasoning", style = HL.type.bodyStrong, color = HL.colors.ink)
         MutedText("Auto asks for none and allows a little when a model insists. Thinking takes longer; the watch waits about 40 s.")
         Gap(8)

@@ -1,13 +1,13 @@
 package dev.heartline.service
 
-import java.net.HttpURLConnection
-import java.net.URI
+import dev.heartline.service.ai.AiSection
+import dev.heartline.service.ai.AiStore
+import dev.heartline.service.ai.ChatMsg
+import dev.heartline.service.ai.ChatRequest
+import dev.heartline.service.ai.badAnswer
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -53,133 +53,79 @@ interface ToolRunner {
 }
 
 /**
- * The Alexa button's brain: an OpenRouter model answers what Gemini heard, calling Heartline's tools (health data
- * lookups and watch actions) as it needs, and its final words are shown on the watch. It throws with a readable
- * message when it can't answer; there is no fallback. The key is never logged.
+ * The Alexa button's brain: the watch assistant's models (AI models, Watch assistant: a main model and two fallbacks, at
+ * any provider) answer what was heard, calling Heartline's tools (health data lookups and watch actions) as they need,
+ * and the final words are shown on the watch. Every request goes through [AiStore.router], which moves to another key
+ * when one runs out of quota and to the next model when a model can't answer; a conversation that fell back stays on
+ * that model for its remaining rounds. It throws with a readable message when no model can answer. Keys are never logged.
  */
-class AssistantAi(private val post: suspend (url: String, headers: Map<String, String>, body: String) -> String = ::httpPost) {
+class AssistantAi(private val store: AiStore) {
 
     /** The final words, and the tools called on the way (in order). */
     class Reply(val text: String, val toolCalls: List<String>)
 
     /**
-     * Answers [transcript] with [settings] (the owner's prompt, models, reasoning and limits), filling [trace] as it
-     * goes so the app can show every request and tool call, even when it fails.
+     * Answers [transcript] with [settings] (the owner's prompt, reasoning and limits), filling [trace] as it goes so the
+     * app can show every request and tool call, even when it fails. [section] picks whose models answer.
      */
-    suspend fun converse(transcript: String, context: AiContext, history: List<Pair<String, String>>, config: AssistantAiConfig, runner: ToolRunner,
-                         settings: AlexaSettings = AlexaSettings(), trace: TurnTrace = TurnTrace()): Reply {
-        check(config.enabled) { "no OpenRouter key saved" }
-        val prompt = renderPrompt(settings.promptTemplate, context)
+    suspend fun converse(transcript: String, context: AiContext, history: List<Pair<String, String>>, runner: ToolRunner,
+                         settings: AlexaSettings = AlexaSettings(), trace: TurnTrace = TurnTrace(), section: AiSection = AiSection.ASSISTANT,
+                         system: String? = null): Reply {
+        val prompt = system ?: renderPrompt(settings.promptTemplate, context)
         trace.prompt = prompt
-        val messages = JSONArray().put(JSONObject().put("role", "system").put("content", prompt))
+        val messages = ArrayList<ChatMsg>()
         val memory = if (settings.memoryTurns == 0) emptyList() else history.takeLast(settings.memoryTurns)
         trace.memory = memory.size
-        memory.forEach { (asked, said) ->
-            messages.put(JSONObject().put("role", "user").put("content", asked)).put(JSONObject().put("role", "assistant").put("content", said))
-        }
-        messages.put(JSONObject().put("role", "user").put("content", transcript))
-        val tools = JSONArray(runner.tools.map { t ->
-            JSONObject().put("type", "function").put("function", JSONObject().put("name", t.name).put("description", t.description).put("parameters", t.parameters))
-        })
+        memory.forEach { (asked, said) -> messages += ChatMsg.User(asked); messages += ChatMsg.Assistant(said) }
+        messages += ChatMsg.User(transcript)
         val called = ArrayList<String>()
-        // auto: thinking is slow, so ask for none; models that must reason refuse that ("Reasoning is mandatory for
-        // this endpoint", 2026-11-06), and from then on get a little reasoning and room for it.
-        var effort: String? = settings.reasoning.takeIf { it in listOf("low", "medium", "high") }
+        val effort = settings.reasoning.takeIf { it in listOf("low", "medium", "high") }
+        var level = 0
         for (round in 1..settings.maxRounds) {
-            val body = JSONObject().put("model", config.model)
-                .put("models", JSONArray((listOf(config.model) + settings.fallbackModels).distinct().take(3)))
-                .put("messages", messages).put("temperature", settings.temperature)
-            if (tools.length() > 0) body.put("tools", tools)
-            fun request(e: String?) = JSONObject(body.toString()).apply {
-                if (e == null) put("max_tokens", settings.maxTokens).put("reasoning", JSONObject().put("enabled", false))
-                else put("max_tokens", settings.reasoningMaxTokens).put("reasoning", JSONObject().put("effort", e).put("exclude", true))
-            }.toString()
+            val req = ChatRequest(prompt, messages.toList(), runner.tools, settings.temperature, settings.maxTokens, reasoning = effort,
+                reasoningMaxTokens = settings.reasoningMaxTokens)
             val t0 = System.currentTimeMillis()
-            val reply = try { send(config, request(effort)) } catch (e: OpenRouterError) {
-                if (!e.reasoning || effort != null) throw e
-                if (settings.reasoning == "off") throw OpenRouterError("${e.message} (Reasoning is set to off; set it to auto or low for this model)")
-                effort = "low"
-                send(config, request(effort))
-            }
-            val ms = System.currentTimeMillis() - t0
-            val o = JSONObject(reply)
-            val choice = runCatching { o.getJSONArray("choices").getJSONObject(0) }.getOrNull()
-                ?: error("no answer in OpenRouter's reply: ${reply.take(120)}")
-            val message = choice.getJSONObject("message")
-            val model = o.optString("model").ifEmpty { config.model }
-            lastModel = model
-            val usage = o.optJSONObject("usage")
-            fun round(calls: List<ToolCallLog>, text: String?) = RoundLog(model, lastKey, effort ?: "off", ms,
-                usage?.optInt("prompt_tokens", -1)?.takeIf { it >= 0 }, usage?.optInt("completion_tokens", -1)?.takeIf { it >= 0 }, calls, text)
-            val calls = message.optJSONArray("tool_calls")
-            if (calls != null && calls.length() > 0) {
-                // The model's turn goes back as it came (some providers need their reasoning details to continue).
-                messages.put(JSONObject().put("role", "assistant").put("content", message.opt("content") ?: "").put("tool_calls", calls).apply {
-                    message.optJSONArray("reasoning_details")?.let { put("reasoning_details", it) }
-                })
-                val logs = ArrayList<ToolCallLog>()
-                for (i in 0 until calls.length()) {
-                    val call = calls.getJSONObject(i)
-                    val fn = call.optJSONObject("function") ?: JSONObject()
-                    val name = fn.optString("name")
-                    val args = runCatching { JSONObject(fn.optString("arguments").ifBlank { "{}" }) }.getOrDefault(JSONObject())
-                    called += name
-                    val c0 = System.currentTimeMillis()
-                    val result = try { runner.run(name, args) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "Error: ${e.message}" }
-                    logs += ToolCallLog(name, args.toString(), result, System.currentTimeMillis() - c0)
-                    messages.put(JSONObject().put("role", "tool").put("tool_call_id", call.optString("id")).put("name", name).put("content", result))
+            val out = store.router.run(section, from = level) { t ->
+                store.api.chat(t.provider, t.key, t.model, req, t.timeoutMs).also { r ->
+                    if (r.text == null && r.calls.isEmpty())
+                        throw badAnswer(if (r.finish == "length") "${t.model} ran out of tokens before it answered" else "${t.model} gave no answer")
                 }
-                trace.rounds += round(logs, message.optString("content").takeIf { !message.isNull("content") && it.isNotBlank() })
+            }
+            val reply = out.value
+            level = out.target.level
+            val ms = System.currentTimeMillis() - t0
+            lastModel = reply.model
+            lastKey = out.target.keyIndex + 1
+            fun round(calls: List<ToolCallLog>, text: String?) = RoundLog("${out.target.provider.name}: ${reply.model}", lastKey, effort ?: "off", ms,
+                reply.tokensIn, reply.tokensOut, calls, text)
+            if (reply.calls.isNotEmpty()) {
+                messages += reply.turn
+                val logs = ArrayList<ToolCallLog>()
+                for (call in reply.calls) {
+                    called += call.name
+                    val c0 = System.currentTimeMillis()
+                    val result = try { runner.run(call.name, call.args) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "Error: ${e.message}" }
+                    logs += ToolCallLog(call.name, call.args.toString(), result, System.currentTimeMillis() - c0)
+                    messages += ChatMsg.ToolResult(call.id, call.name, result)
+                }
+                trace.rounds += round(logs, reply.text)
                 continue
             }
-            val content = message.optString("content").takeIf { !message.isNull("content") && it.isNotBlank() }
-            trace.rounds += round(emptyList(), content)
-            if (content != null) return Reply(content.trim(), called)
-            error(if (choice.optString("finish_reason") == "length") "$model ran out of tokens before it answered" else "$model gave no answer")
+            trace.rounds += round(emptyList(), reply.text)
+            return Reply(reply.text!!.trim(), called)
         }
-        error("${lastModel ?: config.model} kept calling tools without answering (${settings.maxRounds} rounds)")
+        error("${lastModel ?: "the model"} kept calling tools without answering (${settings.maxRounds} rounds)")
     }
 
-    /** The model that gave the last answer (OpenRouter may have used a fallback). */
+    /** The model that gave the last answer. */
     var lastModel: String? = null
         private set
 
-    /** Which key (1 or 2) answered last; it is tried first next time, so a key at its daily limit isn't retried every turn. */
+    /** Which of its provider's keys (from 1) answered last. */
     var lastKey = 1
         private set
 
-    /** [body] to OpenRouter with the key that worked last, then the other one if OpenRouter refuses it. */
-    private suspend fun send(config: AssistantAiConfig, body: String): String {
-        val keys = config.keys
-        val order = keys.indices.sortedBy { if (it == lastKey - 1) 0 else 1 }
-        val errors = ArrayList<String>()
-        for (i in order) {
-            try { return post(URL, headers(keys[i]), body).also { lastKey = i + 1 } }
-            catch (e: OpenRouterError) {
-                // Asking a model that must reason not to is about the request, not the key.
-                if (e.reasoning) throw e
-                errors += if (keys.size > 1) "key ${i + 1}: ${e.message}" else e.message.orEmpty()
-            }
-        }
-        throw OpenRouterError(errors.joinToString("; "))
-    }
-
-    private fun headers(key: String) = mapOf("Authorization" to "Bearer $key", "Content-Type" to "application/json",
-        "HTTP-Referer" to "https://github.com/AbhiramJayasankar/heartline-zepp-alternative", "X-Title" to "Heartline")
-
-    /** OpenRouter answered with an error: [message] is OpenRouter's own words, with the HTTP code. */
-    class OpenRouterError(message: String) : Exception(message) {
-        val reasoning get() = message.orEmpty().contains("Reasoning is mandatory", ignoreCase = true)
-    }
-
     companion object {
-        const val URL = "https://openrouter.ai/api/v1/chat/completions"
-        /**
-         * The longest a single OpenRouter request may take; the whole answer has its own limit (Alexa settings). The
-         * watch gives up after about 40 s on "Thinking", so a slower answer is sent as a watch notification (AlexaBridge).
-         */
-        const val TIMEOUT_MS = 180_000L
-
         /** What each placeholder in the instructions becomes. */
         val PLACEHOLDERS = linkedMapOf(
             "{NOW}" to "the date, time and time zone",
@@ -241,28 +187,5 @@ class AssistantAi(private val post: suspend (url: String, headers: Map<String, S
             .replace("{HEALTH}", c.health?.lines()?.filter { it.isNotBlank() }?.joinToString("\n") { "- $it" } ?: "- not available")
 
         fun systemPrompt(c: AiContext): String = renderPrompt(DEFAULT_PROMPT, c)
-
-        suspend fun httpPost(url: String, headers: Map<String, String>, body: String): String = withContext(Dispatchers.IO) {
-            val c = URI(url).toURL().openConnection() as HttpURLConnection
-            try {
-                c.requestMethod = "POST"; c.connectTimeout = 10_000; c.readTimeout = TIMEOUT_MS.toInt(); c.doOutput = true
-                headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
-                c.outputStream.use { it.write(body.toByteArray()) }
-                val code = c.responseCode
-                val text = (if (code in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
-                if (code !in 200..299) throw OpenRouterError("OpenRouter $code: ${errorMessage(text)}")
-                // A routed request can also fail inside a 200 reply.
-                JSONObject(text).optJSONObject("error")?.let { throw OpenRouterError("OpenRouter: ${errorMessage(text)}") }
-                text
-            } finally { c.disconnect() }
-        }
-
-        /** OpenRouter's error message, with the provider's own one when it passed one on. */
-        fun errorMessage(body: String): String = runCatching {
-            val e = JSONObject(body).getJSONObject("error")
-            val raw = e.optJSONObject("metadata")?.optString("raw")?.takeIf { it.isNotBlank() }
-                ?.let { r -> runCatching { JSONObject(r).optJSONObject("error")?.optString("message") }.getOrNull() ?: r }
-            listOfNotNull(e.optString("message").takeIf { it.isNotBlank() }, raw?.take(160)).distinct().joinToString(": ")
-        }.getOrNull()?.ifBlank { null } ?: body.take(160)
     }
 }

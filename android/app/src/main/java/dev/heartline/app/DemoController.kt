@@ -188,6 +188,37 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override val insightsSettings = MutableStateFlow(dev.heartline.service.InsightsSettings())
     override fun setInsightsSettings(s: dev.heartline.service.InsightsSettings) { insightsSettings.value = s }
     override suspend fun geminiModels(): List<String> = listOf("gemini-3.8-flash", "gemini-3.8-flash-lite")
+    private val demoRefs = listOf(dev.heartline.service.ai.ModelRef("openrouter", "nvidia/nemotron-3.5-super-vl:free"), dev.heartline.service.ai.ModelRef("openrouter", "google/gemma-4-31b-it:free"),
+        dev.heartline.service.ai.ModelRef("gemini", "gemini-3.8-flash"), dev.heartline.service.ai.ModelRef("gemini", "gemini-3.8-flash-lite"), dev.heartline.service.ai.ModelRef("gemini", "gemini-3.5-transcribe-live"))
+    override val aiSetup = MutableStateFlow(dev.heartline.service.ai.AiSetup(
+        dev.heartline.service.ai.AiSetup.defaultProviders().map { if (it.id == "openrouter") it.copy(keys = listOf("…a1f3", "…77c0")) else it.copy(keys = listOf("…9q2e")) },
+        demoRefs).let { s -> dev.heartline.service.ai.AiSection.entries.fold(s) { acc, sec ->
+            val chain = when (sec) { dev.heartline.service.ai.AiSection.VOICE -> listOf(demoRefs[4]); dev.heartline.service.ai.AiSection.ASSISTANT -> listOf(demoRefs[0], demoRefs[2], demoRefs[1])
+                else -> listOf(demoRefs[2], demoRefs[3], demoRefs[0]) }
+            acc.withSection(sec, dev.heartline.service.ai.SectionSetup(chain.getOrNull(0), chain.getOrNull(1), chain.getOrNull(2), dev.heartline.service.ai.RetryPolicy.default(sec)))
+        } })
+    override val aiCatalog = MutableStateFlow(dev.heartline.service.ai.AiCatalog(demoRefs.map { r ->
+        dev.heartline.service.ai.CatalogModel(r, r.model.substringAfter('/'), 131_072, tools = !r.model.contains("live"), audio = r.provider == "gemini", live = r.model.contains("live"), free = r.model.endsWith(":free"))
+    } + (1..40).map { i -> dev.heartline.service.ai.CatalogModel(dev.heartline.service.ai.ModelRef("openrouter", "vendor$i/model-$i"), "Vendor $i Model", 32_768 * (1 + i % 4), tools = i % 3 != 0, audio = i % 7 == 0, free = i % 2 == 0) },
+        mapOf("openrouter" to now() - 7200, "gemini" to now() - 7200)))
+    override val aiActivity = MutableStateFlow(listOf(
+        dev.heartline.service.ai.AiAttempt(System.currentTimeMillis() - 60_000, "assistant", "openrouter", "nvidia/nemotron-3.5-super-vl:free", 1, "77c0", 0, 1830),
+        dev.heartline.service.ai.AiAttempt(System.currentTimeMillis() - 61_000, "assistant", "openrouter", "nvidia/nemotron-3.5-super-vl:free", 0, "a1f3", 0, 420, dev.heartline.service.ai.FailKind.QUOTA, "OpenRouter 429: Rate limit exceeded: free-models-per-day"),
+        dev.heartline.service.ai.AiAttempt(System.currentTimeMillis() - 3_600_000, "insights", "gemini", "gemini-3.8-flash", 0, "9q2e", 0, 14_200)))
+    override fun aiAddKey(provider: String, key: String) { aiSetup.update { s -> s.provider(provider)?.let { s.withProvider(it.copy(keys = it.keys + "…" + key.trim().takeLast(4))) } ?: s } }
+    override fun aiRemoveKey(provider: String, index: Int) { aiSetup.update { s -> s.provider(provider)?.let { s.withProvider(it.copy(keys = it.keys.filterIndexed { i, _ -> i != index })) } ?: s } }
+    override fun aiMoveKey(provider: String, index: Int, up: Boolean) {}
+    override fun aiSaveProvider(id: String?, kind: dev.heartline.service.ai.ProviderKind, name: String, baseUrl: String): String {
+        val pid = id ?: name.lowercase().filter { it.isLetterOrDigit() }.ifEmpty { "custom" }
+        aiSetup.update { s -> s.withProvider((s.provider(pid) ?: dev.heartline.service.ai.AiProvider(pid, kind, name, baseUrl)).copy(name = name, baseUrl = baseUrl)) }
+        return pid
+    }
+    override fun aiDeleteProvider(id: String) { aiSetup.update { s -> s.copy(providers = s.providers.filter { it.id != id || it.builtIn }) } }
+    override fun aiSetPicked(ref: dev.heartline.service.ai.ModelRef, on: Boolean) { aiSetup.update { s -> s.copy(picked = if (on) (s.picked + ref).distinct() else s.picked - ref) } }
+    override fun aiSetSection(section: dev.heartline.service.ai.AiSection, setup: dev.heartline.service.ai.SectionSetup) { aiSetup.update { it.withSection(section, setup) } }
+    override suspend fun aiRefreshModels(provider: String?) = aiCatalog.value
+    override suspend fun aiTestKeys(provider: String): List<String?> = aiSetup.value.provider(provider)?.keys?.mapIndexed { i, _ -> if (i == 0) "Out of quota: Rate limit exceeded: free-models-per-day" else null }.orEmpty()
+    override suspend fun aiTrySection(section: dev.heartline.service.ai.AiSection) = "OK from Gemini: gemini-3.8-flash with key 1 in 1.4 s."
     override val alexaTools = listOf(AlexaToolUi("get_sleep", "Health data", "The night's sleep that ended on the morning of a date.", "{}"),
         AlexaToolUi("web_search", "Web", "Search the web.", "{}"), AlexaToolUi("set_timer", "Watch and Heartline actions", "Start a countdown timer on the watch.", "{}"))
     override suspend fun alexaPromptPreview(template: String) = dev.heartline.service.AssistantAi.renderPrompt(template,

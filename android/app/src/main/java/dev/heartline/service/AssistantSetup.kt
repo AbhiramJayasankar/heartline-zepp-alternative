@@ -42,9 +42,10 @@ class PlaceWeather(private val db: HeartlineDatabase, private val settings: AppS
  * [actions] and [workout] come from the watch service.
  */
 fun watchAssistant(context: android.content.Context, db: HeartlineDatabase, settings: AppSettings, controller: HeartlineController,
-                   actions: AssistantActions = AssistantActions.None, workout: () -> String? = { null }, ai: AssistantAi = AssistantAi()): WatchAssistant = WatchAssistant(
-    ai = ai,
-    aiConfig = { AssistantAiConfig.parse(db.meta.get(AssistantAiConfig.KEY)) },
+                   actions: AssistantActions = AssistantActions.None, workout: () -> String? = { null },
+                   store: dev.heartline.service.ai.AiStore = (context.applicationContext as dev.heartline.HeartlineApp).ai): WatchAssistant = WatchAssistant(
+    ai = AssistantAi(store),
+    aiReady = { store.setup().ready(dev.heartline.service.ai.AiSection.ASSISTANT) },
     facts = { t ->
         val clock = DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH)
         val since = t.toEpochSecond() - 6 * 3600.0

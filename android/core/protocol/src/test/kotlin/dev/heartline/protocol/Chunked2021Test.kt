@@ -51,12 +51,12 @@ class Chunked2021Test {
     }
 
     @Test fun deleteNamesTheKindAndToken() {
-        assertContentEquals(hex("08 02 00 05000000 02 01 61 31 00"), Alexa.deleteAlert(Alexa.ALERT_ALARM, "a1"))
+        assertContentEquals(hex("08 02 00 06000000 02 01 01 61 31 00"), Alexa.deleteAlert(Alexa.ALERT_ALARM, "a1"))
     }
 
     @Test fun alarmCarriesLocalTimeAndDays() {
         val a = Alexa.alarm("a", 0x01020304, Alexa.WEEKDAYS)
-        assertContentEquals(hex("08 02 00 12000000 01 01 61 00 00 00 04030201 00000000 1f000000"), a)
+        assertContentEquals(hex("08 02 00 13000000 01 01 61 00 00 00 04030201 00000000 1f000000 01"), a)
     }
 
     @Test fun listRowsEndWithAnEmptyCode() {

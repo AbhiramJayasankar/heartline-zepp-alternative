@@ -19,6 +19,8 @@ class HeartlineApp : Application() {
     val settings by lazy { AppSettings(this) }
     val keys by lazy { KeyStore(this) }
     val watchStore by lazy { WatchStore(db, settings) }
+    /** Heartline's AI providers, keys, models and the router every AI feature shares. */
+    val ai by lazy { dev.heartline.service.ai.AiStore({ db.meta.get(it) }, { k, v -> db.meta.set(k, v) }) }
     val realController by lazy { RealController(this, scope, db, settings, keys) }
     lateinit var controller: HeartlineController
         private set

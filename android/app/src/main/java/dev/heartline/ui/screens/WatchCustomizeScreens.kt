@@ -141,59 +141,6 @@ fun VibrationScreen(controller: HeartlineController, nav: Navigator) {
 
 // ---------------- Alexa keys (shown on the Alexa pages) ----------------
 
-/** The OpenRouter keys (two accounts) and the model that answers. */
-@Composable
-internal fun OpenRouterKeys(controller: HeartlineController) {
-    val c = HL.colors
-    val ai by controller.assistantAi.collectAsStateWithLifecycle()
-    var key by remember { mutableStateOf("") }
-    var model by remember(ai.model) { mutableStateOf(ai.model) }
-    Text("OpenRouter key and model", style = HL.type.bodyStrong, color = c.ink)
-    Gap(4)
-    MutedText(ai.keyEnd?.let { "OpenRouter key saved, ending in $it." } ?: "Paste an OpenRouter API key. Free models work.")
-    Gap(8)
-    OutlinedTextField(key, { key = it.trim() }, label = { Text(if (ai.keyEnd == null) "OpenRouter API key" else "Replace the key") }, singleLine = true,
-        visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-    Gap(8)
-    OutlinedTextField(model, { model = it.trim() }, label = { Text("Model") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-    Gap(10)
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        PillButton("Save", { controller.setAssistantAi(key.ifEmpty { null }, model); key = "" })
-        if (ai.keyEnd != null) {
-            Spacer(Modifier.width(10.dp))
-            PillButton("Remove key", { controller.setAssistantAi("", model) }, style = ButtonStyle.QUIET)
-        }
-    }
-    Gap(16)
-    ExtraOpenRouterKey(controller, 2, ai.key2End)
-    Gap(16)
-    ExtraOpenRouterKey(controller, 3, ai.key3End)
-}
-
-/** An OpenRouter key from another account, in [slot] 2 or 3, tried when OpenRouter refuses the keys before it. */
-@Composable
-private fun ExtraOpenRouterKey(controller: HeartlineController, slot: Int, end: String?) {
-    val c = HL.colors
-    val nth = if (slot == 3) "third" else "second"
-    val before = if (slot == 3) "the first two" else "the first"
-    var key by remember { mutableStateOf("") }
-    Text(if (slot == 3) "Third account" else "Second account", style = HL.type.bodyStrong, color = c.ink)
-    Gap(4)
-    MutedText(end?.let { "${nth.replaceFirstChar { it.uppercase() }} key saved, ending in $it. Used when OpenRouter refuses $before, such as at its daily free limit." }
-        ?: "Optional: a key from another OpenRouter account, used when OpenRouter refuses $before (such as at its daily free limit).")
-    Gap(8)
-    OutlinedTextField(key, { key = it.trim() }, label = { Text(if (end == null) "${nth.replaceFirstChar { it.uppercase() }} OpenRouter API key" else "Replace the $nth key") }, singleLine = true,
-        visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-    Gap(8)
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        PillButton("Save $nth key", { controller.setAssistantAiExtraKey(slot, key); key = "" }, enabled = key.isNotEmpty())
-        if (end != null) {
-            Spacer(Modifier.width(10.dp))
-            PillButton("Remove", { controller.setAssistantAiExtraKey(slot, "") }, style = ButtonStyle.QUIET)
-        }
-    }
-}
-
 /** Tavily and Exa keys for the model's web searches; Tavily is tried first. */
 @Composable
 internal fun WebSearchSection(controller: HeartlineController) {
@@ -217,34 +164,4 @@ internal fun WebSearchSection(controller: HeartlineController) {
             }
         }
     }
-}
-
-/** The Gemini key that turns what's said to the Alexa button into text, and a test with the last recording. */
-@Composable
-internal fun SpeechSection(controller: HeartlineController) {
-    val c = HL.colors
-    val speech by controller.speech.collectAsStateWithLifecycle()
-    val scope = rememberCoroutineScope()
-    var key by remember { mutableStateOf("") }
-    var result by remember { mutableStateOf<String?>(null) }
-    var testing by remember { mutableStateOf(false) }
-    Text("Gemini key", style = HL.type.bodyStrong, color = c.ink)
-    Gap(4)
-    MutedText(speech.geminiKeyEnd?.let { "Gemini key saved, ending in $it." } ?: "Paste a Gemini API key from Google AI Studio. The free tier works.")
-    Gap(8)
-    OutlinedTextField(key, { key = it.trim() }, label = { Text(if (speech.geminiKeyEnd == null) "Gemini API key" else "Replace the Gemini key") }, singleLine = true,
-        visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-    Gap(8)
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        PillButton("Save key", { controller.setGeminiKey(key); key = "" }, enabled = key.isNotEmpty())
-        if (speech.geminiKeyEnd != null) { Spacer(Modifier.width(10.dp)); PillButton("Remove key", { controller.setGeminiKey("") }, style = ButtonStyle.QUIET) }
-    }
-    Gap(10)
-    PillButton(if (testing) "Listening…" else "Test with the last question", {
-        testing = true; result = null
-        scope.launch { result = controller.testSpeech(); testing = false }
-    }, style = ButtonStyle.QUIET, enabled = !testing && speech.geminiKeyEnd != null)
-    result?.let { Gap(8); Text(it, style = HL.type.small, color = c.ink) }
-    Gap(6)
-    MutedText("The test runs your last Alexa recording through Gemini and the answers model, without sending anything to the watch. Gemini receives the recording of each question.")
 }

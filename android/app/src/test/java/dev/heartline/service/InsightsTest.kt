@@ -25,15 +25,25 @@ class InsightsTest {
         assertTrue(runCatching { InsightReport.fromModel("no json here", 1, "m", 1) }.isFailure)
     }
 
-    @Test fun retriesFollowTheError() {
-        assertEquals(6_000L, HealthInsights.retryAfter("Gemini 503: This model is currently experiencing high demand.", 1))
-        assertEquals(20_000L, HealthInsights.retryAfter("Gemini 503: high demand", 2))
-        assertEquals(null, HealthInsights.retryAfter("Gemini 503: high demand", 3))
-        assertEquals(24_500L, HealthInsights.retryAfter("Gemini 429: Quota exceeded for metric generate_content_free_tier_requests. Please retry in 23.5s.", 1))
-        assertEquals(null, HealthInsights.retryAfter("Gemini 429: Quota exceeded, limit per day. Please retry in 23s", 1))
-        assertEquals(null, HealthInsights.retryAfter("Gemini 429: retry in 300s", 1))
-        assertEquals(null, HealthInsights.retryAfter("Gemini 404: models/nope is not found", 1))
-        assertEquals(null, HealthInsights.retryAfter("Gemini 400: API key not valid", 1))
+    @Test fun insightsAreWrittenDownTheChainAndAWrongShapeIsAskedAgain() = runBlocking {
+        val g = dev.heartline.service.ai.ModelRef("gemini", "gemini-3.8-flash")
+        val o = dev.heartline.service.ai.ModelRef("openrouter", "a/b")
+        var n = 0
+        val fake = dev.heartline.service.ai.FakeAi(dev.heartline.service.ai.FakeAi.setup(listOf("sk"), listOf("g"), dev.heartline.service.ai.AiSection.INSIGHTS, listOf(g, o))) { _, url, _, _ ->
+            n++
+            when {
+                "googleapis" in url && n == 1 -> dev.heartline.service.ai.HttpReply(503, """{"error":{"code":503,"message":"This model is currently experiencing high demand."}}""")
+                "googleapis" in url -> dev.heartline.service.ai.HttpReply(200, """{"candidates":[{"content":{"parts":[{"text":"not json"}]}}]}""")
+                else -> dev.heartline.service.ai.HttpReply(200, JSONObject().put("model", "a/b").put("choices", org.json.JSONArray().put(JSONObject().put("message",
+                    JSONObject().put("content", """{"headline":"h","insights":[{"title":"t","detail":"d"}]}""")))).toString())
+            }
+        }
+        val tools = HealthTools(dev.heartline.app.DemoController(kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined)))
+        val r = HealthInsights(tools, fake.store).generate()
+        assertEquals("h", r.headline)
+        assertEquals("a/b", r.model)
+        // Busy once (asked again), then twice the wrong shape (once more, then the fallback).
+        assertEquals(listOf("Busy", "Unusable answer", "Unusable answer", null), r.attempts.map { it.error?.substringBefore(":") })
     }
 
     @Test fun reportsKeepHowTheyWereMade() {

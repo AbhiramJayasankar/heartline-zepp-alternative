@@ -93,6 +93,10 @@ sealed interface Route {
     data class Trend(val key: String) : Route
     data object Trends : Route
     data object Insights : Route
+    /** Heartline's AI providers, keys, models and each feature's fallbacks. */
+    data object AiModels : Route
+    /** A page under AI models (AiPages). */
+    data class AiPage(val page: String) : Route
     data object SendNotification : Route
     data object GymLog : Route
     /** The gym log opened on one session ("date|name"), scrolled to it: a link from a recording's exercise. */
@@ -199,6 +203,8 @@ fun AppRoot(controller: HeartlineController) {
                         Tab.ACTIVITY -> ActivityScreen(controller, nav)
                         Route.Trends -> TrendsScreen(controller, nav) { nav.pop() }
                         Route.Insights -> dev.heartline.ui.screens.InsightsScreen(controller, nav)
+                        Route.AiModels -> dev.heartline.ui.screens.AiModelsScreen(controller, nav)
+                        is Route.AiPage -> dev.heartline.ui.screens.AiPageScreen(controller, target.page, nav)
                         Tab.WATCH -> dev.heartline.ui.screens.WatchHubScreen(controller, nav)
                         Route.SendNotification -> dev.heartline.ui.screens.SendNotificationScreen(controller, nav)
                         Route.CheckRun -> CheckRunScreen(controller, nav)

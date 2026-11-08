@@ -133,7 +133,8 @@ interface AssistantActions {
  */
 class WatchAssistant(
     private val ai: AssistantAi,
-    private val aiConfig: suspend () -> AssistantAiConfig,
+    /** Whether the watch assistant has a model with a key (AI models). */
+    private val aiReady: suspend () -> Boolean,
     private val facts: suspend (ZonedDateTime) -> Facts,
     private val weather: AssistantWeather,
     private val store: AssistantStore,
@@ -177,8 +178,8 @@ class WatchAssistant(
     suspend fun answer(transcript: String, dryRun: Boolean = false): Answer {
         val t = now()
         if (transcript.isBlank()) return Answer("I didn't hear any words. Try again.", error = "no words heard")
-        val config = aiConfig()
-        if (!config.enabled) return Answer("Add an OpenRouter key in Heartline (Watch, Alexa) so I can answer. I heard: \"$transcript\"", error = "no OpenRouter key")
+        if (!aiReady()) return Answer("Choose a model with a key for the watch assistant in Heartline (AI models) so I can answer. I heard: \"$transcript\"",
+            error = "no model with a key for the watch assistant")
         val s = settings()
         if (t.toEpochSecond() - lastTurn > s.memoryMinutes * 60L) history.clear()
         val trace = TurnTrace()
@@ -194,15 +195,15 @@ class WatchAssistant(
         }
         val reply = try {
             withTimeoutOrNull(s.answerTimeoutS * 1000L) {
-                val first = ai.converse(transcript, context, history.toList(), config, runner, s, trace)
+                val first = ai.converse(transcript, context, history.toList(), runner, s, trace)
                 // A model may say "Cancelled." without calling the tool (2026-11-06: the reminder still rang). It is
                 // asked once more, told that nothing happened; for a reply that only sounded like an action it just answers again.
                 if (first.toolCalls.any { it in ACTION_NAMES } || !CLAIMED_ACTION.containsMatchIn(first.text)) first
-                else ai.converse(undone(first.text), context, history.toList() + (transcript to first.text), config, runner, s, trace)
+                else ai.converse(undone(first.text), context, history.toList() + (transcript to first.text), runner, s, trace)
                     .let { AssistantAi.Reply(it.text, first.toolCalls + it.toolCalls) }
-            } ?: return turn.answer("OpenRouter isn't working: no answer within ${s.answerTimeoutS} s.", emptyList(), "no answer within ${s.answerTimeoutS} s")
+            } ?: return turn.answer("The AI isn't working: no answer within ${s.answerTimeoutS} s.", emptyList(), "no answer within ${s.answerTimeoutS} s")
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
-            return turn.answer("OpenRouter isn't working: ${e.message}", emptyList(), e.message ?: e.toString())
+            return turn.answer("The AI isn't working: ${e.message}", emptyList(), e.message ?: e.toString())
         }
         if (!dryRun) {
             history += transcript to reply.text; lastTurn = t.toEpochSecond()

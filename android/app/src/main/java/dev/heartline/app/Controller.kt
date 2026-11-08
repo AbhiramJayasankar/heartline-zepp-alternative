@@ -108,6 +108,29 @@ interface HeartlineController {
     fun setInsightsSettings(s: dev.heartline.service.InsightsSettings)
     /** The Gemini text models the saved key can use. */
     suspend fun geminiModels(): List<String>
+
+    // ---- AI models: providers, keys, the models to choose from, and each AI section's chain and rules ----
+    /** The setup with every key shown only as its last 4 characters ("…abcd"); keys are changed with [aiAddKey] and friends. */
+    val aiSetup: StateFlow<dev.heartline.service.ai.AiSetup>
+    /** Every provider's model list as last fetched. */
+    val aiCatalog: StateFlow<dev.heartline.service.ai.AiCatalog>
+    /** Every AI request lately, newest first. */
+    val aiActivity: StateFlow<List<dev.heartline.service.ai.AiAttempt>>
+    fun aiAddKey(provider: String, key: String)
+    fun aiRemoveKey(provider: String, index: Int)
+    fun aiMoveKey(provider: String, index: Int, up: Boolean)
+    /** A new provider when [id] is null, else changes [id]'s name and address (its keys stay). Returns the id. */
+    fun aiSaveProvider(id: String?, kind: dev.heartline.service.ai.ProviderKind, name: String, baseUrl: String): String
+    /** Removes a provider that isn't built in, its keys, and its models from every section. */
+    fun aiDeleteProvider(id: String)
+    fun aiSetPicked(ref: dev.heartline.service.ai.ModelRef, on: Boolean)
+    fun aiSetSection(section: dev.heartline.service.ai.AiSection, setup: dev.heartline.service.ai.SectionSetup)
+    /** Fetches the model lists (one provider's, or all), with the first key that works. */
+    suspend fun aiRefreshModels(provider: String? = null): dev.heartline.service.ai.AiCatalog
+    /** Each of a provider's keys tried: null when it works, else why not. */
+    suspend fun aiTestKeys(provider: String): List<String?>
+    /** A small request through [section]'s chain and rules; says who answered and what failed on the way. */
+    suspend fun aiTrySection(section: dev.heartline.service.ai.AiSection): String
     /** Every tool the brain can be given, as defined (before the owner's choices). */
     val alexaTools: List<AlexaToolUi>
     /** [template] filled in as the brain would get it now. */

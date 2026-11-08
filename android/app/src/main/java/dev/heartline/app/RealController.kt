@@ -437,6 +437,8 @@ class RealController(
         .map { dev.heartline.service.AlexaLog.parse(it) }.flowOn(Dispatchers.Default).stateIn(scope, SharingStarted.Eagerly, emptyList())
     override fun clearAlexaTurns() { scope.launch { db.meta.set(dev.heartline.service.AlexaLog.KEY, "[]") } }
     private class InsightsRun(val running: Boolean = false, val error: String? = null, val attempts: List<dev.heartline.service.InsightAttempt> = emptyList())
+    /** The AI providers, models and router every AI feature shares. */
+    private val ai get() = (context.applicationContext as dev.heartline.HeartlineApp).ai
     private val insightsRun = MutableStateFlow(InsightsRun())
     override val insights: StateFlow<InsightsUi> = db.meta.observe(dev.heartline.service.InsightReport.KEY)
         .map { dev.heartline.service.InsightReport.parse(it) }
@@ -447,6 +449,63 @@ class RealController(
     override fun setInsightsSettings(s: dev.heartline.service.InsightsSettings) { scope.launch { db.meta.set(dev.heartline.service.InsightsSettings.KEY, s.json()) } }
     override suspend fun geminiModels(): List<String> = dev.heartline.service.GeminiText().listModels(
         dev.heartline.service.SpeechConfig.parse(db.meta.get(dev.heartline.service.SpeechConfig.KEY)).geminiKey)
+
+    private fun masked(s: dev.heartline.service.ai.AiSetup) = s.copy(providers = s.providers.map { p -> p.copy(keys = p.keys.map { "…" + it.takeLast(4) }) })
+    override val aiSetup: StateFlow<dev.heartline.service.ai.AiSetup> = db.meta.observe(dev.heartline.service.ai.AiSetup.KEY)
+        .map { masked(dev.heartline.service.ai.AiSetup.parse(it) ?: ai.setup()) }.stateIn(scope, SharingStarted.Eagerly, dev.heartline.service.ai.AiSetup())
+    override val aiCatalog: StateFlow<dev.heartline.service.ai.AiCatalog> = db.meta.observe(dev.heartline.service.ai.AiCatalog.KEY)
+        .map { dev.heartline.service.ai.AiCatalog.parse(it) }.stateIn(scope, SharingStarted.Eagerly, dev.heartline.service.ai.AiCatalog())
+    override val aiActivity: StateFlow<List<dev.heartline.service.ai.AiAttempt>> = db.meta.observe(dev.heartline.service.ai.AiAttempt.KEY)
+        .map { dev.heartline.service.ai.AiAttempt.parseAll(it) }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    private fun aiProvider(id: String, change: (dev.heartline.service.ai.AiProvider) -> dev.heartline.service.ai.AiProvider) {
+        scope.launch { ai.update { s -> s.provider(id)?.let { s.withProvider(change(it)) } ?: s } }
+    }
+    override fun aiAddKey(provider: String, key: String) { key.trim().takeIf { it.isNotEmpty() }?.let { k -> aiProvider(provider) { it.copy(keys = (it.keys + k).distinct()) } } }
+    override fun aiRemoveKey(provider: String, index: Int) = aiProvider(provider) { it.copy(keys = it.keys.filterIndexed { i, _ -> i != index }) }
+    override fun aiMoveKey(provider: String, index: Int, up: Boolean) = aiProvider(provider) { p ->
+        val j = if (up) index - 1 else index + 1
+        if (index !in p.keys.indices || j !in p.keys.indices) p else p.copy(keys = p.keys.toMutableList().also { java.util.Collections.swap(it, index, j) })
+    }
+    override fun aiSaveProvider(id: String?, kind: dev.heartline.service.ai.ProviderKind, name: String, baseUrl: String): String {
+        val current = aiSetup.value
+        val pid = id ?: generateSequence(0) { it + 1 }.map { n -> name.lowercase().filter { it.isLetterOrDigit() }.ifEmpty { "custom" } + if (n == 0) "" else "$n" }
+            .first { c -> current.provider(c) == null }
+        scope.launch { ai.update { s ->
+            val old = s.provider(pid)
+            s.withProvider(old?.copy(name = name.trim().ifEmpty { old.name }, baseUrl = if (old.builtIn) old.baseUrl else baseUrl.trim().trimEnd('/').ifEmpty { old.baseUrl })
+                ?: dev.heartline.service.ai.AiProvider(pid, kind, name.trim().ifEmpty { pid }, baseUrl.trim().trimEnd('/').ifEmpty { dev.heartline.service.ai.AiProvider.defaultUrl(kind) }))
+        } }
+        return pid
+    }
+    override fun aiDeleteProvider(id: String) { scope.launch { ai.update { s ->
+        if (s.provider(id)?.builtIn != false) s
+        else s.copy(providers = s.providers.filter { it.id != id }, picked = s.picked.filter { it.provider != id },
+            sections = s.sections.mapValues { (_, v) -> v.copy(main = v.main?.takeIf { it.provider != id }, fallback1 = v.fallback1?.takeIf { it.provider != id },
+                fallback2 = v.fallback2?.takeIf { it.provider != id }) })
+    } } }
+    override fun aiSetPicked(ref: dev.heartline.service.ai.ModelRef, on: Boolean) { scope.launch { ai.update { s -> s.copy(picked = if (on) (s.picked + ref).distinct() else s.picked - ref) } } }
+    override fun aiSetSection(section: dev.heartline.service.ai.AiSection, setup: dev.heartline.service.ai.SectionSetup) {
+        scope.launch { ai.update { it.withSection(section, setup.copy(policy = setup.policy.clamped())) } }
+    }
+    override suspend fun aiRefreshModels(provider: String?) = withContext(Dispatchers.IO) { ai.refreshCatalog(provider) }
+    override suspend fun aiTestKeys(provider: String) = withContext(Dispatchers.IO) { ai.testKeys(provider) }
+    override suspend fun aiTrySection(section: dev.heartline.service.ai.AiSection): String = withContext(Dispatchers.IO) {
+        if (section == dev.heartline.service.ai.AiSection.VOICE) return@withContext testSpeech().substringBefore('\n')
+        val t0 = System.currentTimeMillis()
+        fun failures(list: List<dev.heartline.service.ai.AiAttempt>) = list.filter { !it.ok }.joinToString("\n") { a ->
+            "• ${a.model}" + (if (a.keyIndex >= 0) ", key ${a.keyIndex + 1}" else "") + ": " + (a.kind?.let { "${it.label}, " } ?: "") + (a.error ?: a.note ?: "") }
+        try {
+            val out = ai.router.run(section) { t ->
+                ai.api.chat(t.provider, t.key, t.model, dev.heartline.service.ai.ChatRequest("You are being tested. Reply with only the word OK.",
+                    listOf(dev.heartline.service.ai.ChatMsg.User("Test")), temperature = 0.0, maxTokens = 400), t.timeoutMs).text
+                    ?: throw dev.heartline.service.ai.badAnswer("${t.model} gave no answer")
+            }
+            val t = out.target
+            "\"${out.value.trim().take(60)}\" from ${t.provider.name}: ${t.model} (" + listOf("main model", "fallback 1", "fallback 2")[t.level] +
+                ", key ${t.keyIndex + 1}) in ${"%.1f".format((System.currentTimeMillis() - t0) / 1000.0)} s." +
+                failures(out.attempts).takeIf { it.isNotEmpty() }?.let { "\nOn the way:\n$it" }.orEmpty()
+        } catch (e: dev.heartline.service.ai.AiFailed) { "No model answered.\n" + failures(e.attempts) }
+    }
 
     /** Heart checks for the insights, newest first (they aren't among the Alexa tools). */
     private fun checksSummary(): String = checks.value.take(8).takeIf { it.isNotEmpty() }?.joinToString("\n", "## heart checks (HRV from a 1 to 5 minute rest recording, newest first)\n") { c ->
@@ -460,11 +519,7 @@ class RealController(
         insightsRun.value = InsightsRun(running = true)
         scope.launch {
             val failure = try {
-                val writer = dev.heartline.service.HealthInsights(dev.heartline.service.HealthTools(this@RealController), dev.heartline.service.AssistantAi(),
-                    { dev.heartline.service.AssistantAiConfig.parse(db.meta.get(dev.heartline.service.AssistantAiConfig.KEY)) },
-                    { dev.heartline.service.InsightsSettings.parse(db.meta.get(dev.heartline.service.InsightsSettings.KEY)) },
-                    { dev.heartline.service.SpeechConfig.parse(db.meta.get(dev.heartline.service.SpeechConfig.KEY)).geminiKey },
-                    extra = { checksSummary() })
+                val writer = dev.heartline.service.HealthInsights(dev.heartline.service.HealthTools(this@RealController), ai, extra = { checksSummary() })
                 db.meta.set(dev.heartline.service.InsightReport.KEY, writer.generate(auto).json()); null
             } catch (e: CancellationException) { throw e } catch (e: dev.heartline.service.InsightsFailed) { e
             } catch (e: Exception) { dev.heartline.service.InsightsFailed(listOf(dev.heartline.service.InsightAttempt("heartline", "-", 0, e.message ?: e.toString()))) }
@@ -523,8 +578,11 @@ class RealController(
             val a = all.firstOrNull { it.id == id } ?: return@launch
             db.meta.set(dev.heartline.service.WatchAssistant.ALERTS, org.json.JSONArray().apply { (all - a).forEach { put(it.json()) } }.toString())
             // Reminders live in the watch's reminder slots, which the agenda sync rewrites; alarms and timers are deleted on the watch.
-            if (a.kind != dev.heartline.protocol.Alexa.ALERT_REMINDER)
+            // The watch ignores deletes outside an Alexa conversation, so it's also queued for the next one.
+            if (a.kind != dev.heartline.protocol.Alexa.ALERT_REMINDER) {
+                dev.heartline.service.AlexaDeletes.queue(File(context.filesDir, "alexa"), a.kind, a.token)
                 action { it.send2021(dev.heartline.protocol.Endpoint2021.ALEXA, dev.heartline.protocol.Alexa.deleteAlert(a.kind, a.token)) }
+            }
         }
     }
     override fun alexaRecording(name: String): Uri? {
@@ -555,13 +613,11 @@ class RealController(
             ?: return@withContext "No Alexa recording yet: ask the watch something first."
         val d = wav.readBytes()
         val pcm = ShortArray((d.size - 44) / 2) { i -> ((d[44 + 2 * i].toInt() and 255) or (d[45 + 2 * i].toInt() shl 8)).toShort() }
-        val key = dev.heartline.service.SpeechConfig.parse(db.meta.get(dev.heartline.service.SpeechConfig.KEY)).geminiKey
-        if (key.isBlank()) return@withContext "Save a Gemini key first."
         val started = System.nanoTime()
-        val heard = try { dev.heartline.service.GeminiSpeech().transcribe(pcm, key) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
-            return@withContext "Gemini failed after ${"%.1f".format((System.nanoTime() - started) / 1e9)} s: ${e.message}"
+        val heard = try { dev.heartline.service.VoiceToText(ai).transcribe(pcm, alexaSettings.value) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
+            return@withContext "Voice to text failed after ${"%.1f".format((System.nanoTime() - started) / 1e9)} s: ${e.message}"
         }
-        "Gemini heard \"${heard.text}\" (${"%.1f".format(pcm.size / 16_000.0)} s of audio, ${"%.1f".format((System.nanoTime() - started) / 1e9)} s).\n" + testAssistantAi(heard.text)
+        "${heard.engine} heard \"${heard.text}\" (${"%.1f".format(pcm.size / 16_000.0)} s of audio, ${"%.1f".format((System.nanoTime() - started) / 1e9)} s).\n" + testAssistantAi(heard.text)
     }
     override suspend fun testAssistantAi(question: String): String {
         val started = System.nanoTime()
@@ -630,7 +686,7 @@ class RealController(
 
 
     // ---- Task E: workout capture. Replace these stubs. ----
-    private val captureTask = CaptureController(scope, db, service) { ensureService() }
+    private val captureTask = CaptureController(scope, db, service, ai) { ensureService() }
     override val captureRun = captureTask.run
     override val captures = captureTask.items
     override fun startCapture(label: String, minutes: Int) { if (checkJob?.isActive != true) captureTask.start(label, minutes) }

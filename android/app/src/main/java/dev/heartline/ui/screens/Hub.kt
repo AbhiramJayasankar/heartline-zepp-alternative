@@ -85,7 +85,7 @@ fun WatchHubScreen(controller: HeartlineController, nav: Navigator) {
     val phone by controller.phoneLink.collectAsStateWithLifecycle()
     val hc by controller.healthConnect.collectAsStateWithLifecycle()
     val bg by controller.background.collectAsStateWithLifecycle()
-    val ai by controller.assistantAi.collectAsStateWithLifecycle()
+    val aiSetup by controller.aiSetup.collectAsStateWithLifecycle()
     val turns by controller.alexaTurns.collectAsStateWithLifecycle()
     val sync by controller.sync.collectAsStateWithLifecycle()
     val connected = conn.state == LinkState.CONNECTED
@@ -128,10 +128,16 @@ fun WatchHubScreen(controller: HeartlineController, nav: Navigator) {
 
             // ---- Assistant ----
             Heading("Assistant")
-            HubTile(Icons.mic, "Alexa button", if (ai.keyEnd == null) "Set up voice and the AI brain" else "Answers with ${ai.model.substringAfter('/')} · ${turns.size} questions in the log",
+            val brain = aiSetup.section(dev.heartline.service.ai.AiSection.ASSISTANT).main
+            HubTile(Icons.mic, "Alexa button", if (!aiSetup.ready(dev.heartline.service.ai.AiSection.ASSISTANT)) "Set up voice and the AI brain"
+                else "Answers with ${brain?.model?.substringAfterLast('/')?.removeSuffix(":free")} · ${turns.size} questions in the log",
                 c.pulse, Modifier.fillMaxWidth(), wide = true) { nav.push(Route.Alexa) }
             Gap(10)
-            HubTile(Icons.sparkle, "AI insights", "What two weeks of your data say", c.sleepDeep, Modifier.fillMaxWidth(), wide = true) { nav.push(Route.Insights) }
+            TileRow(
+                { HubTile(Icons.sparkle, "AI insights", "What two weeks of your data say", c.sleepDeep, it) { nav.push(Route.Insights) } },
+                { HubTile(Icons.grid, "AI models", aiSetup.providers.sumOf { p -> p.keys.size }.let { k -> "$k key${if (k == 1) "" else "s"}, ${aiSetup.picked.size} models" },
+                    c.ink, it) { nav.push(Route.AiModels) } },
+            )
 
             // ---- On the watch ----
             Heading("On your wrist")

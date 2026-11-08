@@ -8,7 +8,7 @@ import org.json.JSONObject
 
 internal class CaptureController(
     private val scope: CoroutineScope, private val db: HeartlineDatabase,
-    private val service: StateFlow<WatchService?>, private val ensureService: suspend () -> WatchService,
+    private val service: StateFlow<WatchService?>, private val ai: dev.heartline.service.ai.AiStore, private val ensureService: suspend () -> WatchService,
 ) {
     val run = MutableStateFlow<CaptureRunUi?>(null)
     val items = MutableStateFlow<List<CaptureItemUi>>(emptyList())
@@ -80,8 +80,7 @@ internal class CaptureController(
         }
         if (todo.isEmpty()) return
         naming = scope.launch(Dispatchers.IO) {
-            val key = SpeechConfig.parse(db.meta.get(SpeechConfig.KEY)).geminiKey
-            val model = InsightsSettings.parse(db.meta.get(InsightsSettings.KEY)).geminiModel
+            val ready = ai.setup().ready(dev.heartline.service.ai.AiSection.TITLES)
             // Newest first, a few per pass: each one written triggers the next pass.
             for ((id, f) in todo.entries.sortedByDescending { it.value.start }.take(4)) {
                 val old = meta[CAPTURE_TITLE + id]?.let { runCatching { JSONObject(it) }.getOrNull() }
@@ -90,19 +89,17 @@ internal class CaptureController(
                     db.meta.set(CAPTURE_TITLE + id, JSONObject().put("title", localTitle(f)).put("basis", "").put("ai", false).put("tried", 0).toString())
                 // Nothing to go on (an empty capture): the local name is all there is, and it spares the quota.
                 val empty = f.exercises.isEmpty() && f.sets == 0 && f.watchWorkouts.isEmpty() && f.cardio.isEmpty()
-                suspend fun ask(m: String = model) = parseTitle(GeminiText().generate(key, m, TITLE_SYSTEM, f.prompt(), json = true, temperature = 0.2, maxTokens = 1024).text)
-                // When the main model is overloaded or slow, the newest flash-lite model the key offers: naming is an easy job.
-                suspend fun lite(): String? = runCatching { GeminiText().listModels(key).firstOrNull { it.contains("flash-lite") } }.getOrNull()?.let { ask(it) }
-                val ai = if (key.isBlank() || empty) null else runCatching {
-                    // A 503 ("high demand") is usually gone a few seconds later: one more try before giving up.
-                    try { ask() } catch (e: Exception) {
-                        val busy = e.message?.let { m -> "503" in m || "timeout" in m.lowercase() || "timed out" in m.lowercase() } == true
-                        if (busy) lite() ?: throw e else throw e
-                    }
+                // The Workout names section's models, keys and retry rules (AI models); a reply without a name is asked again.
+                val named = if (!ready || empty) null else runCatching {
+                    ai.router.run(dev.heartline.service.ai.AiSection.TITLES) { t ->
+                        val r = ai.api.chat(t.provider, t.key, t.model, dev.heartline.service.ai.ChatRequest(TITLE_SYSTEM,
+                            listOf(dev.heartline.service.ai.ChatMsg.User(f.prompt())), temperature = 0.2, maxTokens = 1024, json = true), t.timeoutMs)
+                        r.text?.let { parseTitle(it) } ?: throw dev.heartline.service.ai.badAnswer("${t.model} gave no name")
+                    }.value
                 }.onFailure { db.events.add("warn", "Naming a workout capture with AI failed: ${it.message}") }.getOrNull()
-                val title = ai ?: old?.optString("title")?.takeIf { old.optString("basis") == f.basis && old.optBoolean("ai") && it.isNotBlank() } ?: localTitle(f)
+                val title = named ?: old?.optString("title")?.takeIf { old.optString("basis") == f.basis && old.optBoolean("ai") && it.isNotBlank() } ?: localTitle(f)
                 if (db.meta.get(CAPTURE_SESSION + id) == null) continue // deleted while the AI answered
-                db.meta.set(CAPTURE_TITLE + id, JSONObject().put("title", title).put("basis", f.basis).put("ai", ai != null || empty).put("tried", now).toString())
+                db.meta.set(CAPTURE_TITLE + id, JSONObject().put("title", title).put("basis", f.basis).put("ai", named != null || empty).put("tried", now).toString())
             }
         }
     }
@@ -118,24 +115,21 @@ internal class CaptureController(
         // again only on request. (Keying it on the numbers made every open ask the AI again while the page's comparisons
         // were still loading, which also used up the free daily quota.)
         if (!refresh) coachFromJson(db.meta.get(CAPTURE_COACH + id))?.let { (note, b) -> return@withContext note.copy(stale = b != basis) }
-        val key = SpeechConfig.parse(db.meta.get(SpeechConfig.KEY)).geminiKey
-        check(key.isNotBlank()) { "Add a Gemini key under Watch, Alexa, Voice to get a coach's note." }
-        val model = InsightsSettings.parse(db.meta.get(InsightsSettings.KEY)).geminiModel
-        suspend fun ask(m: String) = GeminiText().generate(key, m, COACH_SYSTEM, facts, json = true, temperature = 0.3, maxTokens = 2048)
-        // As for workout names: when the main model is overloaded, slow or out of its daily free quota (429; each model
-        // has its own), the newest flash-lite model.
-        val reply = try { ask(model) } catch (e: CancellationException) { throw e } catch (e: Exception) {
-            val busy = e.message?.let { m -> "503" in m || "429" in m || "timeout" in m.lowercase() || "timed out" in m.lowercase() } == true
-            val lite = if (busy) runCatching { GeminiText().listModels(key).firstOrNull { it.contains("flash-lite") && it != model } }.getOrNull() else null
-            try { lite?.let { ask(it) } ?: throw e } catch (e2: CancellationException) { throw e2 } catch (e2: Exception) {
-                val m = e2.message.orEmpty()
-                // The raw API message is long and full of links; say what happened and when it clears.
-                if ("429" in m) error("Gemini's free daily limit is used up" + (Regex("""retry in (\d+)h(\d+)m""").find(m)?.let { r -> ", for about ${r.groupValues[1]} h ${r.groupValues[2]} min more" } ?: "") + ". The coach's note will be written once it resets.")
-                throw e2
+        check(ai.setup().ready(dev.heartline.service.ai.AiSection.COACH)) { "Choose a model with a key for the coach's note under AI models." }
+        // The Coach's note section's models, keys and retry rules (AI models); a reply in the wrong shape is asked again.
+        val out = try {
+            ai.router.run(dev.heartline.service.ai.AiSection.COACH) { t ->
+                val r = ai.api.chat(t.provider, t.key, t.model, dev.heartline.service.ai.ChatRequest(COACH_SYSTEM, listOf(dev.heartline.service.ai.ChatMsg.User(facts)),
+                    temperature = 0.3, maxTokens = 2048, json = true), t.timeoutMs)
+                (r.text?.let { parseCoach(it) } ?: throw dev.heartline.service.ai.badAnswer("${t.model}'s note didn't come back in the expected shape")) to r.model
             }
+        } catch (e: dev.heartline.service.ai.AiFailed) {
+            error(if (e.kind == dev.heartline.service.ai.FailKind.QUOTA) "Every model for the coach's note is out of quota for now. The note can be written once one resets, or add another key or fallback under AI models."
+                else "The coach's note couldn't be written: ${e.message}")
         }
-        val (note, next) = parseCoach(reply.text) ?: error("The coach's reply didn't come back in the expected shape; try again.")
-        CoachUi(note, next, reply.model, System.currentTimeMillis() / 1000).also { db.meta.set(CAPTURE_COACH + id, coachJson(it, basis)) }
+        val (parsed, model) = out.value
+        val (note, next) = parsed
+        CoachUi(note, next, model, System.currentTimeMillis() / 1000).also { db.meta.set(CAPTURE_COACH + id, coachJson(it, basis)) }
     }
 
     fun delete(id: String) { scope.launch {

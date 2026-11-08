@@ -76,25 +76,22 @@ private fun areaTitle(name: String) = when (name) { "activity" -> "Activity"; "b
 fun InsightsScreen(controller: HeartlineController, nav: Navigator) {
     val c = HL.colors
     val state by controller.insights.collectAsStateWithLifecycle()
-    val ai by controller.assistantAi.collectAsStateWithLifecycle()
-    val speech by controller.speech.collectAsStateWithLifecycle()
+    val aiSetup by controller.aiSetup.collectAsStateWithLifecycle()
     val settings by controller.insightsSettings.collectAsStateWithLifecycle()
-    val gemini = settings.provider == InsightsSettings.GEMINI
-    val modelName = if (gemini) settings.geminiModel else settings.openRouterModel.ifBlank { ai.model }
     val report = state.report
     Screen("AI insights", onBack = { nav.pop() },
         subtitle = report?.let { "Written ${agoOf(it.at)}${if (it.auto) " (daily)" else ""} by ${it.model.substringAfter('/')} in ${"%.0f".format(it.tookMs / 1000.0)} s" }
             ?: "Patterns across your sleep, heart, stress and activity, in plain words.") {
-        ModelPicker(controller, settings, ai.model)
+        AiChainCard(controller, dev.heartline.service.ai.AiSection.INSIGHTS, nav)
+        Gap(10)
+        DailyInsights(controller, settings)
         Gap(14)
-        val geminiReady = speech.geminiKeyEnd != null
-        val orReady = ai.keyEnd != null || ai.key2End != null || ai.key3End != null
-        if (!geminiReady && !orReady) {
+        if (!aiSetup.ready(dev.heartline.service.ai.AiSection.INSIGHTS)) {
             Card {
-                Text("Add a Gemini or OpenRouter key first", style = HL.type.bodyStrong, color = c.ink)
-                MutedText("Gemini uses your Google AI Studio key (the one the Alexa button uses to hear you); OpenRouter uses the Alexa brain's keys.")
+                Text("Choose a model with a key first", style = HL.type.bodyStrong, color = c.ink)
+                MutedText("Insights can be written by any model you've picked under AI models, with fallbacks if it's busy or out of quota.")
                 Gap(10)
-                PillButton("Open the key settings", { nav.push(Route.AlexaPage(if (gemini) AlexaPages.VOICE else AlexaPages.BRAIN)) }, style = ButtonStyle.QUIET)
+                PillButton("Choose the models", { nav.push(Route.AiPage(AiPages.section(dev.heartline.service.ai.AiSection.INSIGHTS))) }, style = ButtonStyle.QUIET)
             }
             return@Screen
         }
@@ -104,7 +101,7 @@ fun InsightsScreen(controller: HeartlineController, nav: Navigator) {
             Gap(10)
             LinearProgressIndicator(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(50)), color = c.pulse, trackColor = c.line)
             Gap(6)
-            MutedText("Gathering two weeks of data and asking ${modelName.substringAfter('/')}. A busy model is asked again after a pause, then the next one is tried; this can take a minute or two.")
+            MutedText("Gathering two weeks of data and asking ${aiSetup.section(dev.heartline.service.ai.AiSection.INSIGHTS).main?.model?.substringAfterLast('/') ?: "the model"}. A busy model is asked again after a pause, then the next one is tried; this can take a minute or two.")
         }
         state.error?.let { err ->
             Gap(10)
@@ -276,70 +273,12 @@ private fun Expandable(title: String, text: String) {
     }
 }
 
-/** Provider, model, fallbacks, the other provider as a last resort, and the daily run; saved as soon as it changes. */
+/** The daily run: saved as soon as it changes. The models and their fallbacks are under AI models. */
 @Composable
-private fun ModelPicker(controller: HeartlineController, s: InsightsSettings, brainModel: String) {
+private fun DailyInsights(controller: HeartlineController, s: InsightsSettings) {
     val c = HL.colors
-    val scope = rememberCoroutineScope()
-    var open by remember { mutableStateOf(false) }
-    val gemini = s.provider == InsightsSettings.GEMINI
     fun set(n: InsightsSettings) = controller.setInsightsSettings(n)
     Card(padding = 14.dp) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClickLabel = if (open) "Hide model settings" else "Change the model", role = Role.Button) { open = !open },
-            verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Model", style = HL.type.label, color = c.inkSoft)
-                Text((if (gemini) "Gemini · " + s.geminiModel else "OpenRouter · " + s.openRouterModel.ifBlank { brainModel }.substringAfter('/')), style = HL.type.bodyStrong, color = c.ink)
-                val fallbacks = if (gemini) s.geminiFallbacks else s.openRouterFallbacks
-                Text(listOfNotNull(fallbacks.takeIf { it.isNotEmpty() }?.let { "then ${it.joinToString { m -> m.substringAfter('/') }}" },
-                    if (s.useOther) "then ${if (gemini) "OpenRouter" else "Gemini"}" else null, if (s.auto) "daily from %02d:00".format(s.autoHour) else null).joinToString(" · "),
-                    style = HL.type.small, color = c.inkSoft)
-            }
-            Text(if (open) "Done" else "Change", style = HL.type.label, color = c.pulse)
-        }
-        if (!open) return@Card
-        Gap(12)
-        Segmented(listOf(InsightsSettings.GEMINI to "Gemini", InsightsSettings.OPENROUTER to "OpenRouter"), s.provider, { set(s.copy(provider = it)) })
-        Gap(12)
-        var model by remember(s.provider) { mutableStateOf(if (gemini) s.geminiModel else s.openRouterModel) }
-        var fallbacks by remember(s.provider) { mutableStateOf((if (gemini) s.geminiFallbacks else s.openRouterFallbacks).joinToString(", ")) }
-        OutlinedTextField(model, { model = it.trim() }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-            label = { Text(if (gemini) "Gemini model" else "OpenRouter model (blank: the Alexa brain's)") })
-        Gap(8)
-        OutlinedTextField(fallbacks, { fallbacks = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-            label = { Text("Fallback models, in order (comma separated)") })
-        Gap(8)
-        PillButton("Save models", {
-            val list = fallbacks.split(',').map { it.trim() }.filter { it.isNotEmpty() }
-            set(if (gemini) s.copy(geminiModel = model.ifBlank { GeminiText.DEFAULT_MODEL }, geminiFallbacks = list) else s.copy(openRouterModel = model, openRouterFallbacks = list))
-        }, style = ButtonStyle.QUIET)
-        if (gemini) {
-            Gap(10)
-            var models by remember { mutableStateOf<List<String>?>(null) }
-            var error by remember { mutableStateOf<String?>(null) }
-            PillButton(if (models == null) "Show the models my key can use" else "Refresh the list", {
-                scope.launch { runCatching { controller.geminiModels() }.onSuccess { models = it; error = null }.onFailure { error = it.message } }
-            }, style = ButtonStyle.QUIET)
-            error?.let { Gap(6); Text(it, style = HL.type.small, color = c.pulse) }
-            models?.let { list ->
-                Gap(8)
-                MutedText("Tap a model to make it the main one; tap + to add it as a fallback.")
-                Gap(6)
-                list.forEach { m ->
-                    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(m, style = HL.type.small.copy(fontSize = 14.sp), color = if (m == s.geminiModel) c.pulse else c.ink,
-                            modifier = Modifier.weight(1f).clickable(onClickLabel = "Use $m", role = Role.Button) { model = m; set(s.copy(geminiModel = m)) }.padding(vertical = 10.dp))
-                        Box(Modifier.heightIn(min = 44.dp).width(44.dp).clip(RoundedCornerShape(50))
-                            .clickable(onClickLabel = "Add $m as a fallback", role = Role.Button) {
-                                val next = (s.geminiFallbacks + m).distinct().filter { it != s.geminiModel }
-                                fallbacks = next.joinToString(", "); set(s.copy(geminiFallbacks = next))
-                            }, contentAlignment = Alignment.Center) { Text("+", style = HL.type.section, color = c.pulse) }
-                    }
-                }
-            }
-        }
-        Gap(12)
-        ToggleRow("If all of these fail, use ${if (gemini) "OpenRouter" else "Gemini"}", "Uses the other provider's key as a last resort.", s.useOther) { set(s.copy(useOther = it)) }
         ToggleRow("Write new insights every day", "After the hour below, once a day; if every model is busy it tries again every 30 minutes.", s.auto) { set(s.copy(auto = it)) }
         if (s.auto) {
             Gap(4)
@@ -348,8 +287,5 @@ private fun ModelPicker(controller: HeartlineController, s: InsightsSettings, br
                 Segmented(listOf(7 to "07:00", 9 to "09:00", 12 to "12:00", 18 to "18:00"), s.autoHour, { set(s.copy(autoHour = it)) })
             }
         }
-        Gap(8)
-        MutedText(if (gemini) "Gemini uses your AI Studio key. Busy errors (503) are retried after 6 and 20 s, rate limits are waited out when short, then the fallbacks are tried."
-            else "OpenRouter uses the Alexa brain's keys and can look up extra days with the health tools while it writes.")
     }
 }
