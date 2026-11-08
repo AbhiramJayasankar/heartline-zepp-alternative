@@ -82,6 +82,9 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
                 // Beat-to-beat intervals: [seconds from start, interval ms, 1 if ectopic]. Enough to recompute any HRV measure.
                 .put("rr", org.json.JSONArray(r.rr.map { org.json.JSONArray().put(Math.round(it.t * 100) / 100.0).put(Math.round(it.rrMs * 10) / 10.0).put(if (it.ectopic) 1 else 0) }))
         }
+        /** Which way the watch faced during a sample, as [x, y, z] of gravity (see WristPose), for sleep positions. */
+        fun poseJson(p: dev.heartline.analytics.WristPose) = org.json.JSONArray(listOf(p.x, p.y, p.z).map { Math.round(it * 1000) / 1000.0 })
+
         /** What the overnight engine is doing now, for the Sleep page. */
         val status = MutableStateFlow("Off")
         /** What daytime sampling is doing now, for the Heart page. */
@@ -262,7 +265,9 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
             delay(seconds * 1000L)
         } finally { running.value = null; withContext(NonCancellable) { runCatching { watch.stopRaw() } } }
         val f = file ?: return Outcome(false, 0.0)
-        val result = withContext(Dispatchers.Default) { analyzeSession(readRecording(f), f.name) }
+        val recording = withContext(Dispatchers.Default) { readRecording(f) }
+        val result = withContext(Dispatchers.Default) { analyzeSession(recording, f.name) }
+        val pose = dev.heartline.analytics.gravityOf(recording.acc, result.start.toLong())
         // The share of the check the wrist was moving, by the same 0.05 g limit beat detection uses.
         val moving = result.motion.takeIf { it.isNotEmpty() }?.let { m -> m.count { it.g > 0.05 }.toDouble() / m.size } ?: 0.0
         val ts = result.start.toLong()
@@ -277,7 +282,7 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         }
         val extra = extract(result, JSONObject().put("file", f.name))
             .put("night", night.toString()).put("reason", reason ?: JSONObject.NULL).put("attempt", attempt).put("length_s", seconds)
-            .put("moving_share", Math.round(moving * 1000) / 1000.0).toString()
+            .put("moving_share", Math.round(moving * 1000) / 1000.0).apply { pose?.let { put("grav", poseJson(it)) } }.toString()
         app.db.health.upsert(listOf(HealthPoint(type, ts, if (clean) result.hrv.rmssdMs else null, extra)))
         app.db.events.add("info", (if (type == SAMPLE) "Overnight" else "Daytime") + " HRV sample at ${clock(ts)}${if (attempt > 0) " (retry $attempt)" else ""}: " + if (clean) "RMSSD ${result.hrv.rmssdMs?.roundToInt()} ms, " +
             "${result.hrBpm?.roundToInt()} bpm, breathing ${result.respiratoryRate ?: "–"}/min" else "set aside, $reason")
@@ -306,9 +311,11 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
             val name = j.optString("file").takeIf { it.isNotEmpty() } ?: continue
             val f = java.io.File(rawDir, java.io.File(name).name)
             if (!f.isFile) continue
-            if (!j.has("rr")) {
-                val r = runCatching { withContext(Dispatchers.Default) { analyzeSession(readRecording(f), f.name) } }.getOrNull() ?: continue
-                app.db.health.upsert(listOf(HealthPoint(type, p.ts, p.value, extract(r, j).toString())))
+            if (!j.has("rr") || !j.has("grav")) {
+                val rec = runCatching { withContext(Dispatchers.Default) { readRecording(f) } }.getOrNull() ?: continue
+                if (!j.has("rr")) extract(runCatching { withContext(Dispatchers.Default) { analyzeSession(rec, f.name) } }.getOrNull() ?: continue, j)
+                dev.heartline.analytics.gravityOf(rec.acc, p.ts)?.let { j.put("grav", poseJson(it)) }
+                app.db.health.upsert(listOf(HealthPoint(type, p.ts, p.value, j.toString())))
             }
             val size = f.length()
             if (f.delete()) {

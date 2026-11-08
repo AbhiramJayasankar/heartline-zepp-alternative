@@ -638,6 +638,21 @@ class RealController(
     override fun deleteCapture(id: String) = captureTask.delete(id)
     override suspend fun captureCoach(id: String, facts: String, refresh: Boolean): CoachUi = captureTask.coach(id, facts, refresh)
     override suspend fun savedCaptureCoach(id: String): CoachUi? = captureTask.savedCoach(id)
+    override suspend fun sleepMovement(start: Long, end: Long): SleepMovement? = withContext(Dispatchers.IO) {
+        val minutes = analyticsMinutes(db.activity.range(start - 60.0, end + 60.0))
+        if (minutes.isEmpty()) return@withContext null
+        val rawDir = File(context.filesDir, "raw")
+        // Each overnight HRV sample's facing; samples saved before it was kept get it from their raw file while that exists.
+        val poses = db.health.series(dev.heartline.service.OvernightHrv.SAMPLE, start - 60.0, end.toDouble()).mapNotNull { p ->
+            val j = runCatching { JSONObject(p.extra ?: "{}") }.getOrNull() ?: return@mapNotNull null
+            j.optJSONArray("grav")?.let { a -> return@mapNotNull WristPose(p.ts, a.getDouble(0), a.getDouble(1), a.getDouble(2)) }
+            val f = j.optString("file").takeIf { it.isNotEmpty() }?.let { File(rawDir, File(it).name) }?.takeIf { it.isFile } ?: return@mapNotNull null
+            val pose = runCatching { gravityOf(readRecording(f).acc, p.ts) }.getOrNull() ?: return@mapNotNull null
+            db.health.upsert(listOf(p.copy(extra = j.put("grav", dev.heartline.service.OvernightHrv.poseJson(pose)).toString())))
+            pose
+        }
+        sleepMovement(minutes, start, end, poses)
+    }
     // ---- end Task E ----
 
 

@@ -172,6 +172,8 @@ interface HeartlineController {
     suspend fun captureCoach(id: String, facts: String, refresh: Boolean = false): CoachUi
     /** The note saved for a session, without asking the AI. */
     suspend fun savedCaptureCoach(id: String): CoachUi?
+    /** The night from [start] to [end] split into still stretches and movements, with positions from the overnight HRV recordings. */
+    suspend fun sleepMovement(start: Long, end: Long): dev.heartline.analytics.SleepMovement? = null
 
     /** Tries the raw-stream mask bits nobody has mapped yet; one line of results per bit. */
     val probe: StateFlow<List<String>>

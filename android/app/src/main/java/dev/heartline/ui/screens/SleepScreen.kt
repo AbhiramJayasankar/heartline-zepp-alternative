@@ -97,7 +97,8 @@ fun SleepScreen(controller: HeartlineController, nav: Navigator) {
             } else NightDetail(night, day!!.minutes + (eve?.minutes ?: emptyList()), score = scoreSeries?.points?.firstOrNull { it.date == date }?.value?.roundToInt(),
                 usualMin = sleepSeries?.points?.dropLast(1)?.mapNotNull { it.value }?.takeIf { it.isNotEmpty() }?.average()?.let { (it * 60).roundToInt() },
                 spo2Points = (day!!.spo2 + (eve?.spo2 ?: emptyList())).filter { it.t >= night.start && it.t <= night.end }.sortedBy { it.t },
-                spo2Aside = (day!!.spo2SetAside + (eve?.spo2SetAside ?: emptyList())).count { it.t >= night.start && it.t <= night.end })
+                spo2Aside = (day!!.spo2SetAside + (eve?.spo2SetAside ?: emptyList())).filter { it.t >= night.start && it.t <= night.end },
+                controller = controller, refresh = day!!.minutes.size)
 
             day?.naps?.takeIf { it.isNotEmpty() }?.let { naps ->
                 Heading(if (naps.size == 1) "Nap" else "Naps")
@@ -169,7 +170,8 @@ fun SleepScreen(controller: HeartlineController, nav: Navigator) {
 }
 
 @Composable
-private fun NightDetail(n: SleepNightUi, minutes: List<dev.heartline.app.MinuteUi>, score: Int?, usualMin: Int?, spo2Points: List<dev.heartline.app.SeriesPoint>, spo2Aside: Int = 0) {
+private fun NightDetail(n: SleepNightUi, minutes: List<dev.heartline.app.MinuteUi>, score: Int?, usualMin: Int?, spo2Points: List<dev.heartline.app.SeriesPoint>,
+                        spo2Aside: List<dev.heartline.app.SeriesPoint> = emptyList(), controller: HeartlineController? = null, refresh: Int = 0) {
     val c = HL.colors
     val spo2 = spo2Points.map { it.v }
     val asleep = n.deepMin + n.lightMin + n.remMin
@@ -234,6 +236,7 @@ private fun NightDetail(n: SleepNightUi, minutes: List<dev.heartline.app.MinuteU
     val hrs = minutes.filter { it.ts in n.start until n.end && it.hr != null && it.state.name.startsWith("SLEEP") }.mapNotNull { it.hr }
     val wakings = minutes.filter { it.ts in n.start until n.end }.sortedBy { it.ts }
         .zipWithNext().count { (a, b) -> a.state.name.startsWith("SLEEP") && (b.state == MinuteState.ACTIVE || b.state == MinuteState.IDLE) }
+    controller?.let { SleepMovementCard(it, n, spo2Points, spo2Aside, refresh) }
     if (hrs.isNotEmpty() || spo2.isNotEmpty()) {
         Heading("Your body while asleep")
         Card(padding = 14.dp) {
@@ -247,9 +250,9 @@ private fun NightDetail(n: SleepNightUi, minutes: List<dev.heartline.app.MinuteU
             ))
             Gap(10)
             MutedText("A low, steady heart rate overnight is a sign of good recovery; the lowest point usually comes in the second half of the night.")
-            if (spo2Aside > 0) {
+            if (spo2Aside.isNotEmpty()) {
                 Gap(6)
-                MutedText("$spo2Aside low SpO2 reading${if (spo2Aside == 1) "" else "s"} set aside: they dropped in a step when you settled into a position " +
+                MutedText("${spo2Aside.size} low SpO2 reading${if (spo2Aside.size == 1) "" else "s"} set aside: they dropped in a step when you settled into a position " +
                     "and jumped back when you moved, which is the watch being pressed on, not your breathing. Wrist SpO2 is a rough guide; " +
                     "only a sleep study can rule breathing problems in or out.")
             }
