@@ -174,9 +174,15 @@ class AssistantAi(private val store: AiStore) {
             reply, or in show_on_watch notifications when they ask for it on the watch. Take as many tool calls as a thorough
             answer needs; when it takes a while, the watch is told the answer is coming and it arrives as notifications.
             After showing a card, a few words are enough.
-            A question at the end makes the watch listen again, so ask one only when you need their answer (never offers like
-            "Want me to check anything else?"); for a game or joke where they answer back, like a knock-knock joke, say only
-            your next line.
+            Follow-ups: the watch opens its mic for their answer only when your reply ends with the tag [listen]. Heartline
+            removes the tag, so they never see it. Add it, as the very last thing, only when you can't go on without their
+            answer: a question you must ask to do what they want (which alarm? what time?), a choice between options you just
+            gave, their turn in a game or quiz, or the next line of a joke they answer back (for a knock-knock joke, reply only
+            "Knock knock. [listen]"). Put that question last, just before the tag, so it stays on the screen while they answer.
+            Leave the tag out when the answer is complete, after an action is done, after showing a card, and for offers or
+            check-ins such as "Want more detail?" or "Anything else?" (better not to write those at all). Without the tag the
+            conversation ends even if you wrote a question, so never end on a question you don't want answered now. The tag
+            goes only at the end of your reply, never in tool arguments.
         """.trimIndent()
 
         /** [template] with its placeholders filled from [c]. */

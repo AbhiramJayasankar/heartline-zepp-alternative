@@ -131,11 +131,26 @@ class WatchAssistantTest {
         assertTrue(a.summary.endsWith("(looked up get_sleep)"))
     }
 
-    @Test fun aQuestionBackListensAgain() = runBlocking {
-        brain(say("Knock knock."))
-        assertFalse(assistant().answer("Tell me a joke").listenAgain)
-        brain(say("Knock knock. Who's there?"))
-        assertTrue(assistant().answer("Tell me a joke").listenAgain)
+    @Test fun onlyTheListenTagOpensTheMicAgain() = runBlocking {
+        brain(say("Knock knock. [listen]"))
+        assistant().answer("Tell me a joke").let { assertTrue(it.listenAgain); assertEquals("Knock knock.", it.text) }
+        // A question mark alone (a rhetorical question, an offer) no longer opens the mic.
+        brain(say("Isn't sleep wonderful?"))
+        assertFalse(assistant().answer("Tell me about sleep").listenAgain)
+        // Bold, capitals and spaces are still the tag, and it never reaches the screen.
+        brain(say("Which alarm, 7:00 or 8:30?\n**[ Listen ]**"))
+        assistant().answer("Change my alarm").let { assertTrue(it.listenAgain); assertEquals("Which alarm, 7:00 or 8:30?", it.text) }
+        assertEquals("Hi", WatchAssistant.watchText("Hi [listen]"))
+        listOf("[listen]", "Follow-ups").forEach { assertTrue(it, system().contains(it)) }
+    }
+
+    @Test fun aLongReplyThatAsksKeepsTheQuestionOnScreen() {
+        val story = (1..60).joinToString(" ") { "Sentence number $it of the story goes on." } + "\nShall I go on with part two?"
+        val (shown, rest) = WatchAssistant.splitReply(story, 700, keepLast = true)
+        assertTrue(shown!!.endsWith("(continued in notifications)\n\nShall I go on with part two?"))
+        assertTrue(shown.toByteArray().size <= 700)
+        assertFalse(rest.joinToString(" ").contains("Shall I go on"))
+        assertTrue(rest.isNotEmpty())
     }
 
     @Test fun failuresAreToldToTheWatch() = runBlocking {

@@ -277,11 +277,11 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
             sendPendingDeletes()
             answer.frames.forEach { watch.send2021(Endpoint2021.ALEXA, it) }
             val limit = if (watchReplyLimit > 0) minOf(watchReplyLimit, s.replyBytes) else s.replyBytes
-            val (shown, rest) = WatchAssistant.splitReply(answer.text?.let { WatchAssistant.watchText(it) }, limit)
+            val listen = answer.listenAgain && s.listenAgain
+            val (shown, rest) = WatchAssistant.splitReply(answer.text?.let { WatchAssistant.watchText(it) }, limit, keepLast = answer.listenAgain)
             shown?.let { watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple(it)) }
             if (rest.isNotEmpty()) scope.launch { notifyAll(rest, s.maxNotifications) }
             repliedAt = System.currentTimeMillis(); answered = true
-            val listen = answer.listenAgain && s.listenAgain
             db.events.add("info", "Alexa replied ${secs(repliedAt - stoppedAt)} s after the stop: ${answer.text ?: "(card)"}" + if (listen) "; listening again" else "")
             val delivery = listOfNotNull(
                 when { answer.text != null -> "Reply on the watch"; answer.frames.isNotEmpty() -> "Card on the watch"; else -> "Nothing shown" },

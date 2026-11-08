@@ -220,10 +220,12 @@ class WatchAssistant(
         var card = false
 
         fun answer(text: String, tools: List<String>, error: String? = null): Answer {
-            val parts = listOfNotNull(text.takeIf { !card }, did.takeIf { it.isNotEmpty() }?.joinToString("; ", "[", "]"),
+            val (shown, listen) = listenTag(text)
+            val parts = listOfNotNull(shown.takeIf { !card }, did.takeIf { it.isNotEmpty() }?.joinToString("; ", "[", "]"),
                 tools.filter { it.startsWith("get_") }.distinct().takeIf { it.isNotEmpty() }?.joinToString(", ", "(looked up ", ")"))
-            // A card is the answer; a text reply after it would replace it on the screen.
-            return Answer(if (card) null else text, frames.toList(), !card && text.trimEnd().endsWith("?"), parts.joinToString(" "), trace, error)
+            // A card is the answer; a text reply after it would replace it on the screen. The mic opens again only when the
+            // model ended with the listen tag (a question mark alone is no longer enough, 2026-11-09).
+            return Answer(if (card) null else shown, frames.toList(), !card && listen, parts.joinToString(" "), trace, error)
         }
 
         private suspend fun addAlert(kind: Int, at: Long, label: String = ""): String {
@@ -592,7 +594,7 @@ class WatchAssistant(
          * clock format puts U+202F before AM/PM) spaces.
          */
         fun watchText(text: String): String {
-            val plain = plainMarkdown(text).replace(Regex("[\\u00A0\\u2000-\\u200B\\u202F\\u205F]"), " ")
+            val plain = plainMarkdown(LISTEN.replace(text, "")).replace(Regex("[\\u00A0\\u2000-\\u200B\\u202F\\u205F]"), " ")
                 .replace(Regex("[\\u2018\\u2019\\u201B\\u2032]"), "'").replace(Regex("[\\u201C\\u201D\\u201F\\u2033]"), "\"")
                 .replace(Regex("[\\u2010-\\u2015\\u2212]"), "-").replace("…", "...").replace(Regex("[•‣▸►]"), "-").replace(Regex("₹ ?"), "Rs ")
             val sb = StringBuilder()
@@ -651,12 +653,32 @@ class WatchAssistant(
          */
         const val REPLY_TEXT = 2000
 
+        /** What a model ends its reply with when it needs the user's answer: Heartline removes it and opens the watch's mic. */
+        const val LISTEN_TAG = "[listen]"
+        private val LISTEN = Regex("""\**\[\s*listen\s*]\**""", RegexOption.IGNORE_CASE)
+
+        /** [text] without the listen tag (in any case, bold or spaced), and whether it had one. */
+        fun listenTag(text: String): Pair<String, Boolean> {
+            if (!LISTEN.containsMatchIn(text)) return text to false
+            return LISTEN.replace(text, "").lines().joinToString("\n") { it.trimEnd() }.trim() to true
+        }
+
         /**
          * [text] as the part the reply screen shows (up to [limit] UTF-8 bytes, cut at a sentence or word) and the rest,
          * in pieces for watch notifications.
          */
-        fun splitReply(text: String?, limit: Int = REPLY_TEXT): Pair<String?, List<String>> {
+        fun splitReply(text: String?, limit: Int = REPLY_TEXT, keepLast: Boolean = false): Pair<String?, List<String>> {
             if (text == null || text.toByteArray().size <= limit) return text to emptyList()
+            // A reply that asks something keeps its last line (or last sentence) on the screen, under the part that fits,
+            // so the question is visible while the mic is open; the middle goes to notifications.
+            if (keepLast) {
+                val line = text.trimEnd().substringAfterLast('\n').trim()
+                val q = if (line.toByteArray().size <= limit / 3) line else line.split(Regex("(?<=[.!?])\\s+")).last().trim()
+                if (q.isNotEmpty() && q.toByteArray().size <= limit / 3) {
+                    val (head, rest) = splitReply(text.trimEnd().removeSuffix(q).trimEnd(), limit - q.toByteArray().size - 2)
+                    return (if (head.isNullOrEmpty()) q else head + "\n\n" + q) to rest
+                }
+            }
             val note = " (continued in notifications)"
             val cut = cutAt(text, limit - note.length, bytes = true)
             return (text.substring(0, cut).trimEnd() + note) to notificationChunks(text.substring(cut))
