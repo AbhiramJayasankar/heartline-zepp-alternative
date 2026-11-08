@@ -278,7 +278,9 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
             answer.frames.forEach { watch.send2021(Endpoint2021.ALEXA, it) }
             val limit = if (watchReplyLimit > 0) minOf(watchReplyLimit, s.replyBytes) else s.replyBytes
             val listen = answer.listenAgain && s.listenAgain
-            val (shown, rest) = WatchAssistant.replyAndNotifications(answer.text?.let { WatchAssistant.watchText(it) }, limit, keepLast = answer.listenAgain)
+            // While listening again the watch shows the latest reply's last question, so a reply that asks ends with one.
+            val text = answer.text?.let { WatchAssistant.watchText(it) }?.let { if (listen) WatchAssistant.endAsQuestion(it) else it }
+            val (shown, rest) = WatchAssistant.replyAndNotifications(text, limit, keepLast = answer.listenAgain)
             shown?.let { watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple(it)) }
             if (rest.isNotEmpty()) scope.launch { notifyAll(rest, s.maxNotifications) }
             repliedAt = System.currentTimeMillis(); answered = true
@@ -289,8 +291,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
                 "listening again".takeIf { listen },
             ).joinToString(", ")
             log(u, stoppedAt, delivery, recording, s)
-            // The watch needs time to draw the reply first: at 0.6 s its listening screen kept the reply before this one
-            // ("Knock knock!" never showed, 2026-11-09).
+            // Zepp waits 600 ms before its continue command (NewBleVoiceCaptureNotifyImpl).
             if (listen) { delay(LISTEN_AGAIN_DELAY_MS); watch.send2021(Endpoint2021.ALEXA, Alexa.listenAgain) }
         } catch (e: CancellationException) { if (!handedOff) work.cancel(); throw e }
     }
@@ -377,7 +378,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
     private companion object {
         const val FRAME = 960
         const val ESCALATE_MS = 1500L
-        const val LISTEN_AGAIN_DELAY_MS = 1800L
+        const val LISTEN_AGAIN_DELAY_MS = 600L
         val ORPHAN_STOPS = listOf("triggered (06)", "a card", "a simple reply", "an error (0f)", "end (02)")
         val STOPS = listOf("triggered (06)", "an error (0f)")
     }

@@ -149,6 +149,14 @@ class WatchAssistantTest {
         listOf("[listen]", "Follow-ups").forEach { assertTrue(it, system().contains(it)) }
     }
 
+    @Test fun aReplyThatAsksEndsWithAQuestionOnTheWatch() {
+        assertEquals("Knock knock?", WatchAssistant.endAsQuestion("Knock knock!"))
+        assertEquals("Lettuce? \uD83D\uDE04", WatchAssistant.endAsQuestion("Lettuce. \uD83D\uDE04"))
+        assertEquals("Fair enough! Here's another one.\n\nKnock knock?", WatchAssistant.endAsQuestion("Fair enough! Here's another one.\n\nKnock knock!"))
+        assertEquals("Which alarm, 7:00 or 8:30?", WatchAssistant.endAsQuestion("Which alarm, 7:00 or 8:30?"))
+        assertEquals("Your turn?", WatchAssistant.endAsQuestion("Your turn"))
+    }
+
     @Test fun aReplyThatOverflowsGoesToNotificationsInFull() {
         val story = (1..60).joinToString(" ") { "Sentence number $it of the story goes on." }
         val (shown, parts) = WatchAssistant.replyAndNotifications(story, 700)

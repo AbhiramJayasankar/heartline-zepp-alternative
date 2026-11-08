@@ -661,6 +661,20 @@ class WatchAssistant(
          */
         private val LISTEN = Regex("""\**\[\s*listen\s*]\**(?=[^\p{L}\p{N}]*$)""", RegexOption.IGNORE_CASE)
 
+        /**
+         * [text] ending in a question. While the mic is open again, the GTR 2e shows the last sentence with a "?" from the
+         * latest reply that had one, so after "Knock knock!" it showed an older "What can I do for you?" (confirmed by the
+         * owner, 2026-11-09). A reply that asks for an answer therefore ends with "?" on the watch: "Knock knock?".
+         */
+        fun endAsQuestion(text: String): String {
+            val t = text.trimEnd()
+            val tail = Regex("""[^\p{L}\p{N}]*$""").find(t)?.value.orEmpty()
+            if ('?' in tail || t.isEmpty()) return t
+            val head = t.substring(0, t.length - tail.length)
+            val after = tail.trimStart(' ', '.', '!', '…', '\n', '\t').trim()
+            return head + "?" + if (after.isEmpty()) "" else " $after"
+        }
+
         /** [text] without a closing listen tag (in any case, bold or spaced), and whether it had one. */
         fun listenTag(text: String): Pair<String, Boolean> {
             if (!LISTEN.containsMatchIn(text)) return text to false
