@@ -655,9 +655,13 @@ class WatchAssistant(
 
         /** What a model ends its reply with when it needs the user's answer: Heartline removes it and opens the watch's mic. */
         const val LISTEN_TAG = "[listen]"
-        private val LISTEN = Regex("""\**\[\s*listen\s*]\**""", RegexOption.IGNORE_CASE)
+        /**
+         * The tag only at the end (after it, at most spaces, punctuation or emoji): a model that mentions [listen] in a
+         * sentence, explaining it, didn't ask for the mic (2026-11-09, that reopened it).
+         */
+        private val LISTEN = Regex("""\**\[\s*listen\s*]\**(?=[^\p{L}\p{N}]*$)""", RegexOption.IGNORE_CASE)
 
-        /** [text] without the listen tag (in any case, bold or spaced), and whether it had one. */
+        /** [text] without a closing listen tag (in any case, bold or spaced), and whether it had one. */
         fun listenTag(text: String): Pair<String, Boolean> {
             if (!LISTEN.containsMatchIn(text)) return text to false
             return LISTEN.replace(text, "").lines().joinToString("\n") { it.trimEnd() }.trim() to true

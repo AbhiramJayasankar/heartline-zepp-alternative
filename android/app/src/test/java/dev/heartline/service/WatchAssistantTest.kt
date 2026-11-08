@@ -141,6 +141,11 @@ class WatchAssistantTest {
         brain(say("Which alarm, 7:00 or 8:30?\n**[ Listen ]**"))
         assistant().answer("Change my alarm").let { assertTrue(it.listenAgain); assertEquals("Which alarm, 7:00 or 8:30?", it.text) }
         assertEquals("Hi", WatchAssistant.watchText("Hi [listen]"))
+        // After it, only spaces, punctuation or emoji; a mention in a sentence is not the tag.
+        brain(say("Knock knock! [listen] \uD83D\uDE04"))
+        assertTrue(assistant().answer("Joke").listenAgain)
+        brain(say("Because my reply ended with [listen], which reopens the mic. I won't add it this time."))
+        assistant().answer("Why did you listen again?").let { assertFalse(it.listenAgain); assertTrue(it.text!!.contains("[listen], which")) }
         listOf("[listen]", "Follow-ups").forEach { assertTrue(it, system().contains(it)) }
     }
 

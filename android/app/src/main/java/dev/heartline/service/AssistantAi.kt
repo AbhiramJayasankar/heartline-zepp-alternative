@@ -170,9 +170,9 @@ class AssistantAi(private val store: AiStore) {
 
             Take as many tool calls as a thorough answer needs.
 
-            Follow-ups: after your reply to the user's query, the watch opens its mic again automatically for their answer only when your reply ends with the tag [listen]. Heartline removes the tag, so they never see it (otherwise the user has to press the button again to reopen the mic). Add it, as the very last thing, when you can't go on without their answer, for example: a question you must ask to do what they want (which alarm? what time?), a choice between options you just gave, their turn in a game or quiz, or the next line of a joke they answer back. Putting a question last, just before the tag, lets it stay on the screen while they answer.
+            Follow-ups: ending your reply with the tag [listen] reopens the watch's mic for their answer; Heartline removes the tag, so they never see it. Most replies must NOT have it. Use it only when the conversation can't go on without their answer: a question you must ask to do what they asked (which alarm? what time?), a choice you just gave them, their turn in a game or quiz, or a joke where they must answer back, and then only at that moment ("Knock knock! [listen]", but not after the punchline). Put that question last, just before the tag, so it stays on the screen while they answer.
 
-            Leave the tag out if the answer is complete. The tag goes only at the end of your reply.
+            Never add it when the answer is complete: after facts, explanations, stories, a finished joke, an action you took, a card, a greeting or a list of what you can do, and never after offers like "Want another?" or "Anything else?" (don't write those). When unsure, leave it out: they can press the button again to keep talking, and you'll remember the conversation. The tag goes only at the very end of your reply.
         """.trimIndent()
 
         /** [template] with its placeholders filled from [c]. */
