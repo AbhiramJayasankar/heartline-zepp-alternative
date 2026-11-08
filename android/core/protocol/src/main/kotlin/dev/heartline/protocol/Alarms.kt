@@ -5,8 +5,8 @@ import java.time.DayOfWeek
 // AmazfitGTR2eCoordinator inherits HuamiCoordinator; AbstractDeviceCoordinator disables smart wake-up.
 const val ALARM_SLOTS = 10
 /**
- * The watch numbers alarms 0 to 15 (4 bits). Heartline writes 0 to 9; alarms made on the watch itself took 10 and up
- * on the user's GTR 2e (2026-11-08: switches 0, 10, 11, 12, 13).
+ * The watch numbers alarms 0 to 15 (4 bits). Heartline writes 0 to 9; 10 and up hold alarms made on the watch and Alexa
+ * alerts (the user's GTR 2e, 2026-11-09: 10 to 14 were Heartline's old Alexa alarms and reminders, 5 at most).
  */
 const val WATCH_ALARM_SLOT_MAX = 15
 const val ALARM_SMART_WAKE_SUPPORTED = false

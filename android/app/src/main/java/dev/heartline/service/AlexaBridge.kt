@@ -380,7 +380,11 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
     }
 }
 
-/** Alerts to remove from the watch, kept as "kind token" lines in the Alexa folder until the next Alexa conversation sends them. */
+/**
+ * Alerts to remove from the watch, kept as "kind token" lines in the Alexa folder until the next Alexa conversation sends
+ * them. The GTR 2e (voice version 2) ignored these deletes in both forms on 2026-11-09, in and out of a conversation;
+ * an Alexa set inside a conversation does land (slot 14), so alerts can be added and switched but not removed there.
+ */
 object AlexaDeletes {
     const val FILE = "pending-deletes"
     fun queue(folder: File, kind: Int, token: String) {

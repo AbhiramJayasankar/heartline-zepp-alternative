@@ -64,7 +64,7 @@ interface DataTools {
  */
 data class WatchAlarm(val slot: Int, val on: Boolean, val hour: Int?, val minute: Int?, val days: Set<DayOfWeek>, val madeOnWatch: Boolean) {
     fun describe(): String {
-        val time = if (hour != null && minute != null) "%02d:%02d".format(hour, minute) else "made on the watch (time unknown; only changeable on the watch)"
+        val time = if (hour != null && minute != null) "%02d:%02d".format(hour, minute) else "made on the watch or by Alexa (time unknown; only changeable on the watch)"
         return "alarm $slot: $time, ${repeatWords(days)}, ${if (on) "on" else "off"}"
     }
     companion object {

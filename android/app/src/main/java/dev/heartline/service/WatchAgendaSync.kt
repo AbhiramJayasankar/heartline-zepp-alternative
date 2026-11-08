@@ -144,7 +144,7 @@ internal class WatchAgendaSync(
     }
 
     private companion object {
-        const val WATCH_MADE = "alarm %d was made on the watch, and the watch doesn't let the phone change or delete those; it can be changed on the watch (Alarm app)"
+        const val WATCH_MADE = "alarm %d isn't in Heartline's alarm slots (it was made on the watch or by an Alexa request), and the watch doesn't let the phone change or delete those; it can be switched on or off on the watch (Alarm app)"
     }
     private suspend fun syncReminders(slots: AgendaSlots) {
         val prefs = readReminderPreferences(db.meta.get(REMINDERS_KEY))
