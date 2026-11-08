@@ -211,6 +211,8 @@ data class HealthDayUi(
     val naps: List<dev.heartline.analytics.Nap> = emptyList(),
     /** Temperature readings left out of skin temperature: off the wrist, settling after putting it on, or a one-off spike. */
     val temperatureSetAside: List<SeriesPoint> = emptyList(),
+    /** Overnight SpO2 readings left out of [spo2] as pressure on the sensor (cleanSpo2). */
+    val spo2SetAside: List<SeriesPoint> = emptyList(),
 )
 data class LapUi(val index: Int, val durationS: Int, val distanceM: Int?, val avgHr: Int?, val paceSPerKm: Double?)
 /** Everything decoded beyond the basic summary. Any decoded field without a dedicated slot goes in [extras] as label to value. */

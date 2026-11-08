@@ -152,6 +152,10 @@ class HealthTools(
         val lines = ArrayList<String>()
         if (h.spo2.isEmpty()) lines += "No SpO2 readings on ${label(d)}." else {
             lines += "SpO2 on ${label(d)}: average ${r(h.spo2Avg)}%, lowest ${r(h.spo2Min)}%, ${h.spo2.size} readings"
+            if (h.spo2SetAside.isNotEmpty()) lines += "${h.spo2SetAside.size} more overnight readings (${r(h.spo2SetAside.minOf { it.v })}–${r(h.spo2SetAside.maxOf { it.v })}%) " +
+                "were set aside and are not in the figures here: they stepped down when the wearer settled into a sleeping position and back up " +
+                "at the next movement, the signature of the watch being pressed on, not of low blood oxygen. Don't treat them as oxygen dips. " +
+                "Wrist SpO2 is a rough guide and can't diagnose breathing problems."
             h.spo2Bands.filter { it.minutes > 0 }.takeIf { it.isNotEmpty() }?.let { b -> lines += "Time in bands: " + b.joinToString(", ") { "${it.name} ${hm(it.minutes)}" } }
             val step = maxOf(1, h.spo2.size / 30)
             lines += "Readings: " + h.spo2.filterIndexed { i, _ -> i % step == 0 }.take(30).joinToString(", ") { "${at(it.t.toLong())} ${r(it.v)}%" }

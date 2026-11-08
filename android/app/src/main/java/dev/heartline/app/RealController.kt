@@ -126,7 +126,11 @@ class RealController(
                 // Skin temperature only: readings off the wrist, settling or spiking are left out of the daily values.
                 val hrMinutes = minutes.filter { it.hr != null && it.hr in 30..220 }.map { it.ts / 60 }.toHashSet()
                 val skin = skinTemperatures(health["temperature"].orEmpty().mapNotNull { h -> h.value?.let { TempReading(h.ts.toLong(), it, sensor2(h.extra)) } }, hrMinutes)
-                val values = health.filterKeys { it != "temperature" }.values.flatten().mapNotNull { it.value?.let { value -> HealthValue(it.type, it.ts, value) } } +
+                // Overnight SpO2 without the readings that are pressure on the sensor (cleanSpo2).
+                val spo2Aside = cleanSleepSpo2(health["spo2_sleep"].orEmpty().mapNotNull { h -> h.value?.let { DayHealthValue(h.type, h.ts, it, h.extra) } }, minutes)
+                    .second.map { it.ts }.toHashSet()
+                val values = health.filterKeys { it != "temperature" }.values.flatten().filter { !(it.type == "spo2_sleep" && it.ts in spo2Aside) }
+                    .mapNotNull { it.value?.let { value -> HealthValue(it.type, it.ts, value) } } +
                     skin.map { HealthValue("temperature", it.ts, it.value) }
                 val summaries = insights.mapNotNull { i -> i.start?.let { CheckSummary(it, i.rmssd, i.hr, i.quality ?: 0.0, i.usableS ?: 0.0, i.rhythm) } }
                 val profile = Profile(p.age, p.sex?.name?.lowercase(), p.weightKg, p.heightCm, p.maxHr, p.restingHr)
@@ -159,8 +163,9 @@ class RealController(
         return combine(activityDay(date), db.heartRate.observeRange(from.toDouble(), to - 1.0), db.health.observeByType(from.toDouble(), to - 1.0),
             settings.profile, steps) { day, live, health, p, st ->
             withContext(Dispatchers.Default) {
-                val values = health.values.flatten().mapNotNull { h -> h.value?.let { DayHealthValue(h.type, h.ts, it, h.extra) } }
-                val daily = computeDaily(analyticsMinutes(db.activity.range(from - 86_400.0, to - 1.0)),
+                val minutes = analyticsMinutes(db.activity.range(from - 86_400.0, to - 1.0))
+                val (values, spo2Aside) = cleanSleepSpo2(health.values.flatten().mapNotNull { h -> h.value?.let { DayHealthValue(h.type, h.ts, it, h.extra) } }, minutes)
+                val daily = computeDaily(minutes,
                     values.map { HealthValue(it.type, it.ts, it.value) }, emptyList(),
                     Profile(p.age, p.sex?.name?.lowercase(), p.weightKg, p.heightCm, p.maxHr, p.restingHr), 2, date.atTime(23, 59).atZone(zone))
                 val d = daily.days.lastOrNull { it.date == date.toString() }
@@ -168,7 +173,8 @@ class RealController(
                 val stride = p.heightCm?.takeIf { it > 0 }?.let { it / 100 * 0.415 } ?: 0.72
                 buildHealthDay(date, from, day, live.map { HrPoint(it.ts.toLong(), it.bpm) }, values, maxHr,
                     (d?.restingHr ?: p.restingHr?.toDouble())?.let { kotlin.math.round(it).toInt() }, d?.caloriesActive, stride,
-                    if (date == LocalDate.now(zone)) st?.distanceM else null).copy(awakeRestingHr = d?.awakeRestingHr?.let { kotlin.math.round(it).toInt() }, naps = day.naps)
+                    if (date == LocalDate.now(zone)) st?.distanceM else null).copy(awakeRestingHr = d?.awakeRestingHr?.let { kotlin.math.round(it).toInt() }, naps = day.naps,
+                    spo2SetAside = spo2Aside.map { SeriesPoint(it.ts.toDouble(), it.value) })
             }
         }
     }
