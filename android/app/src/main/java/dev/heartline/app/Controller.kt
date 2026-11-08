@@ -31,6 +31,8 @@ interface HeartlineController {
     /** An automatic heart check recording right now (overnight or daytime HRV), or null. */
     val hrvCheck: StateFlow<HrvCheckUi?>
     fun setOvernight(enabled: Boolean)
+    /** Accurate positions on or off (see OvernightSettings.positions). */
+    fun setAccuratePositions(enabled: Boolean) {}
     /** One free-text note, kept on the phone (meta "notes"). */
     val notes: StateFlow<String>
     fun saveNotes(text: String)
@@ -381,7 +383,7 @@ data class TrendsUi(
 data class NightSpan(val date: java.time.LocalDate, val start: Long?, val end: Long?, val asleepMin: Int?, val ongoing: Boolean = false)
 
 enum class MinuteState { NOT_WORN, SLEEP_LIGHT, SLEEP_DEEP, SLEEP_REM, ACTIVE, IDLE, CHARGING, UNKNOWN }
-data class MinuteUi(val ts: Long, val state: MinuteState, val steps: Int, val hr: Int?)
+data class MinuteUi(val ts: Long, val state: MinuteState, val steps: Int, val hr: Int?, /** The watch's movement score for the minute. */ val intensity: Int = 0)
 data class RoutePoint(val t: Int, val lat: Double, val lon: Double, val altM: Double? = null)
 data class WorkoutUi(val start: Long, val durationS: Int, val type: String, val avgHr: Int?, val maxHr: Int?, val calories: Int?, val steps: Int?, val distanceM: Int?, val track: List<HrPoint>, val route: List<RoutePoint> = emptyList(), val detail: WorkoutDetailUi? = null)
 data class ActivityDayUi(
@@ -455,4 +457,6 @@ data class OvernightSampleUi(val ts: Long, val night: java.time.LocalDate?, val 
 data class HrvCheckUi(val night: Boolean, val startedAt: Long, val seconds: Int, val attempt: Int)
 data class OvernightUi(val enabled: Boolean = false, val status: String = "Off", val samples: List<OvernightSampleUi> = emptyList(),
     val allDay: Boolean = false, val dayStatus: String = "Off", val daySamples: List<OvernightSampleUi> = emptyList(),
-    val nightEvery: Int = 15, val nightLen: Int = 3, val dayEvery: Int = 30, val dayLen: Int = 2)
+    val nightEvery: Int = 15, val nightLen: Int = 3, val dayEvery: Int = 30, val dayLen: Int = 2,
+    /** Accurate positions: motion-only recordings every 5 minutes while asleep. */
+    val positions: Boolean = false)

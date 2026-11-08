@@ -270,6 +270,8 @@ private fun NightBodyChart(n: SleepNightUi, minutes: List<dev.heartline.app.Minu
     val c = HL.colors
     val inNight = remember(minutes, n) { minutes.filter { it.ts in n.start until n.end }.sortedBy { it.ts } }
     val hr = remember(inNight) { inNight.mapNotNull { m -> m.hr?.let { dev.heartline.app.SeriesPoint(m.ts.toDouble(), it.toDouble()) } } }
+    // The watch's movement score per minute, for a strip under the lines.
+    val moves = remember(inNight) { inNight.filter { it.intensity > 0 }.map { dev.heartline.app.SeriesPoint(it.ts.toDouble(), it.intensity.coerceAtMost(60).toDouble()) } }
     val spans = remember(inNight, c) {
         val out = ArrayList<dev.heartline.ui.components.ChartSpan>()
         var runStart = 0L; var state: MinuteState? = null; var last = 0L
@@ -288,7 +290,11 @@ private fun NightBodyChart(n: SleepNightUi, minutes: List<dev.heartline.app.Minu
                     spo2.takeIf { it.isNotEmpty() }?.let { dev.heartline.ui.components.ChartLine(it, c.oxygen, "SpO2", "%", width = 1.6.dp, gap = 1200.0) },
                 ),
                 n.start.toDouble(), n.end.toDouble(), height = 190.dp, spans = spans, minSpan = 900.0,
-                idleHint = "Red: heart rate. Blue: blood oxygen. Shading: the sleep stage. Touch for a minute's values.",
+                idleHint = "Red: heart rate. Blue: blood oxygen. Shading: the sleep stage. Grey bars: the watch moving. Touch for a minute's values.",
+                lanes = listOfNotNull(moves.takeIf { it.isNotEmpty() }?.let { mv ->
+                    dev.heartline.ui.components.ChartLane("Moves", 18.dp, bars = mv, barWidth = 60.0, barColor = c.inkSoft.copy(alpha = 0.85f),
+                        readout = { t -> inNight.lastOrNull { it.ts <= t && t < it.ts + 60 }?.let { m -> if (m.intensity == 0) "still" else "movement ${m.intensity}" } })
+                }),
             )
         }
         if (spo2.isEmpty()) { Gap(6); MutedText("No blood oxygen this night. Turn on \"Blood oxygen during sleep\" in Watch settings, Tracking.") }

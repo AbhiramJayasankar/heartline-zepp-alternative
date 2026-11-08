@@ -13,7 +13,7 @@ fun ActivityRow.protocolMinute() = ActivityMinute(ts, kind ?: 0, intensity ?: 0,
 fun mappedMinutes(rows: List<ActivityRow>, prevKind: Int? = null): List<MinuteUi> {
     val minutes = rows.map { it.protocolMinute() }
     return minutes.zip(activityStates(minutes, prevKind)).map { (row, state) ->
-        MinuteUi(row.ts, MinuteState.valueOf(state.name), row.steps, row.hr.takeIf { validHr(it) })
+        MinuteUi(row.ts, MinuteState.valueOf(state.name), row.steps, row.hr.takeIf { validHr(it) }, row.intensity)
     }
 }
 fun analyticsMinutes(rows: List<ActivityRow>, prevKind: Int? = null): List<MinuteSample> =

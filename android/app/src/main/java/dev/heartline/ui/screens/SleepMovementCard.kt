@@ -38,6 +38,9 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.background
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.heartline.analytics.MOVE_INTENSITY
 import dev.heartline.analytics.SleepMovement
 import dev.heartline.analytics.StillStretch
@@ -76,6 +79,7 @@ internal fun SleepMovementCard(controller: HeartlineController, n: SleepNightUi,
     val loaded by produceState<SleepMovement?>(null, n.start, n.end, refresh) {
         value = runCatching { controller.sleepMovement(n.start, n.end) }.getOrNull()
     }
+    val ov by controller.overnight.collectAsStateWithLifecycle()
     val m = loaded ?: return
     if (m.intensity.isEmpty()) return
     val palette = listOf(c.oxygen, c.ok, c.warn, c.sleepRem, c.pulse, c.sleepDeep)
@@ -85,7 +89,18 @@ internal fun SleepMovementCard(controller: HeartlineController, n: SleepNightUi,
     Gap(10)
     Card(padding = 14.dp) {
         AreaLabel("Movement and positions", c.hue(Area.SLEEP), dot = false)
-        Gap(8)
+        Gap(6)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Accurate positions", style = HL.type.bodyStrong, color = c.ink)
+                Text(if (ov.positions) "On: the motion sensor is read for 20 s every 5 minutes while you sleep, so nearly every stretch gets a position."
+                    else "Off: positions come from the overnight HRV recordings only.", style = HL.type.small, color = c.inkSoft)
+            }
+            Spacer(Modifier.width(10.dp))
+            Switch(ov.positions, { controller.setAccuratePositions(it) },
+                colors = SwitchDefaults.colors(checkedTrackColor = c.ok, checkedThumbColor = c.surface, uncheckedTrackColor = c.gridMajor, uncheckedThumbColor = c.surface, uncheckedBorderColor = c.gridMajor))
+        }
+        Gap(10)
         FactGrid(listOf(
             FactItem("Moves", "${m.moves.size}", null),
             FactItem("Position changes", if (m.measured) "${m.turns}" else "–", null),
@@ -116,7 +131,8 @@ internal fun SleepMovementCard(controller: HeartlineController, n: SleepNightUi,
             "break one. " + if (m.measured) "Its number comes from which way the watch faced in the overnight HRV recordings taken " +
             "during it, so the same number again means you went back to that position. The watch measures your wrist, which usually " +
             "follows how you lie, but not always."
-        else "Turn on overnight HRV on this page to number the positions: its recordings show which way the watch faced.")
+        else "Turn on Accurate positions above, or overnight HRV on this page, to number the positions: their recordings show which way the watch faced. " +
+            "Accurate positions uses a little watch battery, and the phone needs to stay connected to the watch overnight.")
     }
 }
 

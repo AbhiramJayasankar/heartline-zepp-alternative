@@ -650,8 +650,10 @@ class RealController(
             val pose = runCatching { gravityOf(readRecording(f).acc, p.ts) }.getOrNull() ?: return@mapNotNull null
             db.health.upsert(listOf(p.copy(extra = j.put("grav", dev.heartline.service.OvernightHrv.poseJson(pose)).toString())))
             pose
+        } + db.health.series(dev.heartline.service.OvernightHrv.POSE, start - 60.0, end.toDouble()).mapNotNull { p ->
+            runCatching { JSONObject(p.extra ?: "{}").getJSONArray("grav") }.getOrNull()?.let { a -> WristPose(p.ts, a.getDouble(0), a.getDouble(1), a.getDouble(2)) }
         }
-        sleepMovement(minutes, start, end, poses)
+        sleepMovement(minutes, start, end, poses.sortedBy { it.ts })
     }
     // ---- end Task E ----
 
@@ -671,7 +673,7 @@ class RealController(
         db.health.observeSeries(dev.heartline.service.OvernightHrv.SAMPLE, System.currentTimeMillis() / 1000.0 - 40 * 86_400),
         db.health.observeSeries(dev.heartline.service.OvernightHrv.DAY_SAMPLE, System.currentTimeMillis() / 1000.0 - 40 * 86_400)) { cfg, status, dayStatus, rows, dayRows ->
         val s = dev.heartline.service.OvernightSettings.parse(cfg)
-        OvernightUi(s.enabled, status, rows.map(::sampleUi), s.allDay, dayStatus, dayRows.map(::sampleUi), s.nightEvery, s.nightLen, s.dayEvery, s.dayLen)
+        OvernightUi(s.enabled, status, rows.map(::sampleUi), s.allDay, dayStatus, dayRows.map(::sampleUi), s.nightEvery, s.nightLen, s.dayEvery, s.dayLen, s.positions)
     }.stateIn(scope, SharingStarted.Eagerly, OvernightUi())
     override val notes: StateFlow<String> = db.meta.observe("notes").map { it.orEmpty() }.stateIn(scope, SharingStarted.Eagerly, "")
     override fun saveNotes(text: String) { scope.launch { db.meta.set("notes", text) } }
@@ -680,6 +682,12 @@ class RealController(
             val s = dev.heartline.service.OvernightSettings.parse(db.meta.get(dev.heartline.service.OvernightHrv.KEY))
             db.meta.set(dev.heartline.service.OvernightHrv.KEY, (if (night) s.copy(nightEvery = everyMin, nightLen = lengthMin) else s.copy(dayEvery = everyMin, dayLen = lengthMin)).json())
             db.events.add("info", "${if (night) "Overnight" else "Daytime"} HRV: $lengthMin-minute samples every $everyMin minutes")
+        }
+    }
+    override fun setAccuratePositions(enabled: Boolean) {
+        scope.launch {
+            db.meta.set(dev.heartline.service.OvernightHrv.KEY, dev.heartline.service.OvernightSettings.parse(db.meta.get(dev.heartline.service.OvernightHrv.KEY)).copy(positions = enabled).json())
+            db.events.add("info", "Accurate positions turned ${if (enabled) "on" else "off"}")
         }
     }
     override fun setAllDayHrv(enabled: Boolean) {

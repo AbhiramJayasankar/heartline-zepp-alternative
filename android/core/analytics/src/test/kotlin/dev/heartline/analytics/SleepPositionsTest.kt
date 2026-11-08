@@ -50,4 +50,10 @@ class SleepPositionsTest {
         assertNotNull(gravityOf(still, 0)).also { assertEquals(-1.0, it.z, 1e-9) }
         assertNull(gravityOf(Array(100) { floatArrayOf(0f, 0f, -0.3f) }, 0)) // moving: the mean isn't gravity
     }
+
+    @Test fun accuratePositionsNeedAStillWrist() {
+        assertNotNull(stillGravityOf(Array(100) { floatArrayOf(0f, 0.02f * (it % 3), -1f) }, 0))
+        // Turning over mid-recording: the mean is still near 1 g, but the axes swing.
+        assertNull(stillGravityOf(Array(100) { if (it < 50) floatArrayOf(0f, 0f, -1f) else floatArrayOf(-1f, 0f, 0f) }, 0))
+    }
 }

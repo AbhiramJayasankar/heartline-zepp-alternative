@@ -21,6 +21,16 @@ fun gravityOf(acc: Array<FloatArray>, ts: Long): WristPose? {
     return WristPose(ts, sx / g, sy / g, sz / g)
 }
 
+/** [gravityOf], but only when the wrist was still: every axis within 0.1 g (one standard deviation) of its mean. */
+fun stillGravityOf(acc: Array<FloatArray>, ts: Long): WristPose? {
+    val p = gravityOf(acc, ts) ?: return null
+    for (k in 0..2) {
+        val mean = acc.sumOf { it[k].toDouble() } / acc.size
+        if (sqrt(acc.sumOf { (it[k] - mean) * (it[k] - mean) } / acc.size) > 0.1) return null
+    }
+    return p
+}
+
 /** The watch's facing in words. Only the screen axis is named: which way 12 o'clock points depends on the wrist it's on. */
 fun poseWords(z: Double): String = when {
     z >= 0.9 -> "Watch face up"

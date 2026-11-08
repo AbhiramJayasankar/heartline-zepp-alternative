@@ -25,9 +25,11 @@ data class OvernightSettings(
     val enabled: Boolean = false, val start: String? = null, val end: String? = null, val allDay: Boolean = false,
     /** Night: a sample of [nightLen] minutes every [nightEvery] minutes. Day: [dayLen] minutes every [dayEvery]. */
     val nightEvery: Int = 15, val nightLen: Int = 3, val dayEvery: Int = 30, val dayLen: Int = 2,
+    /** Accurate positions: a short motion-only recording every [OvernightHrv.POSE_EVERY_S] while asleep, for sleep positions. */
+    val positions: Boolean = false,
 ) {
     fun json(): String = JSONObject().put("enabled", enabled).put("start", start ?: JSONObject.NULL).put("end", end ?: JSONObject.NULL).put("all_day", allDay)
-        .put("night_every", nightEvery).put("night_len", nightLen).put("day_every", dayEvery).put("day_len", dayLen).toString()
+        .put("night_every", nightEvery).put("night_len", nightLen).put("day_every", dayEvery).put("day_len", dayLen).put("positions", positions).toString()
     companion object {
         val NIGHT_EVERY = listOf(10, 15, 30, 60)
         val DAY_EVERY = listOf(15, 30, 60)
@@ -36,7 +38,8 @@ data class OvernightSettings(
             val j = JSONObject(text ?: "{}")
             fun pick(k: String, allowed: List<Int>, d: Int) = j.optInt(k, d).takeIf { it in allowed } ?: d
             OvernightSettings(j.optBoolean("enabled"), j.optString("start").takeIf { it.matches(Regex("\\d{2}:\\d{2}")) }, j.optString("end").takeIf { it.matches(Regex("\\d{2}:\\d{2}")) },
-                j.optBoolean("all_day"), pick("night_every", NIGHT_EVERY, 15), pick("night_len", LENGTHS, 3), pick("day_every", DAY_EVERY, 30), pick("day_len", LENGTHS, 2))
+                j.optBoolean("all_day"), pick("night_every", NIGHT_EVERY, 15), pick("night_len", LENGTHS, 3), pick("day_every", DAY_EVERY, 30), pick("day_len", LENGTHS, 2),
+                j.optBoolean("positions"))
         }.getOrDefault(OvernightSettings())
     }
 }
@@ -57,6 +60,10 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         const val KEY = "overnight_hrv"
         const val SAMPLE = "hrv_sleep_sample"
         const val NIGHT = "hrv_sleep"
+        /** Accurate positions: which way the watch faced (extra "grav"), from a [POSE_LEN_S] motion-only recording. */
+        const val POSE = "sleep_pose"
+        const val POSE_EVERY_S = 300L
+        const val POSE_LEN_S = 20
         /** Daytime samples, tried whenever the watch has counted no steps for a minute (see [DayHrvPlan]). */
         const val DAY_SAMPLE = "hrv_day_sample"
         /** After a sample that isn't clean: try again this many times, this far apart. */
@@ -97,6 +104,7 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
     private var lastSync = 0L
     private var lastSample = 0L
     private var lastDaySample = 0L
+    private var lastPose = 0L
     /** A pending retry after a sample that wasn't clean: when, and how many have been used in this slot. */
     private var retryAt = 0L
     private var retriesUsed = 0
@@ -159,11 +167,11 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
 
     private suspend fun tick() {
         val s = OvernightSettings.parse(app.db.meta.get(KEY))
-        if (!s.enabled && !s.allDay) { status.value = "Off"; dayStatus.value = "Off"; return }
+        if (!s.enabled && !s.allDay && !s.positions) { status.value = "Off"; dayStatus.value = "Off"; return }
         val now = System.currentTimeMillis() / 1000
         val w = window(s)
-        val night = if (s.enabled) nightOf(now, w) else null
-        if (!s.enabled) status.value = "Off" else if (night == null) status.value = "Waiting for the night window (${clock(w.first)}–${clock(w.second)})"
+        val night = if (s.enabled || s.positions) nightOf(now, w) else null
+        if (!s.enabled && !s.positions) status.value = "Off" else if (night == null) status.value = "Waiting for the night window (${clock(w.first)}–${clock(w.second)})"
         // Asleep in the night window: overnight samples. Otherwise (awake, or outside it): daytime samples when still.
         if (night != null && nightTick(now, night, s, w)) { dayStatus.value = if (s.allDay) "Paused while you're asleep" else "Off"; return }
         if (s.allDay) dayTick(now, s, inNightWindow = night != null) else dayStatus.value = "Off"
@@ -196,9 +204,11 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
             app.db.events.add("info", "Overnight HRV: asleep since ${clock(firstSleep)} by the watch's labels; noticed at ${clock(now)} " +
                 "(${(now - firstSleep) / 60} min later; the newest synced minute was ${(now - newest.ts) / 60} min old)")
         }
+        if (!s.enabled) { status.value = "Asleep; recording positions"; poseTick(now); return true }
         val every = s.nightEvery * 60L
         val retry = retryAt != 0L && now >= retryAt
         if (now - lastSample < every && !retry) {
+            if (s.positions) poseTick(now)
             status.value = if (retryAt != 0L) "Asleep; last sample wasn't clean, retrying at ${clock(retryAt)}" else "Asleep; next sample at ${clock(lastSample + every)}"
             return true
         }
@@ -206,6 +216,7 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         if (!retry) { lastSample = now; retriesUsed = 0 }
         retryAt = 0L
         val clean = sample(night, SAMPLE, s.nightLen * 60, status, retriesUsed).clean
+        lastPose = System.currentTimeMillis() / 1000 // an HRV recording measures the facing too
         if (!clean && retriesUsed < RETRIES) {
             retriesUsed++
             retryAt = System.currentTimeMillis() / 1000 + RETRY_S
@@ -251,6 +262,27 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
             next.nextAt > end -> "You walked during that check; next try at ${clock(next.nextAt)}"
             else -> "That check wasn't clean; trying again after a minute without steps"
         }
+    }
+
+    /**
+     * Accurate positions: every [POSE_EVERY_S] while asleep, records only the motion sensor for [POSE_LEN_S] seconds and keeps
+     * which way the watch faced, when the wrist was still. The recording is deleted afterwards; only the direction is kept.
+     */
+    private suspend fun poseTick(now: Long) {
+        if (now - lastPose < POSE_EVERY_S || busy()) return
+        lastPose = now
+        var file: java.io.File? = null
+        try {
+            file = watch.startRaw(setOf(RawSensor.ACCEL))
+            delay(POSE_LEN_S * 1000L)
+        } catch (e: CancellationException) { throw e } catch (e: Exception) {
+            app.db.events.add("warn", "Accurate positions: recording failed: ${e.message}")
+        } finally { withContext(NonCancellable) { runCatching { watch.stopRaw() } } }
+        val f = file ?: return
+        val rec = withContext(Dispatchers.Default) { runCatching { readRecording(f) }.getOrNull() }
+        val pose = rec?.let { dev.heartline.analytics.stillGravityOf(it.acc, it.start.toLong()) }
+        if (pose != null) app.db.health.upsert(listOf(HealthPoint(POSE, pose.ts, null, JSONObject().put("grav", poseJson(pose)).toString())))
+        f.delete(); app.db.recordings.delete(f.name)
     }
 
     /** Records and analyses one sample; true when it was clean. [attempt] is 0 for a slot's first try, then 1, 2 for retries. */
