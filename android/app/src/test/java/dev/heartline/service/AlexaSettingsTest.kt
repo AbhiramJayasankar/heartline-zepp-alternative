@@ -41,4 +41,17 @@ class AlexaSettingsTest {
         assertTrue(text, !text.contains("{"))
         assertEquals("Friday 6 November 2026, 09:05 (Asia/Kolkata) 60 bpm at 09:00 100 09:01 none not running - Line one", text)
     }
+
+    @Test fun theOldFollowUpWordingIsReplacedInSavedPrompts() {
+        val old = "Follow-ups: after your reply to the user's query, the watch opens its mic again automatically for their answer only " +
+            "when your reply ends with the tag [listen]. Put a question last.\n\nLeave the tag out if the answer is complete. " +
+            "Do not add it to every response. The tag goes only at the end of your reply."
+        val base = AssistantAi.DEFAULT_PROMPT.substring(0, AssistantAi.DEFAULT_PROMPT.indexOf("Follow-ups:"))
+        // Heartline's own text with the old paragraph (and the owner's added line) becomes Heartline's own again.
+        assertEquals("", AlexaSettings.parse(org.json.JSONObject().put("prompt", base + old).toString()).prompt)
+        // The owner's other changes stay; only the paragraph changes.
+        val mine = AlexaSettings.parse(org.json.JSONObject().put("prompt", "Be brief.\n\n" + old).toString()).prompt
+        assertEquals("Be brief.\n\n" + AssistantAi.FOLLOW_UPS, mine)
+        assertEquals("Be brief.", AlexaSettings.parse(org.json.JSONObject().put("prompt", "Be brief.").toString()).prompt)
+    }
 }

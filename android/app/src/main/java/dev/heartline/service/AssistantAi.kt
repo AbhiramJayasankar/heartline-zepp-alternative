@@ -175,6 +175,23 @@ class AssistantAi(private val store: AiStore) {
             Never add it when the answer is complete: after facts, explanations, stories, a finished joke, an action you took, a card, a greeting or a list of what you can do, and never after offers like "Want another?" or "Anything else?" (don't write those). When unsure, leave it out: they can press the button again to keep talking, and you'll remember the conversation. The tag goes only at the very end of your reply.
         """.trimIndent()
 
+        /** The follow-up part of [DEFAULT_PROMPT], which ends it. */
+        val FOLLOW_UPS: String get() = DEFAULT_PROMPT.substring(DEFAULT_PROMPT.indexOf("Follow-ups:"))
+
+        /** The follow-up wording used until 2026-11-09, with anything the owner added inside it. */
+        private val OLD_FOLLOW_UPS = Regex("""Follow-ups: after your reply to the user's query, the watch opens its mic again.*?The tag goes only at the end of your reply\.""",
+            RegexOption.DOT_MATCHES_ALL)
+
+        /**
+         * A saved prompt that still has the old follow-up wording gets today's (a model overused [listen] with it); the
+         * rest of the owner's text stays. If that makes it Heartline's own prompt, it's blank again, so it follows updates.
+         */
+        fun upgradePrompt(saved: String): String {
+            if (saved.isBlank() || !OLD_FOLLOW_UPS.containsMatchIn(saved)) return saved
+            val next = OLD_FOLLOW_UPS.replace(saved) { FOLLOW_UPS }
+            return if (next.trim() == DEFAULT_PROMPT.trim()) "" else next
+        }
+
         /** [template] with its placeholders filled from [c]. */
         fun renderPrompt(template: String, c: AiContext): String = template
             .replace("{NOW}", "${c.now.format(DateTimeFormatter.ofPattern("EEEE d MMMM yyyy, HH:mm", Locale.ENGLISH))} (${c.now.zone.id})")

@@ -88,7 +88,7 @@ data class AlexaSettings(
             val d = AlexaSettings()
             fun strings(name: String, default: List<String>) = o.optJSONArray(name)?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: default
             AlexaSettings(
-                prompt = o.optString("prompt", d.prompt),
+                prompt = AssistantAi.upgradePrompt(o.optString("prompt", d.prompt)),
                 disabledTools = strings("disabled_tools", emptyList()).toSet(),
                 toolDescriptions = o.optJSONObject("tool_descriptions")?.let { m -> m.keys().asSequence().associateWith { m.optString(it) } }.orEmpty(),
                 fallbackModels = strings("fallback_models", d.fallbackModels),
