@@ -18,6 +18,23 @@ class SpeechEndpointerTest {
         assertEquals(20 + 30 + 60 + 50 + 40 + 75, at)
     }
 
+    @Test fun roomBlipsAfterSpeechDontKeepItListening() {
+        val e = SpeechEndpointer()
+        // A question at -30, then a room with 40 ms sounds at -45 (18 dB over its floor) every 0.6 s.
+        val blips = Array(20) { listOf(-63f to 28, -45f to 2) }.flatMap { it }.toTypedArray()
+        val at = run(e, -10f to 20, -63f to 30, -30f to 60, *blips)
+        assertEquals(SpeechEndpointer.State.DONE, e.state)
+        assertEquals(20 + 30 + 60 + 75, at)
+    }
+
+    @Test fun keepsListeningThroughAQuieterLastPhrase() {
+        val e = SpeechEndpointer()
+        // A loud start, a 1 s pause, and a last phrase 12 dB quieter: still speech, so it waits for the quiet after it.
+        val at = run(e, -10f to 20, -63f to 30, -30f to 60, -63f to 50, -42f to 40, -63f to 200)
+        assertEquals(SpeechEndpointer.State.DONE, e.state)
+        assertEquals(20 + 30 + 60 + 50 + 40 + 75, at)
+    }
+
     @Test fun givesUpWhenNothingIsSaid() {
         val e = SpeechEndpointer()
         run(e, -10f to 20, -63f to 400)
