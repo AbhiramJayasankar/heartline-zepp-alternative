@@ -32,7 +32,9 @@ object WatchIcon {
     const val GENERIC = 0xFF
     /**
      * Zepp's HMAlertApp.CARE: the watch shows it as a full-screen nudge with a small heart, not as a notification
-     * (the Mi Band friend nudge; tested 2026-11-08). Not used yet.
+     * (the Mi Band friend nudge; Zepp sends its "love" alert as this on watches like the GTR 2e; tested 2026-11-08).
+     * Heartline uses it when a heart check finishes. The other full-screen icon, 0xFE (a red envelope), was followed by a
+     * reboot once; no other code 0 to 63, 64, 100 or 200 shows full screen.
      */
     const val CARE = 36
 }

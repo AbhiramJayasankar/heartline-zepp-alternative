@@ -147,6 +147,11 @@ class WatchService : Service() {
                     "Rhythm ${r.rhythm.name.lowercase().replace('_', ' ')}", r.respiratoryRate?.let { "Breathing ${it.roundToInt()}/min" },
                     "Signal ${(r.signalQuality * 100).roundToInt()}%").joinToString("\n")
             }
+            // A full-screen heart says it's done; the numbers follow as a notification, which the watch keeps in its list.
+            if (r != null && done.error == null) {
+                runCatching { watch.nudge("Heart check done", listOfNotNull(r.hr?.let { "${it.roundToInt()} bpm" }, r.rmssd?.let { "HRV ${it.roundToInt()} ms" }).joinToString(", ")) }
+                delay(4_000)
+            }
             runCatching { watch.notify("Heart check", text) }
         }
     }

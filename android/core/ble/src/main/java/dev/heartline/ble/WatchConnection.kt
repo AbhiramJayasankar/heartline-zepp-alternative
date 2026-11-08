@@ -407,6 +407,8 @@ class WatchConnection(
         actions.withLock { c.write(Uuids.ALERT_LEVEL, ALERT_FIND) }; delay(3000)
         actions.withLock { c.write(Uuids.ALERT_LEVEL, ALERT_OFF) }
     }
+    /** The watch's full-screen nudge with a small heart ([WatchIcon.CARE]), for a moment worth seeing at once. */
+    suspend fun nudge(title: String, body: String) = notify(title, body, NotificationKind.MESSAGE, "Heartline", WatchIcon.CARE)
     suspend fun notify(title: String, body: String, kind: NotificationKind = NotificationKind.MESSAGE, app: String = "Heartline", icon: Int = WatchIcon.GENERIC) {
         val c = requireClient()
         actions.withLock { chunks(c, notificationPayload(title, body, kind, app, icon)) }
