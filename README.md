@@ -30,7 +30,8 @@
 | 🎙️ **An Alexa button that knows you** | Ask about your sleep, stress or readiness and get an analysis of *your* data. Ask for the news and it searches the web. Set timers, alarms and reminders by voice. Free AI, your own keys. |
 | 📊 **Health scores Zepp never showed** | Readiness, strain, sleep score and body battery every day, trends against your own 28-day baseline, VO2max and fitness age. |
 | 🌙 **A page for every part of you** | Sleep with a stage-by-stage hypnogram and overnight SpO2, heart rate with resting and HRV against your usual, activity against your goal, and an overview that ties them together. |
-| ✨ **AI insights** | Gemini 3.8 Flash (or any OpenRouter model) reads two weeks of your data and writes what stands out, with the numbers and one thing to try. |
+| ✨ **AI insights** | The model you choose reads two weeks of your data and writes what stands out, with the numbers and one thing to try. |
+| 🧠 **Your AI, your models** | Gemini, OpenRouter or any OpenAI-compatible API, as many keys as you like. Every AI feature gets a main model and two fallbacks, and an out-of-quota key hands over to the next. |
 | 🎨 **Seven themes** | Paper, Night, Sage, Dusk, Lilac, Forest and a true-black OLED theme, or follow the phone. |
 | 🫀 **Heart checks from the raw pulse** | Records the optical pulse waveform and measures HRV, rhythm regularity and breathing rate beat by beat. |
 | 🔬 **Every sensor, raw** | Live pulse, accelerometer, gyroscope, compass, GPS and microphone streams, saved to CSV. |
@@ -58,7 +59,7 @@ Heartline lines the log up with what the watch's accelerometer, gyroscope and he
   of the session, and a running total.
 - **The treadmill against your last walk**: speed, incline, time, steps, distance, calories, steady heart rate,
   rise time and recovery side by side, with a verdict ("same settings, your heart settled 5 bpm lower") and a link.
-- **An AI coach's note** (Gemini, your own free key) that reads the page's numbers and says what to aim for next
+- **An AI coach's note** (the model you choose, your own key) that reads the page's numbers and says what to aim for next
   session, saved with the session.
 - **Around the session**: readiness and sleep going in, the day's load, the heart check after, and the watch's
   workout beside what the sensors measured.
@@ -82,16 +83,22 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
 | "Remind me to drink water in 20 minutes" | The reminder rings on the watch with its title; "cancel my water reminder" cancels it |
 | "Wake me at 6:30" / "Timer for 5 minutes" | A real watch alarm or timer, set on the watch itself |
 | "Start a gym workout" | Heartline's workout capture starts recording sets and reps |
-| "Tell me a 1,000-word story" | It fills the reply screen and continues as watch notifications |
-| "Knock knock" | It plays along: the watch listens again after each line |
+| "Tell me a 5,000-word story" | The reply screen shows the start; the whole story arrives as watch notifications |
+| "Do deep research on this week's AI news" | It searches as long as it needs; if the watch can't wait, it says so and the report arrives as notifications |
+| "Tell me a knock-knock joke" | It plays along: the watch listens again after each line |
 
-- **Hears you with Gemini 3.5 Transcribe Live**, tuned for Indian and US English (free tier, your own AI Studio key).
-- **Thinks with free OpenRouter models** and 20 tools: eight health-data lookups, web search, and actions for
-  timers, alarms, reminders, workouts, the weather card, tables and syncing. A second OpenRouter key takes over when
-  the first hits its daily free limit.
+- **Listens until you stop talking**, up to 29 seconds for a detailed question, and ignores the room's background
+  sounds when deciding you've finished.
+- **Hears you with Gemini 3.5 Transcribe Live** by default (free tier), or any model that takes audio, tuned for
+  Indian and US English.
+- **Thinks with the model you choose** (free OpenRouter models, Gemini, or any OpenAI-compatible API) and 20 tools:
+  eight health-data lookups, web search, and actions for timers, alarms, reminders, workouts, the weather card,
+  tables and syncing. It can take up to 25 requests and 15 minutes for a thorough answer.
+- **Follow-ups when they're needed**: the model ends a reply with a tag when it needs your answer, and the watch
+  reopens its mic with the question on screen.
 - **Built around the watch's real limits**, measured on the device: 2,000-byte replies, 1,024-byte notifications, a
   10-character left column in tables, and a map of the emoji its font actually draws, so you never see a box.
-- **Nothing hidden.** The app's Alexa page logs every question: what Gemini heard, each model request with its
+- **Nothing hidden.** The app's Alexa page logs every question: what was heard, each model request with its
   timing and tokens, every tool call with its arguments and result, the reply, and the recording to play back. You
   can edit the instructions, switch tools on and off, rewrite their descriptions, and pick the models, reasoning
   and limits. "Try a question" runs the whole pipeline without touching the watch.
@@ -130,10 +137,19 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
   clock, find watch.
 
 **AI insights**
-- Gemini 3.8 Flash with your AI Studio key, or an OpenRouter model with the Alexa brain's keys (switchable on the
-  page). Two weeks of readiness, trends, sleep, heart rate, activity, stress, SpO2, temperature and gym captures go
-  in; ranked findings with the numbers and one thing to try come out. Nothing is sent until you ask: daily
-  insights are off unless you switch them on in the page's settings.
+- The model you choose under AI models, with its fallbacks. Two weeks of readiness, trends, sleep, heart rate,
+  activity, stress, SpO2, temperature and gym captures go in; ranked findings with the numbers and one thing to try
+  come out. Nothing is sent until you ask: daily insights are off unless you switch them on in the page's settings.
+
+**AI models**
+- **Providers and keys**: OpenRouter, Gemini and any OpenAI-compatible endpoint (Groq, Together, a local server),
+  each with as many keys as you like. A key that runs out of quota or is refused rests for 30 minutes and the next
+  one takes over.
+- **Models to choose from**: fetch every provider's model list and tick the few you want offered.
+- **Every AI feature** (watch assistant, voice to text, insights, coach's note, workout names) gets a main model and
+  two fallbacks. Out of quota means the next key, then the next model; busy or timed out means the same model again.
+  Retries, waits and time limits are yours to set per feature.
+- **Every request is logged** with its model, key, time and any error.
 
 **Your data stays yours**
 - Everything is stored in a local database on the phone. Export it, back it up, or share it with other apps through
@@ -155,9 +171,10 @@ and open it on your phone, or install it with `adb install -r heartline-*.apk`.
 3. Open Heartline, grant Bluetooth and notification access, and enter the watch's Bluetooth address and key.
    The key is stored encrypted with the Android keystore and never leaves the phone.
 4. Under **Watch → Keep running**, allow background use so syncing continues with the screen off.
-5. **For the Alexa button**, open **Watch → Alexa** and paste a [Gemini](https://aistudio.google.com) key (to hear you)
-   and an [OpenRouter](https://openrouter.ai) key (to answer); both have free tiers. A
-   [Tavily](https://tavily.com) or [Exa](https://exa.ai) key adds web search (1,000 free searches a month on Tavily).
+5. **For the AI features**, open **Watch → AI models**, add a [Gemini](https://aistudio.google.com) key and an
+   [OpenRouter](https://openrouter.ai) key (both have free tiers), fetch their model lists and pick the models each
+   feature uses. Under **Watch → Alexa**, a [Tavily](https://tavily.com) or [Exa](https://exa.ai) key adds web search
+   (1,000 free searches a month on Tavily).
 
 ## Requirements
 
@@ -203,8 +220,11 @@ analysis methods in [`android/core/analytics/`](android/core/analytics) and
   GTR 2e; the count does.
 - **Automatic workout capture** can start up to about 30 minutes late, because the watch reports workout starts
   in batches. For a whole gym session, start the capture in the app.
-- **The Alexa button needs the internet** and your own keys; free models are sometimes slow or rate-limited. If an
-  answer takes longer than the watch waits (about 40 s), it arrives as a notification.
+- **The Alexa button needs the internet** and your own keys; free models are sometimes slow or rate-limited. The
+  watch waits about 30 s after you stop talking, so after 25 s it's told the answer is coming, and the answer
+  arrives as notifications.
+- **Alexa alarms and reminders** made by voice can't be deleted from the phone (the watch ignores it); long-press
+  them in the watch's Alarm app.
 - Heart rhythm screening and all health scores are estimates for personal use, not medical advice.
 
 ## FAQ
@@ -214,8 +234,8 @@ Yes. Heartline replaces Zepp for the Amazfit GTR 2e: syncing, settings, notifica
 work without a Zepp account or cloud connection once you have the watch's auth key.
 
 **Does the Alexa button work without Amazon?**
-Yes. Heartline answers it instead of Alexa, with Gemini for speech and an OpenRouter model of your choice for the
-answers. No Amazon account is involved.
+Yes. Heartline answers it instead of Alexa, with the speech and answer models you choose (Gemini, OpenRouter or any
+OpenAI-compatible API). No Amazon account is involved.
 
 **How is this different from Gadgetbridge?**
 [Gadgetbridge](https://gadgetbridge.org) supports hundreds of watches and was a key reference for the protocol.
@@ -223,8 +243,8 @@ Heartline does one watch in depth: it decodes the watch's skin temperature, even
 health scores, heart checks from the raw pulse, gym set and rep detection, and an AI assistant on the Alexa button.
 
 **Does it need the internet?**
-No. Only optional features go online: weather (Open-Meteo) and the Alexa button (Gemini to hear you, OpenRouter to
-answer, Tavily or Exa to search).
+No. Only optional features go online: weather (Open-Meteo) and the AI features (the models you choose, through your
+own keys, and Tavily or Exa to search).
 
 **Will it work on my GTR 2, GTS 2 or GTS 2e?**
 Probably in large part, since they share the protocol, but only the GTR 2e has been tested. Reports are welcome
@@ -234,7 +254,7 @@ in the [issues](https://github.com/AbhiramJayasankar/heartline-zepp-alternative/
 
 Protocol knowledge from [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge); auth keys via
 [huami-token](https://github.com/argrento/huami-token); weather from [Open-Meteo](https://open-meteo.com); speech
-from [Gemini](https://ai.google.dev); answers through [OpenRouter](https://openrouter.ai); search from
+and answers from [Gemini](https://ai.google.dev), [OpenRouter](https://openrouter.ai) or any OpenAI-compatible API; search from
 [Tavily](https://tavily.com) and [Exa](https://exa.ai). Not affiliated with Zepp Health, Amazfit or Amazon.
 
 ## License
