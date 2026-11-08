@@ -68,6 +68,8 @@ def sleep_blocks(minutes: list[dict]) -> list[dict]:
 
 
 NIGHT_JOIN_S = 2 * 3600   # blocks this close to the main one are the same night (a long wake in the small hours)
+JOIN_MIN_ASLEEP = 30      # ...but a shorter block only joins within JOIN_NEAR_S: minutes marked as sleep an hour
+JOIN_NEAR_S = 1800        # or two before bed are usually sitting still, not a first sleep
 
 
 def night_like(b: dict) -> bool:
@@ -86,8 +88,8 @@ def _gap(a: dict, b: dict) -> float:
 
 
 def night_for(blocks: list[dict], d: date, last_ts: float | None = None) -> tuple[dict | None, int]:
-    """Main night-like sleep block ending in d's night window, plus total sleep minutes of the blocks chained to
-    it within NIGHT_JOIN_S (naps are left out). No night if the main block is under MIN_NIGHT minutes. For the day
+    """The night ending on d: the main night-like block ending in d's night window, merged with the blocks chained to
+    it (within NIGHT_JOIN_S, or JOIN_NEAR_S for a block under JOIN_MIN_ASLEEP), and its total sleep minutes. No night if the main block is under MIN_NIGHT minutes. For the day
     still in progress (last_ts inside the window, before noon), a night only counts once a block of >= 3 h has ended
     >= 30 min before the latest data, so a night that is still going on is not scored as a short one."""
     lo = datetime.combine(d - timedelta(days=1), datetime.min.time()).timestamp() + NIGHT_START_H * 3600
@@ -106,10 +108,19 @@ def night_for(blocks: list[dict], d: date, last_ts: float | None = None) -> tupl
     while grew:
         grew = False
         for b in inside:
-            if all(b is not p for p in part) and any(_gap(p, b) <= NIGHT_JOIN_S for p in part):
+            reach = NIGHT_JOIN_S if b["asleep"] >= JOIN_MIN_ASLEEP else JOIN_NEAR_S
+            if all(b is not p for p in part) and any(_gap(p, b) <= reach for p in part):
                 part.append(b)
                 grew = True
-    return main, sum(b["asleep"] for b in part)
+    if len(part) > 1:
+        # One stretch from first sleep to last: window, stages and total agree; awake between blocks is awake in bed.
+        part.sort(key=lambda b: b["start"])
+        n = {"start": part[0]["start"], "end": max(b["end"] for b in part), "rows": [r for b in part for r in b["rows"]]}
+        for k in ("deep", "rem", "light", "asleep"):
+            n[k] = sum(b[k] for b in part)
+        n["awake"] = int((n["end"] - n["start"]) / 60 + 1) - n["asleep"]
+        main = n
+    return main, main["asleep"]
 
 
 def sleep_score(asleep: int, efficiency: float, deep: int, rem: int) -> int:

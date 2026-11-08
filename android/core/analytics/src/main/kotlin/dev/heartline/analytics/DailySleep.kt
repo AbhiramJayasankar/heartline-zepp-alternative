@@ -70,6 +70,12 @@ private fun gapS(a: SleepBlock, b: SleepBlock): Long = maxOf(0L, maxOf(a.start -
 
 /** Blocks within two hours of the main one belong to the same night (a long wake in the small hours), chained outwards. */
 private const val NIGHT_JOIN_S = 2 * 3600L
+/**
+ * ...but a short block (under [JOIN_MIN_ASLEEP] minutes) only joins when it is within [JOIN_NEAR_S] of the night: a few
+ * minutes the watch marked as sleep an hour or two before bed is usually sitting still, not a first sleep.
+ */
+private const val JOIN_MIN_ASLEEP = 30
+private const val JOIN_NEAR_S = 1800L
 
 internal fun nightFor(blocks: List<SleepBlock>, d: LocalDate, lastTs: Long?, zone: ZoneId): Night {
     // daily.night_for uses midnight + 18 hours and a fixed 86400-second window, even across DST.
@@ -82,13 +88,21 @@ internal fun nightFor(blocks: List<SleepBlock>, d: LocalDate, lastTs: Long?, zon
     var grew = true
     while (grew) {
         grew = false
-        for (b in inside) if (b !in part && part.any { gapS(it, b) <= NIGHT_JOIN_S }) { part.add(b); grew = true }
+        for (b in inside) if (b !in part && part.any { p -> gapS(p, b) <= (if (b.asleep >= JOIN_MIN_ASLEEP) NIGHT_JOIN_S else JOIN_NEAR_S) }) { part.add(b); grew = true }
+    }
+    // A night of several blocks is one stretch, first sleep to last: its window, stages and total agree, and the time
+    // awake between blocks counts as awake in bed.
+    val night = if (part.size == 1) main else SleepBlock(part.minOf { it.start }).also { n ->
+        n.end = part.maxOf { it.end }
+        part.sortedBy { it.start }.forEach { n.rows.addAll(it.rows) }
+        n.deep = part.sumOf { it.deep }; n.rem = part.sumOf { it.rem }; n.light = part.sumOf { it.light }
+        n.awake = ((n.end - n.start) / 60 + 1).toInt() - n.asleep
     }
     // daily.night_for held a night back until 30 min after the last sleep minute (or 3 h asleep) before noon. Heartline
     // shows it straight away instead, flagged as still going on, and the next sync updates it.
     val ongoing = lastTs != null && lastTs >= lo && lastTs < hi && Instant.ofEpochSecond(lastTs).atZone(zone).hour < 12 &&
         (main.asleep < 180 || lastTs - main.end < 1800)
-    return Night(main, part.sumOf { it.asleep }, ongoing)
+    return Night(night, night.asleep, ongoing)
 }
 
 /**

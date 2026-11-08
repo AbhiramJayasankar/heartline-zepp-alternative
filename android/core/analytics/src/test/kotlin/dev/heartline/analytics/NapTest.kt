@@ -55,5 +55,22 @@ class NapTest {
         val d = computeDaily(m, emptyList(), emptyList(), Profile(), 2, at(day, 9, 0)).days.last()
         assertEquals(360, d.sleepMinutes)
         assertTrue(d.naps.isEmpty())
+        // One stretch from first sleep to last: stages add up to the total, the window covers both, the hour awake is awake.
+        assertEquals(360, (d.deepMin ?: 0) + (d.lightMin ?: 0) + (d.remMin ?: 0))
+        assertEquals(at(day, 1, 0).toEpochSecond(), d.sleepStart)
+        assertEquals(60, d.awakeMin)
+    }
+
+    @Test fun shortStillMomentsBeforeBedAreNotSleep() {
+        // 8 Nov: 14 and 12 minutes the watch marked as sleep at 00:54 and 02:02 while sitting up, then 04:09-10:13.
+        val d8 = day.plusDays(1)
+        val m = span(at(d8, 0, 0), at(d8, 0, 54), "idle", 85) + span(at(d8, 0, 54), at(d8, 1, 8), "sleep_light", 70) +
+            span(at(d8, 1, 8), at(d8, 2, 2), "idle", 85) + span(at(d8, 2, 2), at(d8, 2, 14), "sleep_light", 70) +
+            span(at(d8, 2, 14), at(d8, 4, 9), "idle", 85) + span(at(d8, 4, 9), at(d8, 10, 14), "sleep_light", 57) +
+            span(at(d8, 10, 14), at(d8, 12, 0), "idle", 80)
+        val d = computeDaily(m, emptyList(), emptyList(), Profile(), 2, at(d8, 12, 0)).days.last()
+        assertEquals(365, d.sleepMinutes) // not 391
+        assertEquals(365, (d.deepMin ?: 0) + (d.lightMin ?: 0) + (d.remMin ?: 0))
+        assertEquals(at(d8, 4, 9).toEpochSecond(), d.sleepStart)
     }
 }
