@@ -106,13 +106,13 @@ private fun trendAbout(key: String): About? = when (key) {
         "Minutes where the watch says you were awake and worn it, took no steps and the watch's movement intensity stayed low (30 or less out of 100); within runs of such minutes Heartline takes 10-minute medians (at least 8 readings) and keeps the lowest. Lying awake in bed counts as still.",
         "60–100 bpm for most adults at rest; 40s–50s is common in fit people. It moves with caffeine, heat, stress and how long you'd been still.")
     "hrv" -> About("Heart rate variability (RMSSD): how much the gap between beats changes. Higher usually means better recovered.",
-        "From Heartline's heart checks with at least 70% clean signal and 45 s of beats; the median when there are several in a day. The GTR 2e answers requests for its own HRV record with no data.",
+        "Awake HRV: the median of the day's heart checks and automatic daytime samples (taken in still moments), each with at least 70% clean signal. Overnight HRV, from samples while you sleep, is kept apart because asleep HRV runs higher. The GTR 2e answers requests for its own HRV record with no data.",
         "About 19–75 ms in short resting readings from healthy adults; it falls with age and varies hugely between people. Compare with your own baseline only.", "HRV")
     "sleep" -> About("Hours asleep each night, light, deep and REM together.",
         "The watch classifies every minute; Heartline joins asleep minutes into a night, bridging awake gaps of up to 30 minutes.",
         "7–9 hours for adults. Consistently under 6 is linked with worse recovery, mood and health.", "sleep_score")
     "sleep_score" -> About("A 0–100 grade for each night.",
-        "Up to 50 points for time asleep (full at 8 h), 20 for efficiency (95% of time in bed asleep), 15 for deep sleep (13% of sleep) and 15 for REM (20%).",
+        "Up to 50 points for time asleep (full at 8 h), 20 for efficiency (95% of time in bed asleep), 15 for deep sleep (13% of sleep) and 15 for REM (20%). With overnight HRV, it earns up to 10 points (full at or above your usual) and the other parts share the remaining 90.",
         "70 is a decent night; 85+ is excellent.", "sleep_score")
     "strain" -> About("How hard your heart worked each day, from 0 to 21.",
         "Every awake minute above half your maximum heart rate adds load, more steeply near your maximum; the total is squeezed onto 0–21.",

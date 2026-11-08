@@ -45,10 +45,12 @@ private val SIGNALS = listOf(
     Signal("HRV", "hrv", "hrv", 0.35, Area.HEART,
         "Heart rate variability: how much the time between heartbeats varies, measured as RMSSD. When you're rested your nervous system " +
             "lets each beat drift a little; stress, illness, alcohol and hard training make the rhythm stiffer and the number drops.",
-        "Today's RMSSD from your heart checks (the GTR 2e keeps no HRV record of its own) against your last 28 days. Higher than usual helps. It is the " +
-            "biggest weight because it reacts first, often a day before you feel run down.",
-        "Not counted today: it needs an HRV reading today and at least three earlier days with one in the last 28. A one-minute heart check " +
-            "after waking, before coffee, gives the cleanest number."),
+        "Last night's overnight HRV (the median of the automatic samples taken while you slept) against your earlier nights. It counts from the " +
+            "second night, at a third of its weight per earlier night until there are three. Without it, today's awake HRV counts instead: your heart " +
+            "checks and the automatic samples from still moments in the day, against your last 28 days. Higher than usual helps. It is the biggest " +
+            "weight because it reacts first, often a day before you feel run down.",
+        "Not counted today: it needs last night's overnight HRV and an earlier night with it, or an awake HRV reading today and at least three " +
+            "earlier days with one. Turn on overnight HRV in Sleep, or daytime samples in Heart, and it fills itself in."),
     Signal("Sleeping heart rate", "rhr", "rhr", 0.30, Area.HEART,
         "Your calmest half hour asleep last night (the lowest 30-minute median). A fitter, rested heart pumps the same blood with fewer beats.",
         "Last night's value against your last 28 nights. Lower than usual helps; a few beats higher often means poor sleep, a late meal, " +
@@ -56,7 +58,8 @@ private val SIGNALS = listOf(
         "Not counted today: it needs a night with the watch on and at least three earlier nights."),
     Signal("Sleep", "sleep", "sleep_score", 0.25, Area.SLEEP,
         "Last night's sleep score (0 to 100), built from how long you slept, how much of your time in bed was asleep, and your share of deep and REM sleep.",
-        "Compared with a fixed 70, a decent night. Every 15 points above or below moves it as much as one standard deviation does for the heart signals.",
+        "Compared with a fixed 70, a decent night. Every 15 points above or below moves it as much as one standard deviation does for the heart signals. " +
+            "The score's HRV part is left out here, because HRV already counts on its own.",
         "Not counted today: it needs a finished night with at least an hour asleep. Wear the watch to bed."),
     Signal("Yesterday's strain", "strain", "strain", 0.10, Area.MOVE,
         "How hard your heart worked yesterday, on a 0 to 21 scale.",
@@ -152,9 +155,12 @@ fun ReadinessScreen(controller: HeartlineController, focus: String?, nav: Naviga
         val totalWeight = factors.sumOf { it.weight }.takeIf { it > 0 } ?: 1.0
         SIGNALS.forEach { s ->
             val f = factors.firstOrNull { it.name == s.name }
+            // HRV from the night is drawn against its own trend: asleep HRV runs higher than awake.
+            val overnight = s.key == "hrv" && f?.detail?.startsWith("Overnight") == true
+            val trend = if (overnight) "hrv_sleep" else s.trend
             val focused = focus == s.name
             Card(Modifier.padding(bottom = 10.dp).anchor(s.name).then(if (focused) Modifier.border(2.dp, c.pulse, RoundedCornerShape(18.dp)) else Modifier),
-                onClick = { openTrend(nav, s.trend) }, onClickLabel = "Open ${s.name}") {
+                onClick = { openTrend(nav, trend) }, onClickLabel = "Open ${s.name}") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     AreaLabel(s.name, c.hue(s.area), Modifier.weight(1f))
                     if (f != null) Delta(when (f.impact) { Impact.POSITIVE -> "Helping ${signed(f.points)}"; Impact.NEGATIVE -> "Holding back ${signed(f.points)}"; Impact.NEUTRAL -> "About usual ${signed(f.points)}" },
@@ -164,7 +170,7 @@ fun ReadinessScreen(controller: HeartlineController, focus: String?, nav: Naviga
                 Gap(10)
                 if (f != null) {
                     Row(Modifier.fillMaxWidth()) {
-                        Fact(if (s.key == "strain") "Yesterday" else if (s.key == "sleep") "Last night" else "Today", f.value?.let { num(it) } ?: "–", Modifier.weight(1f), unit = f.unit.ifEmpty { null })
+                        Fact(if (s.key == "strain") "Yesterday" else if (s.key == "sleep" || overnight) "Last night" else "Today", f.value?.let { num(it) } ?: "–", Modifier.weight(1f), unit = f.unit.ifEmpty { null })
                         Fact(if (s.key == "sleep" || s.key == "strain") "Compared with" else "Your usual", f.usual?.let { num(it) } ?: "–", Modifier.weight(1f), unit = f.unit.ifEmpty { null })
                         Fact("Share", "${(100 * f.weight / totalWeight).roundToInt()}", Modifier.weight(1f), unit = "%")
                     }
@@ -172,6 +178,13 @@ fun ReadinessScreen(controller: HeartlineController, focus: String?, nav: Naviga
                     ZBar(f.z)
                     Gap(4)
                     Text(if (s.key == "strain" && f.z == 0.0) "At or under 14, so it neither helps nor hurts today." else zWords(f.z, s.key), style = HL.type.small, color = c.inkSoft)
+                    if (s.key == "hrv") {
+                        Gap(4)
+                        Text(if (overnight) "From the automatic samples taken while you slept." + (Regex("from (\\d+) earlier night").find(f.detail)?.let { m ->
+                                " Only ${m.groupValues[1]} earlier night${if (m.groupValues[1] == "1") "" else "s"} to compare with so far, so it carries less weight until there are 3." } ?: "")
+                            else "From today's heart checks and automatic daytime samples. Overnight HRV takes over once it has an earlier night to compare with.",
+                            style = HL.type.small, color = c.inkSoft)
+                    }
                 } else {
                     Text(s.missing, style = HL.type.small, color = c.inkSoft)
                 }
@@ -179,9 +192,9 @@ fun ReadinessScreen(controller: HeartlineController, focus: String?, nav: Naviga
                 Text(s.what, style = HL.type.body.copy(fontSize = 15.sp, lineHeight = 22.sp), color = c.ink)
                 Gap(6)
                 Text(s.how, style = HL.type.small, color = c.inkSoft)
-                series(s.trend)?.points?.takeLast(14)?.takeIf { p -> p.any { it.value != null } }?.let { pts ->
+                series(trend)?.points?.takeLast(14)?.takeIf { p -> p.any { it.value != null } }?.let { pts ->
                     Gap(10)
-                    DayBars(pts, c.hue(s.area), height = 90.dp, reference = series(s.trend)?.baseline, referenceLabel = "usual", line = s.key == "rhr" || s.key == "hrv")
+                    DayBars(pts, c.hue(s.area), height = 90.dp, reference = series(trend)?.baseline, referenceLabel = "usual", line = s.key == "rhr" || s.key == "hrv")
                 }
                 Gap(6)
                 Text(when (s.trend) { "sleep_score" -> "Open Sleep ›"; "strain" -> "Open Activity ›"; else -> "Open Heart ›" }, style = HL.type.label, color = c.pulse)
@@ -226,7 +239,7 @@ fun ReadinessScreen(controller: HeartlineController, focus: String?, nav: Naviga
                 Text(today?.sleepScore?.toString() ?: "–", style = HL.type.stat.copy(fontSize = 24.sp), color = c.ink)
             }
             Gap(8)
-            Text("Out of 100, from four parts of last night:", style = HL.type.body.copy(fontSize = 15.sp), color = c.ink)
+            Text(if (night?.hrv != null) "Out of 100, from five parts of last night:" else "Out of 100, from four parts of last night:", style = HL.type.body.copy(fontSize = 15.sp), color = c.ink)
             Gap(8)
             sleepParts(night).forEach { (label, got, max, note) -> PartRow(label, got, max, note) }
             Gap(6)
@@ -315,12 +328,12 @@ private fun ZBar(z: Double) {
 }
 
 @Composable
-private fun PartRow(label: String, got: Double, max: Int, note: String) {
+private fun PartRow(label: String, got: Double, max: Double, note: String) {
     val c = HL.colors
     Column(Modifier.padding(vertical = 5.dp).semantics(mergeDescendants = true) {}) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(label, style = HL.type.bodyStrong.copy(fontSize = 14.sp), color = c.ink, modifier = Modifier.weight(1f))
-            Text("${"%.1f".format(got)} of $max", style = HL.type.label, color = c.ink)
+            Text("${"%.1f".format(got)} of ${num(max)}", style = HL.type.label, color = c.ink)
         }
         Gap(4)
         Meter((got / max).toFloat(), c.hue(Area.SLEEP), height = 6.dp)
@@ -328,23 +341,28 @@ private fun PartRow(label: String, got: Double, max: Int, note: String) {
     }
 }
 
-/** DailySleep.sleepScore's four parts for [n]: label, points earned, points possible, how it was earned. */
+/** The sleep score's parts for [n] (Daily.kt): label, points earned, points possible, how it was earned. With overnight HRV
+ *  the four sleep parts are scaled into what HRV leaves. */
 private fun sleepParts(n: SleepNightUi?): List<Quad> {
     if (n == null) return listOf(
-        Quad("Time asleep", 0.0, 50, "Full marks at 8 hours."), Quad("Efficiency", 0.0, 20, "Asleep for 95% of the time in bed earns all 20; 70% earns none."),
-        Quad("Deep sleep", 0.0, 15, "Full marks at 13% of sleep."), Quad("REM sleep", 0.0, 15, "Full marks at 20% of sleep."))
+        Quad("Time asleep", 0.0, 50.0, "Full marks at 8 hours."), Quad("Efficiency", 0.0, 20.0, "Asleep for 95% of the time in bed earns all 20; 70% earns none."),
+        Quad("Deep sleep", 0.0, 15.0, "Full marks at 13% of sleep."), Quad("REM sleep", 0.0, 15.0, "Full marks at 20% of sleep."))
     val asleep = n.deepMin + n.lightMin + n.remMin
     val eff = 100.0 * asleep / ((n.end - n.start) / 60.0 + 1)
     val deepShare = if (asleep > 0) n.deepMin.toDouble() / asleep else 0.0
     val remShare = if (asleep > 0) n.remMin.toDouble() / asleep else 0.0
-    return listOf(
-        Quad("Time asleep", 50 * min(1.0, asleep / 480.0), 50, "${hm(asleep)} of the 8 hours that earn full marks."),
-        Quad("Efficiency", 20 * ((eff - 70) / 25).coerceIn(0.0, 1.0), 20, "Asleep ${"%.0f".format(eff)}% of the time in bed; 95% earns all 20, 70% none."),
-        Quad("Deep sleep", 15 * min(1.0, deepShare / 0.13), 15, "${hm(n.deepMin)}, ${"%.0f".format(deepShare * 100)}% of sleep; full marks at 13%."),
-        Quad("REM sleep", 15 * min(1.0, remShare / 0.20), 15, "${hm(n.remMin)}, ${"%.0f".format(remShare * 100)}% of sleep; full marks at 20%."),
+    val k = 1 - (n.hrv?.possible ?: 0.0) / 100
+    return listOfNotNull(
+        Quad("Time asleep", k * 50 * min(1.0, asleep / 480.0), k * 50, "${hm(asleep)} of the 8 hours that earn full marks."),
+        Quad("Efficiency", k * 20 * ((eff - 70) / 25).coerceIn(0.0, 1.0), k * 20, "Asleep ${"%.0f".format(eff)}% of the time in bed; 95% earns all of it, 70% none."),
+        Quad("Deep sleep", k * 15 * min(1.0, deepShare / 0.13), k * 15, "${hm(n.deepMin)}, ${"%.0f".format(deepShare * 100)}% of sleep; full marks at 13%."),
+        Quad("REM sleep", k * 15 * min(1.0, remShare / 0.20), k * 15, "${hm(n.remMin)}, ${"%.0f".format(remShare * 100)}% of sleep; full marks at 20%."),
+        n.hrv?.let { h -> Quad("Overnight HRV", h.points, h.possible,
+            "${"%.0f".format(h.ms)} ms against your usual ${"%.0f".format(h.usual)}; full marks at or above it, none 2 standard deviations below." +
+                if (h.nights < 3) " Worth ${num(h.possible)} of 10 until 3 earlier nights set your usual (${h.nights} so far)." else "") },
     )
 }
-private data class Quad(val a: String, val b: Double, val c: Int, val d: String)
+private data class Quad(val a: String, val b: Double, val c: Double, val d: String)
 
 private fun signed(p: Double): String = if (p >= 0) "+%.1f".format(p) else "−%.1f".format(-p)
 private fun num(v: Double): String = if (v % 1.0 == 0.0 || v >= 100) "%.0f".format(v) else "%.1f".format(v)

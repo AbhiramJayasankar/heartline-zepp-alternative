@@ -81,7 +81,16 @@ data class DayResult(
     val hrvSleep: Double? = null,
     /** Daytime and evening sleep that started this day, kept out of the night's figures. */
     val naps: List<Nap> = emptyList(),
+    /** Overnight HRV's part of [sleepScore], when there is an earlier night to compare it with. */
+    val sleepHrv: SleepHrvPart? = null,
 )
+
+/**
+ * Overnight HRV in the sleep score: [value] ms against the [usual] of [nights] earlier nights, [z] spreads apart.
+ * It earns [points] of [possible]: 10, or a third of that per earlier night until there are three. Full marks at or
+ * above the usual, none two spreads below. The other parts are scaled into the remaining 100 − [possible].
+ */
+data class SleepHrvPart(val value: Double, val usual: Double, val z: Double, val nights: Int, val points: Double, val possible: Double)
 
 /** A nap: [start]/[end] epoch seconds of the watch's sleep minutes, minutes asleep by stage, and heart rate while asleep. */
 data class Nap(val start: Long, val end: Long, val asleepMin: Int, val deepMin: Int, val lightMin: Int, val remMin: Int,

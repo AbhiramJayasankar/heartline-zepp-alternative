@@ -18,12 +18,29 @@ fun healthByDay(
     } }
 }
 
-fun hrvByDay(checks: List<CheckSummary>, zone: ZoneId = ZoneId.systemDefault()): Map<LocalDate, Double> =
-    checks.filter { it.rmssdMs != null && it.signalQuality >= 0.7 && it.usableS >= 45 }
-        .groupBy { Instant.ofEpochSecond(floor(it.start).toLong()).atZone(zone).toLocalDate() }
-        .mapValues { (_, values) -> rounded(median(values.map { it.rmssdMs!! }.toDoubleArray()), 1) }
+/** Health type of the automatic daytime HRV samples (OvernightHrv.DAY_SAMPLE); only clean ones carry a value. */
+const val DAY_HRV_SAMPLE = "hrv_day_sample"
 
-private data class DayWork(var row: DayResult, val awakeHr: List<Int>, val factors: MutableList<ReadinessFactor> = arrayListOf())
+/** Awake HRV per day: the median RMSSD of the day's clean heart checks and clean automatic daytime samples. */
+fun hrvByDay(checks: List<CheckSummary>, zone: ZoneId = ZoneId.systemDefault(), daySamples: List<HealthValue> = emptyList()): Map<LocalDate, Double> =
+    (checks.filter { it.rmssdMs != null && it.signalQuality >= 0.7 && it.usableS >= 45 }
+        .map { Instant.ofEpochSecond(floor(it.start).toLong()).atZone(zone).toLocalDate() to it.rmssdMs!! } +
+        daySamples.filter { it.value > 0 }.map { dayOf(it.ts, zone) to it.value })
+        .groupBy({ it.first }, { it.second })
+        .mapValues { (_, values) -> rounded(median(values.toDoubleArray()), 1) }
+
+/** Overnight HRV against earlier nights: how far from the usual in its spread (at least 10% of it), and how many nights the usual rests on. */
+internal data class NightHrv(val value: Double, val usual: Double, val z: Double, val nights: Int)
+internal fun nightHrv(value: Double?, base: List<Double>): NightHrv? {
+    if (value == null || value <= 0 || base.isEmpty()) return null
+    val usual = average(base)
+    val sd = if (base.size >= 2) sqrt(variance(base.toDoubleArray())) else 0.0
+    return NightHrv(value, usual, (value - usual) / max(sd, 0.1 * usual), base.size)
+}
+/** Overnight HRV and readiness: full weight once three earlier nights set the usual, a third of it per night before. */
+internal fun nightShare(nights: Int): Double = min(1.0, nights / 3.0)
+
+private data class DayWork(var row: DayResult, val awakeHr: List<Int>, val factors: MutableList<ReadinessFactor> = arrayListOf(), var sleepBase: Int? = null)
 private fun nonzero(v: Double?): Boolean = v != null && v != 0.0
 private fun average(values: List<Double>): Double = values.sum() / values.size
 private fun zScore(value: Double?, base: List<Double>, floor: Double): Double? {
@@ -47,7 +64,8 @@ fun computeDaily(
     val hrMax = hrMaxOf(profile)
     val since = today.minusDays(max(days, 35).toLong() + 1).atStartOfDay(zone).toEpochSecond()
     val ownHealth = healthByDay(health, since, zone)
-    val hrv = hrvByDay(checks, zone)
+    val hrv = hrvByDay(checks, zone, health.filter { it.type == DAY_HRV_SAMPLE && it.ts >= since })
+    fun nightBase(d: LocalDate) = (1..28).mapNotNull { ownHealth["hrv_sleep"]?.get(d.minusDays(it.toLong()))?.takeIf { v -> v > 0 } }
     val byDay = minutes.groupBy { dayOf(it.ts, zone) }
     val blocks = sleepBlocks(minutes)
     val naps = napsOf(blocks, zone)
@@ -61,19 +79,26 @@ fun computeDaily(
         val eff = main?.let { rounded(100 * it.asleep / ((it.end - it.start) / 60.0 + 1), 1) }
         val resting = ownHealth["resting_hr"]?.get(d) ?: main?.let { restingHrFrom(it.rows) }
         val awakeHr = ms.filter { it.hr != null && it.hr != 0 && it.state !in sleepStates }.map { it.hr!! }
+        // Sleep score: duration, efficiency, deep and REM, plus up to 10 points for overnight HRV against your earlier
+        // nights. With HRV the other parts are scaled into the remaining 90, so a night without it scores as before.
+        val baseExact = main?.let { sleepScoreExact(it.asleep, eff ?: 0.0, it.deep, it.rem) }
+        val hrvPart = if (baseExact != null && baseExact > 0) nightHrv(ownHealth["hrv_sleep"]?.get(d), nightBase(d))?.let { h ->
+            val possible = 10 * nightShare(h.nights)
+            SleepHrvPart(h.value, rounded(h.usual, 1), rounded(h.z, 2), h.nights, rounded(possible * (1 + h.z / 2).coerceIn(0.0, 1.0), 2), rounded(possible, 2))
+        } else null
         rows[d] = DayWork(DayResult(
             date = d.toString(), restingHr = resting, hrvRmssd = hrv[d] ?: ownHealth["hrv"]?.get(d),
             sleepMinutes = main?.let { asleep }, sleepEfficiency = eff, deepMin = main?.deep,
             lightMin = main?.light, remMin = main?.rem, awakeMin = main?.awake,
-            sleepScore = main?.let { sleepScore(it.asleep, eff ?: 0.0, it.deep, it.rem) },
+            sleepScore = baseExact?.let { b -> hrvPart?.let { h -> rounded(b * (1 - h.possible / 100) + h.points).toInt() } ?: rounded(b).toInt() },
             steps = ms.takeIf { it.isNotEmpty() }?.sumOf { it.steps },
             activeMinutes = null, // set below, once resting heart rate is known
             wornMinutes = ms.takeIf { it.isNotEmpty() }?.count { it.state !in noDataStates },
             strain = null, trimp = null, hrZones = hrMax?.takeIf { it != 0 && awakeHr.isNotEmpty() }?.let { zoneMinutes(awakeHr, it) },
             spo2Avg = ownHealth["spo2"]?.get(d), stressAvg = ownHealth["stress"]?.get(d),
             readiness = null, caloriesActive = null, sleepStart = main?.start, sleepEnd = main?.end, sleepOngoing = ongoing,
-            awakeRestingHr = awakeRestingHrFrom(ms), hrvSleep = ownHealth["hrv_sleep"]?.get(d), naps = naps[d].orEmpty(),
-        ), awakeHr)
+            awakeRestingHr = awakeRestingHrFrom(ms), hrvSleep = ownHealth["hrv_sleep"]?.get(d), naps = naps[d].orEmpty(), sleepHrv = hrvPart,
+        ), awakeHr, sleepBase = baseExact?.let { rounded(it).toInt() })
     }
     // Heart rate reserve wants resting heart rate awake (Karvonen): the profile's, else the median of each day's calmest
     // still, awake 10 minutes. Sleeping heart rate runs lower, so it is only a fallback, raised by 8 bpm.
@@ -103,18 +128,22 @@ fun computeDaily(
         val rhrText = row.restingHr?.let { if (ownHealth["resting_hr"]?.containsKey(d) == true) it.toString() else it.toLong().toString() }
         zScore(row.restingHr, baseRest, 2.0)?.let { z -> factor("Resting heart rate", -z, 0.30,
             "$rhrText bpm vs your usual ${rounded(average(baseRest)).toLong()}", row.restingHr, average(baseRest), "bpm") }
-        // Overnight HRV, once three earlier nights have it, replaces heart checks: asleep HRV runs higher than awake,
-        // so each is only ever compared with itself.
-        val sleepBase = (1..28).mapNotNull { ownHealth["hrv_sleep"]?.get(d.minusDays(it.toLong())) }
-        val sleepZ = row.hrvSleep?.takeIf { sleepBase.size >= 3 }?.let { zScore(it, sleepBase, 0.1 * average(sleepBase)) }
-        if (sleepZ != null) factor("HRV", sleepZ, 0.35, "Overnight RMSSD ${rounded(row.hrvSleep!!).toLong()} ms vs your usual ${rounded(average(sleepBase)).toLong()}",
-            row.hrvSleep, average(sleepBase), "ms")
+        // Overnight HRV comes first, from the second night on: asleep HRV runs higher than awake, so each is only ever
+        // compared with itself. Its weight grows to the full 0.35 over the first three earlier nights. Without it, the
+        // day's awake HRV (heart checks and automatic daytime samples) against earlier days counts instead.
+        val night = nightHrv(row.hrvSleep, nightBase(d))
+        if (night != null) factor("HRV", night.z, 0.35 * nightShare(night.nights),
+            "Overnight RMSSD ${rounded(night.value).toLong()} ms vs your usual ${rounded(night.usual).toLong()}" +
+                (if (night.nights < 3) " from ${night.nights} earlier night${if (night.nights == 1) "" else "s"}, so it counts for less until there are 3" else ""),
+            night.value, night.usual, "ms")
         val baseHrv = prev.mapNotNull { it.hrvRmssd?.takeIf { v -> v != 0.0 } }
-        if (sleepZ == null) zScore(row.hrvRmssd, baseHrv, if (baseHrv.isNotEmpty()) 0.1 * average(baseHrv) else 1.0)?.let { z ->
-            factor("HRV", z, 0.35, "RMSSD ${rounded(row.hrvRmssd!!).toLong()} ms vs your usual ${rounded(average(baseHrv)).toLong()}", row.hrvRmssd, average(baseHrv), "ms")
+        if (night == null) zScore(row.hrvRmssd, baseHrv, if (baseHrv.isNotEmpty()) 0.1 * average(baseHrv) else 1.0)?.let { z ->
+            factor("HRV", z, 0.35, "Awake RMSSD ${rounded(row.hrvRmssd!!).toLong()} ms vs your usual ${rounded(average(baseHrv)).toLong()}", row.hrvRmssd, average(baseHrv), "ms")
         }
-        row.sleepScore?.let { score -> factor("Sleep", (score - 70) / 15.0, 0.25,
-            "sleep score $score, ${row.sleepMinutes!! / 60} h ${row.sleepMinutes % 60} min asleep", score.toDouble(), 70.0) }
+        // The sleep score's HRV part is left out here: HRV already counts on its own.
+        if (row.sleepScore != null) work.sleepBase?.let { score -> factor("Sleep", (score - 70) / 15.0, 0.25,
+            "sleep score $score" + (if (row.sleepHrv != null) " without its HRV part" else "") +
+                ", ${row.sleepMinutes!! / 60} h ${row.sleepMinutes % 60} min asleep", score.toDouble(), 70.0) }
         rows[d.minusDays(1)]?.row?.strain?.let { strain -> factor("Yesterday's strain",
             if (strain > 14) -(strain - 14) / 4 else 0.0, 0.10, "strain $strain", strain, 14.0) }
         // Each factor's share of the score: readiness = 70 + the sum of these points.

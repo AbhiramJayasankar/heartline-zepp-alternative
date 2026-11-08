@@ -335,7 +335,11 @@ data class Factor(
     val z: Double = 0.0, val weight: Double = 0.0, val points: Double = 0.0, val value: Double? = null, val usual: Double? = null, val unit: String = "",
 )
 data class AlertUi(val warn: Boolean, val title: String, val detail: String)
-data class SleepNightUi(val start: Long, val end: Long, val deepMin: Int, val lightMin: Int, val remMin: Int, val awakeMin: Int, val ongoing: Boolean = false)
+data class SleepNightUi(val start: Long, val end: Long, val deepMin: Int, val lightMin: Int, val remMin: Int, val awakeMin: Int, val ongoing: Boolean = false,
+                        /** Overnight HRV's part of the sleep score, when it has one. */
+                        val hrv: SleepHrvUi? = null)
+/** Overnight HRV in the sleep score: [ms] against the [usual] of [nights] earlier nights, earning [points] of [possible]. */
+data class SleepHrvUi(val ms: Double, val usual: Double, val z: Double, val nights: Int, val points: Double, val possible: Double)
 
 data class TodayUi(
     val readiness: Int?,

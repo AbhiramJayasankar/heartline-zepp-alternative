@@ -362,7 +362,7 @@ def compute(minutes: list[dict], profile: dict, days: int, today: date | None = 
         z = _z(row["hrv_rmssd"], base_hrv, 0.1 * mean(base_hrv) if base_hrv else 1.0)
         if z is not None:
             zs.append((z, 0.35))
-            factors.append(("HRV", z, f"RMSSD {row['hrv_rmssd']:.0f} ms vs your usual {mean(base_hrv):.0f}"))
+            factors.append(("HRV", z, f"Awake RMSSD {row['hrv_rmssd']:.0f} ms vs your usual {mean(base_hrv):.0f}"))
         if row["sleep_score"] is not None:
             z = (row["sleep_score"] - 70) / 15
             zs.append((z, 0.25))

@@ -116,13 +116,14 @@ internal fun napsOf(blocks: List<SleepBlock>, zone: ZoneId): Map<LocalDate, List
             Nap(b.start, b.end, b.asleep, b.deep, b.light, b.rem, hr.minOrNull(), hr.takeIf { it.isNotEmpty() }?.average()?.roundToInt())
         }.groupBy { dayOf(it.start, zone) }
 
-internal fun sleepScore(asleep: Int, efficiency: Double, deep: Int, rem: Int): Int {
-    if (asleep <= 0) return 0
+internal fun sleepScore(asleep: Int, efficiency: Double, deep: Int, rem: Int): Int = rounded(sleepScoreExact(asleep, efficiency, deep, rem)).toInt()
+internal fun sleepScoreExact(asleep: Int, efficiency: Double, deep: Int, rem: Int): Double {
+    if (asleep <= 0) return 0.0
     var s = 50 * min(1.0, asleep / 480.0)
     s += 20 * ((efficiency - 70) / 25).coerceIn(0.0, 1.0)
     s += 15 * min(1.0, deep.toDouble() / asleep / 0.13)
     s += 15 * min(1.0, rem.toDouble() / asleep / 0.20)
-    return rounded(s).toInt()
+    return s
 }
 
 internal fun restingHrFrom(rows: List<MinuteSample>): Double? {
