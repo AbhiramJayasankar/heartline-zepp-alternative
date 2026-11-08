@@ -37,6 +37,17 @@ class WatchAssistantTest {
         override fun startWorkout(label: String, minutes: Int) { check(running == null) { "A workout capture is already running" }; running = label; did += "start $label $minutes" }
         override fun stopWorkout(): String? = running?.let { did += "stop"; running = null; "$it after 12 minutes" }
         override fun sync() { did += "sync" }
+        val alarms = mutableListOf(WatchAlarm(0, true, 7, 0, setOf(java.time.DayOfWeek.MONDAY), false), WatchAlarm(10, false, null, null, emptySet(), true))
+        override suspend fun watchAlarms() = alarms.toList()
+        override suspend fun setWatchAlarm(slot: Int?, hour: Int, minute: Int, days: Set<java.time.DayOfWeek>, on: Boolean): Int {
+            did += "set $slot %02d:%02d ${days.sorted()} $on".format(hour, minute); return slot?.takeIf { it < 10 } ?: 1
+        }
+        override suspend fun switchWatchAlarm(slot: Int, on: Boolean) { did += "switch $slot $on" }
+        override suspend fun deleteWatchAlarm(slot: Int) { check(alarms.any { it.slot == slot }) { "there is no alarm $slot on the watch" }; did += "delete $slot" }
+        override suspend fun sendToWatch(title: String, parts: List<String>): Int { did += "send $title ${parts.size}"; return parts.size }
+        override suspend fun media(action: String, percent: Int?): String { did += "media $action $percent"; return "Spotify playing" }
+        override suspend fun ringer(mode: String?, percent: Int?): String { did += "ringer $mode $percent"; return "ringer ${mode ?: "normal"}" }
+        override suspend fun addNote(text: String) { did += "note $text" }
     }
     private val data = object : DataTools {
         override val tools = listOf(Tool("get_sleep", "Sleep for a night.", JSONObject().put("type", "object").put("properties", JSONObject())))
@@ -63,20 +74,20 @@ class WatchAssistantTest {
     private var alexa = AlexaSettings()
 
     @Test fun theOwnersSettingsShapeTheRequest() = runBlocking {
-        alexa = AlexaSettings(prompt = "Be brief. Now {NOW}. Steps {STEPS}.", disabledTools = setOf("set_timer"),
+        alexa = AlexaSettings(prompt = "Be brief. Now {NOW}. Steps {STEPS}.", disabledTools = setOf("timers_and_reminders"),
             toolDescriptions = mapOf("get_sleep" to "Sleep data."), fallbackModels = listOf("x/y"), temperature = 0.7, maxTokens = 900, memoryTurns = 0)
-        brain(call("set_timer", """{"seconds":60}"""), say("Done."))
+        brain(call("timers_and_reminders", """{"action":"timer","seconds":60}"""), say("Done."))
         val a = assistant().answer("Timer for a minute")
         assertEquals("Be brief. Now Friday 6 November 2026, 15:40 (Asia/Kolkata). Steps 4200.", system())
         val body = bodies.first()
         val tools = body.getJSONArray("tools").let { t -> (0 until t.length()).map { t.getJSONObject(it).getJSONObject("function") } }
-        assertFalse(tools.any { it.getString("name") == "set_timer" })
+        assertFalse(tools.any { it.getString("name") == "timers_and_reminders" })
         assertEquals("Sleep data.", tools.first { it.getString("name") == "get_sleep" }.getString("description"))
         assertEquals(listOf(AssistantAiConfig.DEFAULT_MODEL, "x/y"), body.getJSONArray("models").let { m -> (0 until m.length()).map { m.getString(it) } })
         assertEquals(0.7, body.getDouble("temperature"), 0.0)
         assertEquals(900, body.getInt("max_tokens"))
         // A tool that's off isn't run even if the model calls it.
-        assertEquals(listOf("Error: the set_timer tool is turned off in Heartline"), toolResults())
+        assertEquals(listOf("Error: the timers_and_reminders tool is turned off in Heartline"), toolResults())
         assertTrue(a.frames.isEmpty())
     }
 
@@ -107,7 +118,7 @@ class WatchAssistantTest {
         assertEquals("Your heart rate was 72 bpm.", a.text)
         assertTrue(a.frames.isEmpty())
         assertFalse(a.listenAgain)
-        listOf("Steps today: 4200", "show_weather_card", "- Readiness: 62 out of 100").forEach { assertTrue(it, system().contains(it)) }
+        listOf("Steps today: 4200", "show_on_watch", "- Readiness: 62 out of 100").forEach { assertTrue(it, system().contains(it)) }
         val tools = bodies.last().getJSONArray("tools").let { t -> (0 until t.length()).map { t.getJSONObject(it).getJSONObject("function").getString("name") } }
         assertEquals(listOf("get_sleep") + WatchAssistant.ACTION_TOOLS.map { it.name }, tools)
     }
@@ -136,32 +147,29 @@ class WatchAssistantTest {
         assertEquals("I didn't hear any words. Try again.", assistant().answer(" ").text)
     }
 
-    @Test fun timersAndAlarmsGoToTheWatchAndCanBeCancelled() = runBlocking {
+    @Test fun timersGoToTheWatchAndCanBeCancelled() = runBlocking {
         val a = assistant()
-        brain(call("set_timer", """{"seconds":300}"""), say("Timer set for 5 minutes."))
+        brain(call("timers_and_reminders", """{"action":"timer","seconds":300}"""), say("Timer set for 5 minutes."))
         val timer = a.answer("Timer for 5 minutes")
         assertEquals("Timer set for 5 minutes.", timer.text)
         assertEquals(listOf("Done: timer for 5 minutes, ringing at 15:45"), toolResults())
         assertArrayEquals(Alexa.timer("heartline-timer-${now.toEpochSecond()}-0", 0, 5, 0), timer.frames.single())
-        brain(call("set_alarm", """{"time":"07:00"}"""), say("Alarm set for 7 AM."))
-        val alarm = a.answer("Wake me at 7")
-        assertArrayEquals(Alexa.alarm("heartline-alarm-${now.toEpochSecond()}-1", LocalDateTime.of(2026, 11, 7, 7, 0).toEpochSecond(ZoneOffset.UTC)), alarm.frames.single())
-        brain(call("cancel_alerts", """{"ids":[2]}"""), say("Cancelled your 7 AM alarm."))
-        val cancel = a.answer("Cancel my alarm")
-        assertTrue(system().contains("id 1: timer ringing at 15:45; id 2: alarm at Sat 07:00"))
-        assertArrayEquals(Alexa.deleteAlert(Alexa.ALERT_ALARM, "heartline-alarm-${now.toEpochSecond()}-1"), cancel.frames.single())
-        assertEquals(1, WatchAssistant.parseAlerts(saved[WatchAssistant.ALERTS]).size)
-        brain(call("cancel_alerts", """{"ids":[9]}"""), say("Nothing to cancel."))
+        brain(call("timers_and_reminders", """{"action":"cancel","ids":[1]}"""), say("Cancelled your timer."))
+        val cancel = a.answer("Cancel my timer")
+        assertTrue(system().contains("id 1: timer ringing at 15:45"))
+        assertArrayEquals(Alexa.deleteAlert(Alexa.ALERT_TIMER, "heartline-timer-${now.toEpochSecond()}-0"), cancel.frames.single())
+        assertEquals(0, WatchAssistant.parseAlerts(saved[WatchAssistant.ALERTS]).size)
+        brain(call("timers_and_reminders", """{"action":"cancel","ids":[9]}"""), say("Nothing to cancel."))
         a.answer("Cancel it")
         assertTrue(toolResults().last().startsWith("Error: none of those ids are set"))
     }
 
     @Test fun aClaimedActionWithoutItsToolIsAskedAgain() = runBlocking {
         val a = assistant()
-        brain(call("set_reminder", """{"label":"Drink water","in_seconds":120}"""), say("Reminder set for 15:42."))
+        brain(call("timers_and_reminders", """{"action":"reminder","label":"Drink water","in_seconds":120}"""), say("Reminder set for 15:42."))
         a.answer("Remind me to drink water in two minutes")
-        // The model says it cancelled without calling the tool; told nothing happened, it calls cancel_alerts.
-        brain(say("Cancelled."), call("cancel_alerts", """{"ids":[1]}"""), say("Cancelled your water reminder."))
+        // The model says it cancelled without calling the tool; told nothing happened, it calls the tool.
+        brain(say("Cancelled."), call("timers_and_reminders", """{"action":"cancel","ids":[1]}"""), say("Cancelled your water reminder."))
         val cancel = a.answer("Cancel my water reminder")
         assertEquals("Cancelled your water reminder.", cancel.text)
         assertTrue(WatchAssistant.parseAlerts(saved[WatchAssistant.ALERTS]).isEmpty())
@@ -173,41 +181,42 @@ class WatchAssistantTest {
 
     @Test fun alarmsInMinutesRingOnTheNextWholeMinute() = runBlocking {
         now = now.plusSeconds(20) // 15:40:20
-        brain(call("set_alarm", """{"in_seconds":60}"""), say("Alarm set."))
+        brain(call("alarms", """{"action":"set","in_seconds":60}"""), say("Alarm set."))
         assistant().answer("Set an alarm for one minute from now")
-        assertEquals("Done: alarm at 15:42", toolResults().single())
+        assertEquals("Done: alarm 1 set for 15:42, once, on (rings 15:42)", toolResults().single())
+        assertEquals("set null 15:42 [] true", did.single())
     }
 
     @Test fun remindersUseTheWatchsReminderSlots() = runBlocking {
-        brain(call("set_reminder", """{"label":"drink water","in_seconds":120}"""), say("I'll remind you to drink water at 15:42."))
+        brain(call("timers_and_reminders", """{"action":"reminder","label":"drink water","in_seconds":120}"""), say("I'll remind you to drink water at 15:42."))
         val a = assistant().answer("Remind me in 2 minutes to drink water")
         assertTrue(a.frames.isEmpty()) // the agenda sync writes the slot
         val r = WatchAssistant.voiceReminders(saved[WatchAssistant.ALERTS], now.toEpochSecond()).single()
         assertEquals("drink water", r.title)
         assertEquals(now.plusMinutes(2).toEpochSecond(), r.start)
         assertTrue(WatchAssistant.voiceReminders(saved[WatchAssistant.ALERTS], now.plusMinutes(3).toEpochSecond()).isEmpty())
-        brain(call("set_reminder", """{"time":"18:00"}"""), say("What should I remind you about?"))
+        brain(call("timers_and_reminders", """{"action":"reminder","time":"18:00"}"""), say("What should I remind you about?"))
         assistant().answer("Remind me at 6")
-        assertEquals("Error: label is required", toolResults().single())
+        assertEquals("Error: a reminder needs a label", toolResults().single())
     }
 
     @Test fun workoutCaptureStartsAndStopsByVoice() = runBlocking {
         val a = assistant()
-        brain(call("start_workout", """{"label":"Gym","minutes":45}"""), say("Started your gym capture."))
+        brain(call("recording", """{"action":"start_workout","label":"Gym","minutes":45}"""), say("Started your gym capture."))
         assertEquals("Started your gym capture.", a.answer("Start a gym workout for 45 minutes").text)
-        brain(call("start_workout", """{"label":"Gym"}"""), say("One is already running."))
+        brain(call("recording", """{"action":"start_workout","label":"Gym"}"""), say("One is already running."))
         a.answer("Start a gym workout")
         assertEquals("Error: A workout capture is already running", toolResults().single())
-        brain(call("stop_workout"), say("Stopped."))
+        brain(call("recording", """{"action":"stop_workout"}"""), say("Stopped."))
         a.answer("Stop my workout")
         assertEquals("Done: stopped Gym after 12 minutes; Heartline is working out the sets and reps", toolResults().single())
-        brain(call("sync_watch"), say("Syncing."))
+        brain(call("app", """{"action":"sync_watch"}"""), say("Syncing."))
         a.answer("Sync my watch")
         assertEquals(listOf("start Gym 45", "stop", "sync"), did)
     }
 
     @Test fun dryRunsChangeNothing() = runBlocking {
-        brain(call("set_timer", """{"seconds":60}"""), call("start_workout", """{"label":"Run"}"""), say("Done."))
+        brain(call("timers_and_reminders", """{"action":"timer","seconds":60}"""), call("recording", """{"action":"start_workout","label":"Run"}"""), say("Done."))
         val a = assistant().answer("Timer and a run", dryRun = true)
         assertEquals("Done. [timer for 1 minute, ringing at 15:41; started the Run capture for 1 hour]", a.summary)
         assertNull(saved[WatchAssistant.ALERTS])
@@ -215,13 +224,13 @@ class WatchAssistantTest {
     }
 
     @Test fun weatherIsARealCard() = runBlocking {
-        brain(call("show_weather_card"), say("Here's the weather."))
+        brain(call("show_on_watch", """{"action":"weather"}"""), say("Here's the weather."))
         val a = assistant().answer("What's the weather like?")
         assertNull(a.text)
         val body = String(a.frames.single(), Charsets.UTF_8)
         listOf("Noida", "Partly cloudy", "/currentWeatherIcon/partly_cloudy.png", "/weatherForecast/rainy.png", "24", "29", "19").forEach { assertTrue(it, body.contains(it)) }
         weatherError = "choose a place in Heartline's weather settings"
-        brain(call("show_weather_card"), say("I couldn't get the weather."))
+        brain(call("show_on_watch", """{"action":"weather"}"""), say("I couldn't get the weather."))
         assertEquals("I couldn't get the weather.", assistant().answer("Weather?").text)
         assertEquals("Error: couldn't get the weather: choose a place in Heartline's weather settings", toolResults().single())
     }
@@ -278,14 +287,50 @@ class WatchAssistantTest {
     }
 
     @Test fun showListSendsATable() = runBlocking {
-        brain(call("show_list", """{"title":"Forecast","rows":[{"left":"Mon","right":"31° / 22° **Sunny**"},{"left":"","right":""},{"left":"Tue","right":"Rain"}]}"""), say("Here it is."))
+        brain(call("show_on_watch", """{"action":"table","title":"Forecast","rows":[{"left":"Mon","right":"31° / 22° **Sunny**"},{"left":"","right":""},{"left":"Tue","right":"Rain"}]}"""), say("Here it is."))
         val a = assistant().answer("Forecast as a table")
         assertArrayEquals(Alexa.list("Forecast", "", listOf("Mon" to "31° / 22° Sunny", "Tue" to "Rain")), a.frames.single())
         assertEquals(null, a.text) // the card is the answer
         assertEquals(listOf("Done: showed a list of 2 rows"), toolResults())
-        brain(call("show_list", """{"rows":[${(1..60).joinToString(",") { """{"left":"$it","right":"${"word ".repeat(30)}"}""" }}]}"""), say("Done."))
+        brain(call("show_on_watch", """{"action":"table","rows":[${(1..60).joinToString(",") { """{"left":"$it","right":"${"word ".repeat(30)}"}""" }}]}"""), say("Done."))
         val big = assistant().answer("A long table")
         assertTrue(big.frames.single().size <= WatchAssistant.LIST_BYTES + 7)
         assertTrue(toolResults().single().contains("didn't fit"))
+    }
+
+    @Test fun alarmsAreListedSetSwitchedAndDeleted() = runBlocking {
+        val a = assistant()
+        brain(call("alarms", """{"action":"list"}"""), say("You have two."))
+        a.answer("What alarms do I have?")
+        assertEquals("Alarms on the watch, by slot:\nalarm 0: 07:00, Mon, on\nalarm 10: time unknown (made on the watch), once, off", toolResults().single())
+        brain(call("alarms", """{"action":"set","time":"6:30","days":["weekdays"]}"""), say("Set."))
+        a.answer("Alarm at 6:30 on weekdays")
+        assertEquals("Done: alarm 1 set for 06:30, weekdays, on", toolResults().single())
+        brain(call("alarms", """{"action":"set","slot":0,"on":false}"""), say("Off."))
+        a.answer("Turn off my 7 am alarm")
+        brain(call("alarms", """{"action":"set","slot":0,"time":"07:15"}"""), say("Moved."))
+        a.answer("Move it to 7:15")
+        assertEquals("Done: alarm 0 set for 07:15, Mon, on", toolResults().single()) // the days are kept
+        brain(call("alarms", """{"action":"delete","slots":[10,4]}"""), say("Deleted."))
+        a.answer("Delete the others")
+        assertEquals("Done: deleted alarm 10; failed: alarm 4: there is no alarm 4 on the watch", toolResults().single())
+        assertEquals(listOf("set null 06:30 [MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY] true", "switch 0 false", "set 0 07:15 [MONDAY] true", "delete 10"), did)
+        brain(call("alarms", """{"action":"snooze"}"""), say("?"))
+        a.answer("Snooze")
+        assertEquals("Error: action for alarms is one of list, set, delete", toolResults().single())
+    }
+
+    @Test fun thePhoneNotesAndLongTextsAreControlled() = runBlocking {
+        val a = assistant()
+        brain(call("phone", """{"action":"pause"}"""), call("phone", """{"action":"ringer_vibrate"}"""), call("phone", """{"action":"set_volume"}"""), say("Done."))
+        a.answer("Pause the music and put my phone on vibrate")
+        assertEquals(listOf("Done: pause. Now: Spotify playing", "Done: ringer vibrate. Now: ringer vibrate", "Error: set_volume needs percent"), toolResults())
+        brain(call("app", """{"action":"add_note","text":"buy milk"}"""), say("Noted."))
+        a.answer("Note buy milk")
+        val story = "Once upon a time. ".repeat(120)
+        brain(call("show_on_watch", """{"action":"notifications","title":"Story","text":"$story"}"""), say("Sent to your watch."))
+        val sent = a.answer("Send me a long story")
+        assertEquals("Sent to your watch.", sent.text)
+        assertEquals(listOf("media pause null", "ringer vibrate null", "note buy milk", "send Story 3"), did)
     }
 }

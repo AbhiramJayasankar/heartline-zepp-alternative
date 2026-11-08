@@ -501,7 +501,8 @@ class RealController(
         testAssistant.allTools.map { t ->
             val group = when {
                 t.name == "web_search" -> "Web"
-                t.name.startsWith("get_") && t.name != "get_weather" -> "Health data"
+                t.name == "get_info" -> "Lookups"
+                t.name == "phone" -> "Phone"
                 else -> "Watch and Heartline actions"
             }
             AlexaToolUi(t.name, group, t.description, t.parameters.toString(2))

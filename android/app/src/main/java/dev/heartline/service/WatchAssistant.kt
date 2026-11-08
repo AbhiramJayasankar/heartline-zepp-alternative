@@ -5,6 +5,7 @@ import dev.heartline.protocol.Alexa
 import dev.heartline.protocol.CalendarReminder
 import dev.heartline.protocol.reminderTitle
 import dev.heartline.protocol.wmoCondition
+import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -57,12 +58,64 @@ interface DataTools {
     }
 }
 
+/**
+ * An alarm on the watch: one Heartline set ([hour], [minute], repeat [days], none = once) or one made on the watch
+ * ([madeOnWatch]), whose time the watch doesn't share.
+ */
+data class WatchAlarm(val slot: Int, val on: Boolean, val hour: Int?, val minute: Int?, val days: Set<DayOfWeek>, val madeOnWatch: Boolean) {
+    fun describe(): String {
+        val time = if (hour != null && minute != null) "%02d:%02d".format(hour, minute) else "time unknown (made on the watch)"
+        return "alarm $slot: $time, ${repeatWords(days)}, ${if (on) "on" else "off"}"
+    }
+    companion object {
+        fun repeatWords(days: Set<DayOfWeek>): String = when {
+            days.isEmpty() -> "once"
+            days.size == 7 -> "every day"
+            days == WEEKDAYS -> "weekdays"
+            days == setOf(DayOfWeek.SATURDAY, DayOfWeek.SUNDAY) -> "weekends"
+            else -> days.sorted().joinToString(" ") { it.getDisplayName(java.time.format.TextStyle.SHORT, Locale.ENGLISH) }
+        }
+        private val WEEKDAYS = setOf(DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY)
+
+        /** Repeat days from words such as "weekdays", "weekends", "daily", "once" or day names; null when one isn't understood. */
+        fun parseDays(words: List<String>): Set<DayOfWeek>? {
+            val out = HashSet<DayOfWeek>()
+            for (w in words.map { it.trim().lowercase(Locale.ROOT) }.filter { it.isNotEmpty() }) when (w) {
+                "once", "none", "never" -> {}
+                "daily", "every day", "everyday", "all" -> out += DayOfWeek.entries
+                "weekdays", "weekday" -> out += WEEKDAYS
+                "weekends", "weekend" -> out += setOf(DayOfWeek.SATURDAY, DayOfWeek.SUNDAY)
+                else -> out += DayOfWeek.entries.firstOrNull { d -> w.length >= 2 && d.name.lowercase(Locale.ROOT).startsWith(w.take(3)) } ?: return null
+            }
+            return out
+        }
+    }
+}
+
 /** What the Alexa button can make Heartline do. Each throws with a message when it can't. */
 interface AssistantActions {
     fun startWorkout(label: String, minutes: Int)
     /** The capture that was stopped, as words, or null if none was running. */
     fun stopWorkout(): String?
     fun sync()
+    /** Every alarm on the watch, read from it now. */
+    suspend fun watchAlarms(): List<WatchAlarm> = error("only the watch service can read the watch's alarms")
+    /** Adds or changes an alarm ([slot] null for a new one) and returns its slot once the watch took it. */
+    suspend fun setWatchAlarm(slot: Int?, hour: Int, minute: Int, days: Set<DayOfWeek>, on: Boolean): Int = error("only the watch service can set alarms")
+    suspend fun switchWatchAlarm(slot: Int, on: Boolean): Unit = error("only the watch service can switch alarms")
+    suspend fun deleteWatchAlarm(slot: Int): Unit = error("only the watch service can delete alarms")
+    /** Starts a heart check of [seconds]; the result goes to the watch as a notification when it's done. */
+    suspend fun startHeartCheck(seconds: Int): Unit = error("only the watch service can start a heart check")
+    /** Adds [text] as a new line at the end of the app's quick notes. */
+    suspend fun addNote(text: String): Unit = error("only the app can change notes")
+    /** Sends [parts] as watch notifications titled [title], in order; returns how many will be sent. */
+    suspend fun sendToWatch(title: String, parts: List<String>): Int = error("only the watch service can send notifications")
+    /** Media on the phone: play, pause, play_pause, next, previous, stop, volume_up, volume_down, set_volume, mute, unmute. Returns the state after. */
+    suspend fun media(action: String, percent: Int?): String = error("only the phone can control media")
+    /** The phone's ringer: normal, vibrate or silent, and optionally its ring volume. Returns the state after. */
+    suspend fun ringer(mode: String?, percent: Int?): String = error("only the phone can change the ringer")
+    /** Ringer, volumes, what's playing and the phone's battery, as words. */
+    suspend fun phoneStatus(): String = error("only the phone can say its status")
 
     /** For the app's test buttons, which never act. */
     object None : AssistantActions {
@@ -193,77 +246,176 @@ class WatchAssistant(
         }
 
         suspend fun act(name: String, args: JSONObject): String {
-            fun done(what: String): String { did += what; return if (dryRun) "Done (test run, nothing was sent): $what" else "Done: $what" }
+            val what = (args.optString(if (name == "get_info") "topic" else "action")).trim().lowercase(Locale.ROOT)
+            fun bad() = "Error: ${if (name == "get_info") "topic" else "action"} for $name is one of ${CHOICES[name]?.joinToString() ?: "nothing"}"
             return when (name) {
-                "set_timer" -> {
-                    val s = args.optInt("seconds", 0).takeIf { it in 1..86_399 } ?: return "Error: seconds must be 1 to 86399"
-                    val token = addAlert(Alexa.ALERT_TIMER, t.toEpochSecond() + s)
-                    frames += Alexa.timer(token, s / 3600, s / 60 % 60, s % 60)
-                    done("timer for ${spoken(s)}, ringing at ${clock(t.toLocalDateTime().plusSeconds(s.toLong()))}")
+                "get_info" -> when (what) {
+                    "weather" -> forecast?.let { describe(it) } ?: try { describe(weather.latest().also { forecast = it }) } catch (e: Exception) { "Error: ${e.message}" }
+                    "phone" -> try { actions.phoneStatus() } catch (e: Exception) { "Error: ${e.message}" }
+                    else -> bad()
                 }
-                "set_alarm" -> {
-                    // Watch alarms ring on the minute: "in N minutes" rounds up to the next whole minute.
-                    val at = whenOf(args, roundToMinute = true) ?: return "Error: give time as HH:MM or in_seconds"
-                    val token = addAlert(Alexa.ALERT_ALARM, at.atZone(t.zone).toEpochSecond())
-                    frames += Alexa.alarm(token, wallClock(at))
-                    done("alarm at ${clock(at)}")
+                "alarms" -> when (what) { "list" -> listAlarms(); "set" -> setAlarm(args); "delete" -> deleteAlarms(args); else -> bad() }
+                "timers_and_reminders" -> when (what) { "timer" -> timer(args); "reminder" -> reminder(args); "cancel" -> cancel(args); else -> bad() }
+                "show_on_watch" -> when (what) {
+                    "table" -> table(args)
+                    "weather" -> {
+                        val w = forecast ?: try { weather.latest().also { forecast = it } } catch (e: Exception) { return "Error: couldn't get the weather: ${e.message}" }
+                        frames += card(w, t); card = true
+                        done("showed the weather card for ${w.weather.location}")
+                    }
+                    "things_to_ask" -> {
+                        frames += Alexa.list("Heartline", "Things to ask", HELP.mapIndexed { i, q -> "${i + 1}" to q }); card = true
+                        done("showed the list of things to ask")
+                    }
+                    "notifications" -> notifications(args)
+                    else -> bad()
                 }
-                "set_reminder" -> {
-                    val label = args.optString("label").trim().ifEmpty { return "Error: label is required" }
-                    val at = whenOf(args, roundToMinute = true) ?: return "Error: give time as HH:MM or in_seconds"
-                    // A watch reminder (the calendar slots, which show their title), written by the agenda sync.
-                    addAlert(Alexa.ALERT_REMINDER, at.atZone(t.zone).toEpochSecond(), label)
-                    done("reminder \"${reminderTitle(label)}\" at ${clock(at)} (the watch shows the first ${dev.heartline.protocol.REMINDER_TITLE_LENGTH} characters)")
+                "recording" -> when (what) {
+                    "heart_check" -> {
+                        val minutes = args.optInt("minutes", 2).coerceIn(1, 5)
+                        if (!dryRun) try { actions.startHeartCheck(minutes * 60) } catch (e: Exception) { return "Error: ${e.message}" }
+                        done("started a ${spoken(minutes * 60)} heart check; they should keep the wrist still, and the result comes as a watch notification")
+                    }
+                    "start_workout" -> {
+                        val label = args.optString("label").trim().takeIf { it.isNotEmpty() && it != "null" } ?: "Workout"
+                        val minutes = args.optInt("minutes", 60).coerceIn(1, 720)
+                        if (!dryRun) try { actions.startWorkout(label, minutes) } catch (e: Exception) { return "Error: ${e.message}" }
+                        done("started the $label capture for ${spoken(minutes * 60)}")
+                    }
+                    "stop_workout" -> {
+                        val stopped = if (dryRun) "the workout capture" else try { actions.stopWorkout() } catch (e: Exception) { return "Error: ${e.message}" }
+                        stopped?.let { done("stopped $it; Heartline is working out the sets and reps") } ?: "No workout capture is running."
+                    }
+                    else -> bad()
                 }
-                "cancel_alerts" -> {
-                    val ids = args.optJSONArray("ids")?.let { a -> (0 until a.length()).map { a.optInt(it, -1) } }.orEmpty()
-                    val gone = alerts.filter { it.id in ids }
-                    if (gone.isEmpty()) return "Error: none of those ids are set; the list is ${if (alerts.isEmpty()) "empty" else alerts.joinToString { "${it.id}: ${it.describe(t)}" }}"
-                    alerts = alerts - gone.toSet()
-                    if (!dryRun) saveAlerts(alerts)
-                    gone.filter { it.kind != Alexa.ALERT_REMINDER }.forEach { frames += Alexa.deleteAlert(it.kind, it.token) }
-                    done("cancelled " + gone.joinToString(" and ") { it.describe(t) })
-                }
-                "get_weather" -> forecast?.let { describe(it) } ?: try { describe(weather.latest().also { forecast = it }) } catch (e: Exception) { "Error: ${e.message}" }
-                "show_weather_card" -> {
-                    val w = forecast ?: try { weather.latest().also { forecast = it } } catch (e: Exception) { return "Error: couldn't get the weather: ${e.message}" }
-                    frames += card(w, t); card = true
-                    done("showed the weather card for ${w.weather.location}")
-                }
-                "show_help" -> {
-                    frames += Alexa.list("Heartline", "Things to ask", HELP.mapIndexed { i, q -> "${i + 1}" to q }); card = true
-                    done("showed the list of things to ask")
-                }
-                "show_list" -> {
-                    val given = args.optJSONArray("rows") ?: return "Error: give rows, each with left and right"
-                    val rows = fitLeft((0 until given.length()).mapNotNull { given.optJSONObject(it) }
-                        .map { watchText(it.optString("left")) to watchText(it.optString("right")) }
-                        .filter { (l, r) -> l.isNotEmpty() || r.isNotEmpty() }).map { (l, r) -> l to r.take(LIST_RIGHT) }
-                    if (rows.isEmpty()) return "Error: give at least one row with left or right text"
-                    val title = watchText(args.optString("title")).take(LIST_TITLE)
-                    val subtitle = watchText(args.optString("subtitle")).take(LIST_TITLE)
-                    // Keep the card within what a reply carries; rows that don't fit are left out and the model is told.
-                    var shown = rows.take(LIST_ROWS)
-                    while (shown.size > 1 && Alexa.list(title, subtitle, shown).size > LIST_BYTES) shown = shown.dropLast(1)
-                    frames += Alexa.list(title, subtitle, shown); card = true
-                    done("showed a list of ${shown.size} rows" + if (shown.size < rows.size) " (the last ${rows.size - shown.size} didn't fit)" else "")
-                }
-                "start_workout" -> {
-                    val label = args.optString("label").trim().ifEmpty { "Workout" }
-                    val minutes = args.optInt("minutes", 60).coerceIn(1, 720)
-                    if (!dryRun) try { actions.startWorkout(label, minutes) } catch (e: Exception) { return "Error: ${e.message}" }
-                    done("started the $label capture for ${spoken(minutes * 60)}")
-                }
-                "stop_workout" -> {
-                    val stopped = if (dryRun) "the workout capture" else try { actions.stopWorkout() } catch (e: Exception) { return "Error: ${e.message}" }
-                    stopped?.let { done("stopped $it; Heartline is working out the sets and reps") } ?: "No workout capture is running."
-                }
-                "sync_watch" -> {
-                    if (!dryRun) try { actions.sync() } catch (e: Exception) { return "Error: ${e.message}" }
-                    done("started a sync with the watch")
+                "phone" -> phone(what, args)
+                "app" -> when (what) {
+                    "sync_watch" -> {
+                        if (!dryRun) try { actions.sync() } catch (e: Exception) { return "Error: ${e.message}" }
+                        done("started a sync with the watch")
+                    }
+                    "add_note" -> {
+                        val text = args.optString("text").trim().takeIf { it.isNotEmpty() && it != "null" } ?: return "Error: add_note needs text"
+                        if (!dryRun) try { actions.addNote(text) } catch (e: Exception) { return "Error: ${e.message}" }
+                        done("added to quick notes: $text")
+                    }
+                    else -> bad()
                 }
                 else -> "Error: there is no tool called $name"
             }
+        }
+
+        private fun done(what: String): String { did += what; return if (dryRun) "Done (test run, nothing was sent): $what" else "Done: $what" }
+        private fun given(args: JSONObject, key: String) = args.has(key) && !args.isNull(key) && args.optString(key).trim().let { it.isNotEmpty() && it != "null" }
+
+        private suspend fun listAlarms(): String = try {
+            val list = actions.watchAlarms()
+            val voice = alerts.filter { it.kind == Alexa.ALERT_ALARM }
+            (if (list.isEmpty()) "No alarms on the watch." else "Alarms on the watch, by slot:\n" + list.joinToString("\n") { it.describe() }) +
+                (if (voice.isEmpty()) "" else "\nOlder voice alarms (cancel with timers_and_reminders, action cancel): " + voice.joinToString { "${it.id}: ${it.describe(t)}" })
+        } catch (e: Exception) { "Error: couldn't read the watch's alarms: ${e.message}" }
+
+        /**
+         * A new alarm (time or in_seconds, and days), a change to one (slot and what changes) or a switch (slot and on).
+         * "in N minutes" becomes a one-off alarm at that minute.
+         */
+        private suspend fun setAlarm(args: JSONObject): String {
+            val slot = if (given(args, "slot")) args.optInt("slot", -1).takeIf { it in 0..15 } ?: return "Error: slot is 0 to 15, from action list" else null
+            val on = if (given(args, "on")) args.optBoolean("on", true) else true
+            val daysGiven = args.optJSONArray("days")?.let { a -> (0 until a.length()).map { a.optString(it) } }
+            val days = daysGiven?.let { WatchAlarm.parseDays(it) ?: return "Error: days are day names, weekdays, weekends, daily or once" }
+            val soon = args.optInt("in_seconds", 0).takeIf { it > 0 }
+            if (!given(args, "time") && soon == null && daysGiven == null) {
+                slot ?: return "Error: give a time (or in_seconds) for a new alarm, or a slot to switch on or off"
+                if (!dryRun) try { actions.switchWatchAlarm(slot, on) } catch (e: Exception) { return "Error: ${e.message}" }
+                return done("switched alarm $slot ${if (on) "on" else "off"}")
+            }
+            val existing = if (slot != null && soon == null && (!given(args, "time") || daysGiven == null)) runCatching { actions.watchAlarms() }.getOrNull()?.firstOrNull { it.slot == slot } else null
+            val at: LocalTime = when {
+                soon != null -> whenOf(args, roundToMinute = true)!!.toLocalTime()
+                given(args, "time") -> runCatching { LocalTime.parse(args.optString("time").trim().padStart(5, '0')) }.getOrNull() ?: return "Error: time is HH:MM, 24-hour"
+                else -> existing?.hour?.let { LocalTime.of(it, existing.minute ?: 0) } ?: return "Error: give the time; alarm $slot's time isn't known"
+            }
+            val repeat = if (soon != null) emptySet() else days ?: existing?.days ?: emptySet()
+            val used = if (dryRun) slot ?: 0 else try { actions.setWatchAlarm(slot, at.hour, at.minute, repeat, on) } catch (e: Exception) { return "Error: ${e.message}" }
+            val ring = if (repeat.isEmpty()) " (rings ${clock(next(t, at))})" else ""
+            return done("alarm $used set for %02d:%02d, %s, %s".format(at.hour, at.minute, WatchAlarm.repeatWords(repeat), if (on) "on" else "off") + ring +
+                if (slot != null && slot >= 10 && used != slot) " (it replaces alarm $slot, made on the watch)" else "")
+        }
+
+        private suspend fun deleteAlarms(args: JSONObject): String {
+            val slots = args.optJSONArray("slots")?.let { a -> (0 until a.length()).map { a.optInt(it, -1) } }.orEmpty()
+                .plus(if (given(args, "slot")) listOf(args.optInt("slot", -1)) else emptyList()).filter { it in 0..15 }.distinct()
+            if (slots.isEmpty()) return "Error: give the slots to delete, from action list"
+            val failed = ArrayList<String>()
+            if (!dryRun) for (s in slots) try { actions.deleteWatchAlarm(s) } catch (e: Exception) { failed += "alarm $s: ${e.message}" }
+            if (failed.size == slots.size) return "Error: " + failed.joinToString("; ")
+            return done("deleted " + slots.filter { s -> failed.none { it.startsWith("alarm $s:") } }.joinToString(" and ") { "alarm $it" }) +
+                if (failed.isEmpty()) "" else "; failed: " + failed.joinToString("; ")
+        }
+
+        private suspend fun timer(args: JSONObject): String {
+            val s = args.optInt("seconds", 0).takeIf { it in 1..86_399 } ?: return "Error: a timer needs seconds, 1 to 86399"
+            val token = addAlert(Alexa.ALERT_TIMER, t.toEpochSecond() + s)
+            frames += Alexa.timer(token, s / 3600, s / 60 % 60, s % 60)
+            return done("timer for ${spoken(s)}, ringing at ${clock(t.toLocalDateTime().plusSeconds(s.toLong()))}")
+        }
+
+        private suspend fun reminder(args: JSONObject): String {
+            val label = args.optString("label").trim().takeIf { it.isNotEmpty() && it != "null" } ?: return "Error: a reminder needs a label"
+            val at = whenOf(args, roundToMinute = true) ?: return "Error: give time as HH:MM or in_seconds"
+            // A watch reminder (the calendar slots, which show their title), written by the agenda sync.
+            addAlert(Alexa.ALERT_REMINDER, at.atZone(t.zone).toEpochSecond(), label)
+            return done("reminder \"${reminderTitle(label)}\" at ${clock(at)} (the watch shows the first ${dev.heartline.protocol.REMINDER_TITLE_LENGTH} characters)")
+        }
+
+        private suspend fun cancel(args: JSONObject): String {
+            val ids = args.optJSONArray("ids")?.let { a -> (0 until a.length()).map { a.optInt(it, -1) } }.orEmpty()
+            val gone = alerts.filter { it.id in ids }
+            if (gone.isEmpty()) return "Error: none of those ids are set; the list is ${if (alerts.isEmpty()) "empty" else alerts.joinToString { "${it.id}: ${it.describe(t)}" }}"
+            alerts = alerts - gone.toSet()
+            if (!dryRun) saveAlerts(alerts)
+            gone.filter { it.kind != Alexa.ALERT_REMINDER }.forEach { frames += Alexa.deleteAlert(it.kind, it.token) }
+            return done("cancelled " + gone.joinToString(" and ") { it.describe(t) })
+        }
+
+        private fun table(args: JSONObject): String {
+            val given = args.optJSONArray("rows") ?: return "Error: a table needs rows, each with left and right"
+            val rows = fitLeft((0 until given.length()).mapNotNull { given.optJSONObject(it) }
+                .map { watchText(it.optString("left")) to watchText(it.optString("right")) }
+                .filter { (l, r) -> l.isNotEmpty() || r.isNotEmpty() }).map { (l, r) -> l to r.take(LIST_RIGHT) }
+            if (rows.isEmpty()) return "Error: give at least one row with left or right text"
+            val title = watchText(args.optString("title")).take(LIST_TITLE)
+            val subtitle = watchText(args.optString("subtitle")).take(LIST_TITLE)
+            // Keep the card within what a reply carries; rows that don't fit are left out and the model is told.
+            var shown = rows.take(LIST_ROWS)
+            while (shown.size > 1 && Alexa.list(title, subtitle, shown).size > LIST_BYTES) shown = shown.dropLast(1)
+            frames += Alexa.list(title, subtitle, shown); card = true
+            return done("showed a list of ${shown.size} rows" + if (shown.size < rows.size) " (the last ${rows.size - shown.size} didn't fit)" else "")
+        }
+
+        private suspend fun notifications(args: JSONObject): String {
+            val body = watchText(args.optString("text")).takeIf { it.isNotEmpty() } ?: return "Error: notifications need text"
+            val title = watchText(args.optString("title")).ifEmpty { "Heartline" }.take(24)
+            val parts = notificationChunks(body)
+            val n = if (dryRun) parts.size else try { actions.sendToWatch(title, parts) } catch (e: Exception) { return "Error: ${e.message}" }
+            return done("sending it to the watch as $n notification${if (n == 1) "" else "s"}" + if (n < parts.size) " (the last ${parts.size - n} are over the limit)" else "")
+        }
+
+        private suspend fun phone(action: String, args: JSONObject): String {
+            val percent = if (given(args, "percent")) args.optInt("percent").coerceIn(0, 100) else null
+            val state = when (action) {
+                in MEDIA_ACTIONS -> {
+                    if (action == "set_volume" && percent == null) return "Error: set_volume needs percent"
+                    if (dryRun) "" else try { actions.media(action, percent) } catch (e: Exception) { return "Error: ${e.message}" }
+                }
+                "ringer_normal", "ringer_vibrate", "ringer_silent", "ring_volume" -> {
+                    if (action == "ring_volume" && percent == null) return "Error: ring_volume needs percent"
+                    if (dryRun) "" else try { actions.ringer(action.removePrefix("ringer_").takeIf { action != "ring_volume" }, percent) } catch (e: Exception) { return "Error: ${e.message}" }
+                }
+                else -> return "Error: action for phone is one of ${CHOICES.getValue("phone").joinToString()}"
+            }
+            return done(action.replace('_', ' ') + (percent?.let { " $it%" } ?: "")) + if (state.isNotEmpty()) ". Now: $state" else ""
         }
     }
 
@@ -295,8 +447,9 @@ class WatchAssistant(
     companion object {
         const val ALERTS = "alexa_alerts"
 
-        val HELP = listOf("How did I sleep", "Analyse my heart rate today", "How's my stress today", "What's my readiness", "Start a gym workout",
-            "Timer for 5 minutes", "Alarm at 7 am", "Remind me at 6 pm to call home", "Cancel my alarm", "What's the weather", "Ask me anything")
+        val HELP = listOf("How did I sleep", "How's my HRV", "What's my readiness", "Start a heart check", "Start a gym workout",
+            "Timer for 5 minutes", "Alarm at 7 am on weekdays", "List my alarms", "Remind me at 6 pm to call home", "Pause the music",
+            "Put my phone on vibrate", "Note: buy milk", "Send me a pasta recipe", "What's the weather", "Ask me anything")
 
         private fun obj(vararg props: Pair<String, JSONObject>, required: List<String> = emptyList()) =
             JSONObject().put("type", "object").put("properties", JSONObject().apply { props.forEach { (k, v) -> put(k, v) } }).put("required", JSONArray(required))
@@ -336,37 +489,77 @@ class WatchAssistant(
             "no tool, so nothing happened on the watch. If they asked for an action, call its tool now and then reply; if " +
             "they didn't, just give your answer again.)"
 
-        /** The actions the brain can take on the watch and in Heartline. */
-        val ACTION_TOOLS = listOf(
-            Tool("set_timer", "Start a countdown timer on the watch.", obj("seconds" to prop("integer", "Length in seconds"), required = listOf("seconds"))),
-            Tool("set_alarm", "Set an alarm on the watch, at a time of day or in some time from now.", obj(*WHEN)),
-            Tool("set_reminder", "Set a reminder on the watch; it shows the label at that time.",
-                obj("label" to prop("string", "What to remind them about, short (the watch shows 16 characters)"), *WHEN, required = listOf("label"))),
-            Tool("cancel_alerts", "Cancel alarms, timers or reminders set by voice, by their ids from the list in the instructions.",
-                obj("ids" to JSONObject().put("type", "array").put("items", JSONObject().put("type", "integer")), required = listOf("ids"))),
-            Tool("get_weather", "The weather where the phone is: now, today and the next three days.", obj()),
-            Tool("show_weather_card", "Show the weather card on the watch (now, today and the next three days). Use it whenever they ask about the weather in general.", obj()),
-            Tool("show_help", "Show the list of things they can ask; use it when they ask what you can do.", obj()),
-            Tool("show_list", "Show a table on the watch: rows of a short left column and a wrapping right column, under an optional " +
-                "title and subtitle; it scrolls. Use it for anything in rows: a schedule, a forecast by day, rankings or scores, a " +
-                "comparison, steps of a recipe, a top-10 list; prefer it to a numbered list in the text whenever the items have a " +
-                "value beside them. The left column fits only about 9 characters, so put a rank, day, " +
-                "time, number or very short label there and names in the right column, which wraps and can hold a sentence " +
-                "(for a ranking: left \"3.\", right \"Kangchenjunga, 8,586 m\"). The card replaces the text " +
-                "reply on the watch, so put everything that matters in it.",
-                obj("title" to prop("string", "Short heading at the top; optional"),
-                    "subtitle" to prop("string", "Second line under the title; optional"),
-                    "rows" to JSONObject().put("type", "array").put("description", "Up to $LIST_ROWS rows, in order").put("items",
-                        obj("left" to prop("string", "Left column, 9 characters at most: a rank, day, time or number"), "right" to prop("string", "Right column"))),
-                    required = listOf("rows"))),
-            Tool("start_workout", "Start Heartline's workout capture, which records sets, reps and heart rate from the watch's sensors.",
-                obj("label" to prop("string", "The workout they named, such as Gym or Run"), "minutes" to prop("integer", "How long to capture; 60 if they don't say"), required = listOf("label"))),
-            Tool("stop_workout", "Stop the running workout capture.", obj()),
-            Tool("sync_watch", "Fetch the latest data from the watch now.", obj()),
+        /** get_info topics the assistant answers itself; the rest come from Heartline's data ([HealthTools]). */
+        val OWN_TOPICS = listOf("weather" to "the weather where the phone is: now, today and the next three days",
+            "phone" to "the phone's ringer mode, ring and media volume, what's playing and its battery")
+
+        val MEDIA_ACTIONS = listOf("play", "pause", "play_pause", "next", "previous", "stop", "volume_up", "volume_down", "set_volume", "mute", "unmute")
+
+        /** Each grouped tool's actions (get_info: the topics it answers itself). */
+        val CHOICES: Map<String, List<String>> = mapOf(
+            "get_info" to OWN_TOPICS.map { it.first },
+            "alarms" to listOf("list", "set", "delete"),
+            "timers_and_reminders" to listOf("timer", "reminder", "cancel"),
+            "show_on_watch" to listOf("table", "weather", "things_to_ask", "notifications"),
+            "recording" to listOf("heart_check", "start_workout", "stop_workout"),
+            "phone" to MEDIA_ACTIONS + listOf("ringer_normal", "ringer_vibrate", "ringer_silent", "ring_volume"),
+            "app" to listOf("sync_watch", "add_note"),
         )
 
-        /** The tools that do something (all actions but get_weather). */
-        val ACTION_NAMES: Set<String> = ACTION_TOOLS.map { it.name }.toSet() - "get_weather"
+        private fun action(tool: String, description: String) =
+            "action" to JSONObject().put("type", "string").put("enum", JSONArray(CHOICES.getValue(tool))).put("description", description)
+        private fun intList(description: String) = JSONObject().put("type", "array").put("items", JSONObject().put("type", "integer")).put("description", description)
+
+        /**
+         * The actions the brain can take, grouped by what they act on: a few tools, each with an action, keep the
+         * choice simple for the model (about 30 single-purpose tools was too many to pick from reliably).
+         */
+        val ACTION_TOOLS = listOf(
+            Tool("alarms", "The watch's alarms. list: every alarm by slot with time, repeat days and on or off (alarms made on the watch show " +
+                "without a time, the watch doesn't share it). set: a new alarm (time, or in_seconds for \"in N minutes\", and days to repeat; " +
+                "no slot), a change to one (slot and what changes), or switching one on or off (slot and on only). delete: by slots. " +
+                "List first when they refer to an existing alarm.",
+                obj(action("alarms", "list, set or delete"),
+                    "time" to prop("string", "set: time of day as HH:MM, 24-hour"),
+                    "in_seconds" to prop("integer", "set: or how many seconds from now, for a one-off alarm"),
+                    "days" to JSONObject().put("type", "array").put("items", JSONObject().put("type", "string"))
+                        .put("description", "set: repeat days: day names (mon, tue...), weekdays, weekends or daily; leave out or [\"once\"] for no repeat"),
+                    "on" to prop("boolean", "set: switched on (true if left out) or off"),
+                    "slot" to prop("integer", "set: the alarm to change or switch, from list"),
+                    "slots" to intList("delete: the alarms to delete, from list"), required = listOf("action"))),
+            Tool("timers_and_reminders", "timer: a countdown on the watch (seconds). reminder: the watch shows label at a time (time or " +
+                "in_seconds). cancel: timers, reminders or older voice alarms by their ids from the list in the instructions.",
+                obj(action("timers_and_reminders", "timer, reminder or cancel"),
+                    "seconds" to prop("integer", "timer: length in seconds"),
+                    "label" to prop("string", "reminder: what to remind them about, short (the watch shows 16 characters)"),
+                    *WHEN, "ids" to intList("cancel: ids to cancel"), required = listOf("action"))),
+            Tool("show_on_watch", "Show something on the watch. table: rows of a short left column (about 9 characters: a rank, day, time or " +
+                "number) and a wrapping right column, under an optional title and subtitle; use it for anything in rows (a ranking, a " +
+                "schedule, a forecast by day, prices, steps with timings) even if they say list; it replaces the text reply, so put " +
+                "everything in it. weather: the weather card, whenever they ask about the weather in general. things_to_ask: what " +
+                "they can ask, when they ask what you can do. notifications: long text (a story, recipe, explanation or summary) sent " +
+                "as watch notifications to read later, split as needed; put the whole text in it and reply in a few words.",
+                obj(action("show_on_watch", "table, weather, things_to_ask or notifications"),
+                    "title" to prop("string", "table or notifications: short heading; optional"),
+                    "subtitle" to prop("string", "table: second line under the title; optional"),
+                    "rows" to JSONObject().put("type", "array").put("description", "table: up to $LIST_ROWS rows, in order").put("items",
+                        obj("left" to prop("string", "Left column, 9 characters at most: a rank, day, time or number"), "right" to prop("string", "Right column"))),
+                    "text" to prop("string", "notifications: the full text; plain text, new lines allowed"), required = listOf("action"))),
+            Tool("recording", "heart_check: the watch records the pulse for some minutes while they sit still; heart rate, HRV and rhythm " +
+                "come as a watch notification when done. start_workout: Heartline's workout capture (sets, reps and heart rate from the " +
+                "watch's sensors). stop_workout: stop the capture.",
+                obj(action("recording", "heart_check, start_workout or stop_workout"),
+                    "minutes" to prop("integer", "heart_check: 1 to 5, 2 if they don't say; start_workout: how long to capture, 60 if they don't say"),
+                    "label" to prop("string", "start_workout: the workout they named, such as Gym or Run"), required = listOf("action"))),
+            Tool("phone", "Control the phone: media playing on it (play, pause, play_pause, next, previous, stop, volume_up, volume_down, " +
+                "set_volume, mute, unmute) and its ringer (ringer_normal, ringer_vibrate, ringer_silent, ring_volume). Returns the state after.",
+                obj(action("phone", "what to do"), "percent" to prop("integer", "set_volume or ring_volume: 0 to 100"), required = listOf("action"))),
+            Tool("app", "Heartline itself. sync_watch: fetch the latest data from the watch now. add_note: add a line to their quick notes.",
+                obj(action("app", "sync_watch or add_note"), "text" to prop("string", "add_note: the note, as they said it"), required = listOf("action"))),
+        )
+
+        /** The tools that do something (all but the lookups). */
+        val ACTION_NAMES: Set<String> = ACTION_TOOLS.map { it.name }.toSet()
 
         fun parseAlerts(json: String?): List<AlexaAlert> = runCatching {
             val a = JSONArray(json ?: "[]")

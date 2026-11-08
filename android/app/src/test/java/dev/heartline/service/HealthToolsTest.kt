@@ -15,18 +15,21 @@ class HealthToolsTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         try {
             val tools = HealthTools(DemoController(scope))
-            tools.tools.forEach { t ->
-                assertEquals("object", t.parameters.getString("type"))
-                val out = tools.run(t.name, JSONObject())!!
-                println("== ${t.name}\n$out")
-                assertTrue(t.name, out.isNotBlank())
-                assertFalse("${t.name}: $out", out.startsWith("Error"))
+            assertEquals(listOf("get_info"), tools.tools.map { it.name })
+            assertEquals("object", tools.tools.single().parameters.getString("type"))
+            suspend fun info(topic: String, date: String? = null) = tools.run("get_info", JSONObject().put("topic", topic).apply { date?.let { put("date", it) } })
+            tools.topics.forEach { (topic, _) ->
+                val out = info(topic)!!
+                println("== $topic\n$out")
+                assertTrue(topic, out.isNotBlank())
+                assertFalse("$topic: $out", out.startsWith("Error"))
             }
-            assertTrue(tools.run("get_heart_rate", JSONObject())!!.contains("By hour"))
-            assertTrue(tools.run("get_sleep", JSONObject().put("date", "today"))!!.contains("asleep"))
-            assertNull(tools.run("set_timer", JSONObject()))
-            assertEquals("Error: date must be YYYY-MM-DD, today or yesterday", tools.run("get_stress", JSONObject().put("date", "last week")))
-            assertTrue(tools.run("get_stress", JSONObject().put("date", "2999-01-01"))!!.startsWith("Error: 2999-01-01 is in the future"))
+            assertTrue(info("heart_rate")!!.contains("By hour"))
+            assertTrue(info("sleep", "today")!!.contains("asleep"))
+            assertNull(info("weather")) // answered by the assistant itself
+            assertNull(tools.run("alarms", JSONObject()))
+            assertEquals("Error: date must be YYYY-MM-DD, today or yesterday", info("stress", "last week"))
+            assertTrue(info("stress", "2999-01-01")!!.startsWith("Error: 2999-01-01 is in the future"))
         } finally { scope.cancel() }
     }
 }

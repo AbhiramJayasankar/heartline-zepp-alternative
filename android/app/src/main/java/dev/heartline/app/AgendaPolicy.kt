@@ -21,6 +21,32 @@ internal fun alarmSlots(alarms: List<AlarmUi>): List<ByteArray> {
     }
 }
 
+private fun hexOf(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it.toInt() and 255) }
+
+/**
+ * Heartline's [stored] alarms after reading the watch's [switches]: an alarm switched on or off, or deleted, on the watch
+ * since Heartline last wrote it ([written], slot to hex) follows the watch, so the next sync doesn't undo it. An alarm
+ * changed in the app and not written yet keeps the app's version. Returns the new list and the writes to record.
+ */
+internal fun followWatchAlarms(stored: List<AlarmUi>, written: Map<Int, String>, switches: List<WatchAlarmSwitch>): Pair<List<AlarmUi>, Map<Int, ByteArray>> {
+    val onWatch = switches.associateBy { it.slot }
+    val record = LinkedHashMap<Int, ByteArray>()
+    val next = stored.mapNotNull { a ->
+        if (written[a.slot] != hexOf(alarmCommand(a.slot, a.enabled, a.hour, a.minute, a.days))) return@mapNotNull a
+        val s = onWatch[a.slot]
+        when {
+            s == null -> { record[a.slot] = alarmCommand(a.slot, unused = true); null }
+            s.on != a.enabled -> a.copy(enabled = s.on).also { record[a.slot] = alarmCommand(a.slot, it.enabled, it.hour, it.minute, it.days) }
+            else -> a
+        }
+    }
+    return next to record
+}
+
+/** The first of Heartline's slots that neither Heartline nor the watch is using, or null when all are taken. */
+internal fun freeAlarmSlot(stored: List<AlarmUi>, switches: List<WatchAlarmSwitch>): Int? =
+    (0 until ALARM_SLOTS).firstOrNull { slot -> stored.none { it.slot == slot } && switches.none { it.slot == slot } }
+
 internal fun upcomingReminders(
     instances: List<CalendarInstance>, selected: Set<Long>, now: Instant, zone: ZoneId,
 ): List<CalendarReminder> {

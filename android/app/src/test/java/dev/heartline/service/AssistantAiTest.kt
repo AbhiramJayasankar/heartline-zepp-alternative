@@ -45,7 +45,7 @@ class AssistantAiTest {
         val messages = json.getJSONArray("messages")
         assertEquals(4, messages.length()) // system, one past turn, the question
         val system = messages.getJSONObject(0).getString("content")
-        listOf("Asia/Kolkata", "15:40", "id 3: alarm at", "- Readiness: 62 out of 100", "call the get_ tools").forEach { assertTrue(it, system.contains(it)) }
+        listOf("Asia/Kolkata", "15:40", "id 3: alarm at", "- Readiness: 62 out of 100", "call get_info with the topic").forEach { assertTrue(it, system.contains(it)) }
     }
 
     @Test fun toolCallsRunAndTheirResultsGoBack() = runBlocking {

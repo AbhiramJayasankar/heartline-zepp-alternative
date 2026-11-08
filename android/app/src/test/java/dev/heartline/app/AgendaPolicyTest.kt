@@ -86,4 +86,30 @@ class AgendaPolicyTest {
         assertEquals(listOf(2), slots.changed(alarmSlots(emptyList())))
         assertEquals(10, slots.changed(edited, force = true).size)
     }
+
+    private fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it.toInt() and 255) }
+
+    @Test fun alarmsSwitchedOrDeletedOnTheWatchFollowTheWatch() {
+        val weekday = AlarmUi(0, true, 7, 0, setOf(DayOfWeek.MONDAY))
+        val gym = AlarmUi(1, true, 6, 0, emptySet())
+        val written = mapOf(0 to hex(alarmCommand(0, true, 7, 0, setOf(DayOfWeek.MONDAY))), 1 to hex(alarmCommand(1, true, 6, 0)))
+        // Slot 0 switched off on the watch, slot 1 deleted there; slot 10 was made on the watch.
+        val (next, record) = followWatchAlarms(listOf(weekday, gym), written, listOf(WatchAlarmSwitch(0, false), WatchAlarmSwitch(10, true)))
+        assertEquals(listOf(weekday.copy(enabled = false)), next)
+        assertEquals(hex(alarmCommand(0, false, 7, 0, setOf(DayOfWeek.MONDAY))), hex(record.getValue(0)))
+        assertEquals(hex(alarmCommand(1, unused = true)), hex(record.getValue(1)))
+    }
+
+    @Test fun anAppEditNotWrittenYetWins() {
+        val edited = AlarmUi(0, true, 8, 30, emptySet())
+        val written = mapOf(0 to hex(alarmCommand(0, false, 7, 0)))
+        val (next, record) = followWatchAlarms(listOf(edited), written, listOf(WatchAlarmSwitch(0, false)))
+        assertEquals(listOf(edited), next)
+        assertTrue(record.isEmpty())
+    }
+
+    @Test fun aFreeSlotIsUnusedByBoth() {
+        assertEquals(2, freeAlarmSlot(listOf(AlarmUi(0, true, 7, 0, emptySet())), listOf(WatchAlarmSwitch(1, false), WatchAlarmSwitch(10, true))))
+        assertEquals(null, freeAlarmSlot((0 until 10).map { AlarmUi(it, true, 7, 0, emptySet()) }, emptyList()))
+    }
 }

@@ -12,6 +12,7 @@ import dev.heartline.ble.*
 import dev.heartline.data.KeyStore
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlin.math.roundToInt
 
 class WatchService : Service() {
     private val dispatcher = Dispatchers.IO.limitedParallelism(1)
@@ -38,10 +39,39 @@ class WatchService : Service() {
         calls = CallForwarder(this, scope, app.settings, watch)
         agenda = WatchAgendaSync(this, scope, app.db, watch)
         scope.launch(kotlinx.coroutines.Dispatchers.IO) { backfillWatchWorkouts() }
+        val phone = PhoneControl(this)
         val alexaActions = object : AssistantActions {
             override fun startWorkout(label: String, minutes: Int) = captureRunner.start(label, minutes)
             override fun stopWorkout(): String? = captureRunner.run.value?.let { r -> captureRunner.stop(); "${r.label} after ${WatchAssistant.spoken(r.seconds)}" }
             override fun sync() = app.realController.syncNow()
+            override suspend fun watchAlarms() = agenda.watchAlarms()
+            override suspend fun setWatchAlarm(slot: Int?, hour: Int, minute: Int, days: Set<java.time.DayOfWeek>, on: Boolean) = agenda.putAlarm(slot, hour, minute, days, on)
+            override suspend fun switchWatchAlarm(slot: Int, on: Boolean) = agenda.switchAlarm(slot, on)
+            override suspend fun deleteWatchAlarm(slot: Int) = agenda.deleteAlarm(slot)
+            override suspend fun startHeartCheck(seconds: Int) = assistantHeartCheck(seconds)
+            override suspend fun addNote(text: String) {
+                val old = app.db.meta.get("notes").orEmpty().trimEnd()
+                app.db.meta.set("notes", if (old.isEmpty()) text else "$old\n$text")
+            }
+            override suspend fun sendToWatch(title: String, parts: List<String>): Int {
+                val max = AlexaSettings.parse(app.db.meta.get(AlexaSettings.KEY)).maxNotifications.coerceAtLeast(1)
+                val sent = parts.take(max)
+                // After the spoken reply has shown, then a moment apart so they arrive in order.
+                scope.launch {
+                    delay(2_500)
+                    sent.forEachIndexed { i, p ->
+                        try { watch.notify(if (sent.size > 1) "$title ${i + 1}/${sent.size}" else title, p) }
+                        catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { app.db.events.add("warn", "Send to watch: notification ${i + 1} failed: ${e.message}"); return@launch }
+                        delay(1_500)
+                    }
+                    app.db.events.add("info", "Sent \"$title\" to the watch as ${sent.size} notification(s)")
+                }
+                return sent.size
+            }
+            override suspend fun media(action: String, percent: Int?) = phone.media(action, percent)
+            override suspend fun ringer(mode: String?, percent: Int?) = phone.ringer(mode, percent).also { runCatching { phoneFeatures.sendSilentState() } }
+            override suspend fun phoneStatus() = phone.status()
         }
         val workoutNow = { captureRunner.run.value?.let { r -> "${r.label}, ${r.seconds / 60} of ${r.plannedS / 60} minutes" + (r.hr?.let { ", heart rate $it" } ?: "") } }
         AlexaBridge(scope, watch, app.db, java.io.File(filesDir, "alexa"), GeminiSpeech(),
@@ -64,6 +94,12 @@ class WatchService : Service() {
             watch.ready.collectLatest { connected ->
                 if (connected) coroutineScope {
                     launch { phoneFeatures.sendSilentState() }
+                    // An alarm switched or changed on the watch: let Heartline's list follow it, so the next sync keeps it.
+                    launch {
+                        watch.deviceEvents.collect { data ->
+                            if (dev.heartline.protocol.deviceEventName(data) in setOf("alarm_toggled", "alarm_changed")) agenda.watchAlarmsChanged()
+                        }
+                    }
                     launch { followWatchWorkouts() }
                     // A workout opened on the watch starts a capture when the owner has turned that on.
                     launch {
@@ -88,6 +124,33 @@ class WatchService : Service() {
         }
         scope.launch { app.settings.notificationForwarding.collect { calls.refresh() } }
     }
+    /**
+     * A heart check started by the watch assistant: fails at once when one can't start, and sends the result to the
+     * watch as a notification when it's done.
+     */
+    private suspend fun assistantHeartCheck(seconds: Int) {
+        val c = app.realController
+        c.checkRun.value?.let { if (it.result == null && it.error == null) error("a heart check is already running") }
+        check(!captureRunner.active) { "a workout capture is running; stop it first" }
+        check(OvernightHrv.running.value == null) { "an automatic HRV check is recording right now; try again in a few minutes" }
+        c.startCheck(seconds)
+        delay(1_500)
+        val run = c.checkRun.value ?: error("the heart check didn't start")
+        run.error?.let { error(it) }
+        scope.launch {
+            val done = withTimeoutOrNull((seconds + 240) * 1000L) { c.checkRun.first { it == null || it.result != null || it.error != null } } ?: return@launch
+            val r = done.result
+            val text = when {
+                done.error != null -> "The heart check failed: ${done.error}"
+                r == null -> return@launch
+                else -> listOfNotNull(r.hr?.let { "Heart rate ${it.roundToInt()} bpm" }, r.rmssd?.let { "HRV (RMSSD) ${it.roundToInt()} ms" } ?: "HRV not measured",
+                    "Rhythm ${r.rhythm.name.lowercase().replace('_', ' ')}", r.respiratoryRate?.let { "Breathing ${it.roundToInt()}/min" },
+                    "Signal ${(r.signalQuality * 100).roundToInt()}%").joinToString("\n")
+            }
+            runCatching { watch.notify("Heart check", text) }
+        }
+    }
+
     /** The profile as the watch's user info, once age, height and weight are set; the birthday is 1 January of the birth year. */
     /** Once: workout starts and ends from saved event logs (version 2 replaces rows stored 5:30 h late, read as UTC). */
     private suspend fun backfillWatchWorkouts() {

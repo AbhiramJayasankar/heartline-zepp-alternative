@@ -68,7 +68,7 @@ fun watchAssistant(context: android.content.Context, db: HeartlineDatabase, sett
     data = object : DataTools {
         val health = HealthTools(controller)
         val web = WebSearch({ WebSearchConfig.parse(db.meta.get(WebSearchConfig.KEY)) }, { AlexaSettings.parse(db.meta.get(AlexaSettings.KEY)).webResults })
-        override val tools = health.tools + web.tools
+        override val tools = listOf(health.tool(WatchAssistant.OWN_TOPICS)) + web.tools
         override suspend fun run(name: String, args: org.json.JSONObject) = health.run(name, args) ?: web.run(name, args)
     },
     settings = { AlexaSettings.parse(db.meta.get(AlexaSettings.KEY)) },

@@ -540,6 +540,9 @@ class WatchConnection(
             }
         }
     }
+    /** The alarms the watch holds now, including ones made on the watch ([parseAlarmSwitches]). */
+    suspend fun readAlarmSwitches(): List<WatchAlarmSwitch> =
+        parseAlarmSwitches(queryConfig(ALARM_QUERY)) ?: error("The watch didn't list its alarms")
     /** A chunked type-2 message without a reply, e.g. the app list or a vibration pattern ([what] is for the log). */
     suspend fun writeChunkedType2(payload: ByteArray, what: String) = actions.withLock {
         val c = requireClient()

@@ -11,6 +11,8 @@ import dev.heartline.protocol.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.Instant
 import java.time.ZoneId
 
@@ -39,7 +41,7 @@ internal class WatchAgendaSync(
             runAgendaSchedule(watch.ready.onEach { if (!it) stopObserving() }, changes) { forceAlarms ->
                 var alarmsOk = true
                 var remindersOk = true
-                try { syncAlarms(db.meta.readSlots(ALARMS_WRITTEN_KEY), forceAlarms) }
+                try { syncAlarms(forceAlarms) }
                 catch (e: Exception) {
                     currentCoroutineContext().ensureActive() // Local ACK timeouts are failures; service cancellation still propagates.
                     alarmsOk = false; db.events.add("warn", "Alarm sync failed: ${e.message}")
@@ -53,11 +55,91 @@ internal class WatchAgendaSync(
             }
         } finally { stopObserving() }
     }
-    private suspend fun syncAlarms(slots: AgendaSlots, force: Boolean) {
+    private suspend fun syncAlarms(force: Boolean) = alarmLock.withLock {
+        // On connecting, first take in what was switched or deleted on the watch meanwhile, so it isn't undone.
+        if (force) try { followWatch() } catch (e: Exception) {
+            currentCoroutineContext().ensureActive(); db.events.add("warn", "Couldn't read the watch's alarms: ${e.message}")
+        }
+        val written = db.meta.readSlots(ALARMS_WRITTEN_KEY)
         val desired = alarmSlots(readAlarms(db.meta.get(ALARMS_KEY)))
-        for (slot in slots.changed(desired, force)) {
+        for (slot in written.changed(desired, force)) {
             service.command { it.writeAlarm(desired[slot]) }
-            slots.written(slot, desired[slot]); db.meta.saveSlots(ALARMS_WRITTEN_KEY, slots)
+            written.written(slot, desired[slot]); db.meta.saveSlots(ALARMS_WRITTEN_KEY, written)
+        }
+    }
+
+    /** Alarm reads and writes, one at a time (the sync, the assistant's alarm tools, the watch's alarm events). */
+    private val alarmLock = Mutex()
+
+    /** Reads the watch's alarms and lets Heartline's list follow switches flipped and alarms deleted on the watch. */
+    private suspend fun followWatch(): Pair<List<WatchAlarmSwitch>, List<AlarmUi>> {
+        val switches = service.command { it.readAlarmSwitches() }
+        val slots = db.meta.readSlots(ALARMS_WRITTEN_KEY)
+        val stored = readAlarms(db.meta.get(ALARMS_KEY))
+        val (next, record) = followWatchAlarms(stored, slots.snapshot(), switches)
+        if (record.isNotEmpty()) {
+            record.forEach { (slot, bytes) -> slots.written(slot, bytes) }
+            db.meta.saveSlots(ALARMS_WRITTEN_KEY, slots)
+            db.meta.set(ALARMS_KEY, alarmsJson(next))
+            db.events.add("info", "Alarms changed on the watch: " + record.keys.joinToString { s ->
+                next.firstOrNull { it.slot == s }?.let { "slot $s switched ${if (it.enabled) "on" else "off"}" } ?: "slot $s deleted" })
+        }
+        return switches to next
+    }
+
+    /** The watch said an alarm was switched or changed on it. */
+    fun watchAlarmsChanged() {
+        scope.launch {
+            try { alarmLock.withLock { followWatch() } } catch (e: Exception) {
+                currentCoroutineContext().ensureActive(); db.events.add("warn", "Couldn't read the watch's alarms: ${e.message}")
+            }
+        }
+    }
+
+    /** Every alarm on the watch now: Heartline's with their times, and the ones made on the watch (time unknown). */
+    suspend fun watchAlarms(): List<WatchAlarm> = alarmLock.withLock {
+        val (switches, stored) = followWatch()
+        val mine = stored.map { a -> WatchAlarm(a.slot, switches.firstOrNull { it.slot == a.slot }?.on ?: a.enabled, a.hour, a.minute, a.days, false) }
+        (mine + switches.filter { s -> stored.none { it.slot == s.slot } }.map { WatchAlarm(it.slot, it.on, null, null, emptySet(), true) }).sortedBy { it.slot }
+    }
+
+    /**
+     * Sets an alarm on the watch and waits for the watch to take it. [slot] null picks a free one; a slot made on the watch
+     * (10 and up) is cleared and the alarm goes in a free slot of Heartline's. Returns the slot used.
+     */
+    suspend fun putAlarm(slot: Int?, hour: Int, minute: Int, days: Set<java.time.DayOfWeek>, on: Boolean): Int = alarmLock.withLock {
+        val (switches, stored) = followWatch()
+        val target = slot?.takeIf { it < ALARM_SLOTS }
+            ?: freeAlarmSlot(stored, switches.filter { it.slot != slot })
+            ?: error("all $ALARM_SLOTS of Heartline's alarm slots are in use; delete one first")
+        val cmd = alarmCommand(target, on, hour, minute, days)
+        service.command { it.writeAlarm(cmd) }
+        val slots = db.meta.readSlots(ALARMS_WRITTEN_KEY)
+        slots.written(target, cmd)
+        if (slot != null && slot >= ALARM_SLOTS) service.command { it.writeAlarm(alarmCommand(slot, unused = true)) }
+        db.meta.saveSlots(ALARMS_WRITTEN_KEY, slots)
+        db.meta.set(ALARMS_KEY, alarmsJson(stored.filter { it.slot != target } + AlarmUi(target, on, hour, minute, days)))
+        target
+    }
+
+    /** Switches alarm [slot] on or off; only Heartline's alarms, since the watch doesn't share the time of its own. */
+    suspend fun switchAlarm(slot: Int, on: Boolean) {
+        val a = alarmLock.withLock { followWatch() }.second.firstOrNull { it.slot == slot }
+            ?: error("alarm $slot was made on the watch, which doesn't share its time, so it can only be deleted or given a new time")
+        putAlarm(slot, a.hour, a.minute, a.days, on)
+    }
+
+    /** Deletes alarm [slot] from the watch, Heartline's or one made on the watch. */
+    suspend fun deleteAlarm(slot: Int) = alarmLock.withLock {
+        require(slot in 0..WATCH_ALARM_SLOT_MAX) { "slots are 0 to $WATCH_ALARM_SLOT_MAX" }
+        val (switches, stored) = followWatch()
+        if (switches.none { it.slot == slot } && stored.none { it.slot == slot }) error("there is no alarm $slot on the watch")
+        val cmd = alarmCommand(slot, unused = true)
+        service.command { it.writeAlarm(cmd) }
+        if (slot < ALARM_SLOTS) {
+            val slots = db.meta.readSlots(ALARMS_WRITTEN_KEY)
+            slots.written(slot, cmd); db.meta.saveSlots(ALARMS_WRITTEN_KEY, slots)
+            db.meta.set(ALARMS_KEY, alarmsJson(stored.filter { it.slot != slot }))
         }
     }
     private suspend fun syncReminders(slots: AgendaSlots) {

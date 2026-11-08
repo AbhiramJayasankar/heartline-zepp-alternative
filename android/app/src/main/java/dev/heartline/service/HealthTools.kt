@@ -27,38 +27,67 @@ class HealthTools(
         JSONObject().put("type", "object").put("properties", JSONObject().apply { props.forEach { (k, v) -> put(k, v) } }).put("required", JSONArray())
     private val date = "date" to JSONObject().put("type", "string").put("description", "YYYY-MM-DD, or today or yesterday; today if left out")
 
-    val tools = listOf(
-        Tool("get_heart_rate", "Heart rate for a day: resting, lowest, average, highest, time in zones and hour by hour. Use it to describe or analyse heart rate.", obj(date)),
-        Tool("get_stress", "Stress for a day (0 to 100): average, highest, time in each band and hour by hour. Use it for questions about stress.", obj(date)),
-        Tool("get_sleep", "The night's sleep that ended on the morning of a date: bed and wake time, stages, awakenings and a stage timeline.", obj(date)),
-        Tool("get_activity", "Steps, distance, calories, active minutes, PAI, steps by hour and the watch's workouts for a day.", obj(date)),
-        Tool("get_spo2_and_temperature", "Blood oxygen (SpO2) readings and skin temperature for a day.", obj(date)),
-        Tool("get_readiness", "Today's readiness score, what drove it, strain, sleep score, body battery, resting heart rate and Heartline's suggestion.", obj()),
-        Tool("get_trends", "Daily values over recent days (readiness, resting heart rate, HRV, sleep, steps, strain, active time) with the usual level, plus VO2max and training load.",
-            obj("days" to JSONObject().put("type", "integer").put("description", "How many days, 7 to 28; 14 if left out"))),
-        Tool("get_workout_captures", "The newest workout captures recorded with Heartline (gym sessions with sets and reps).",
-            obj("limit" to JSONObject().put("type", "integer").put("description", "How many, 1 to 10; 5 if left out"))),
-    )
+    /** The get_info topics Heartline's data answers, with what each gives. */
+    val topics: List<Pair<String, String>> = TOPICS
 
-    /** Runs tool [name]; null if it isn't one of [tools]. Bad arguments come back as an error line. */
+    /**
+     * One lookup tool for everything the brain can read (fewer tools keep the model's choice simple): [topics] plus
+     * [extraTopics] that the assistant answers itself (weather, the phone).
+     */
+    fun tool(extraTopics: List<Pair<String, String>> = emptyList()): Tool {
+        val all = topics + extraTopics
+        return Tool("get_info", "Look something up. Topics: " + all.joinToString("; ") { (t, d) -> "$t: $d" } +
+            ". Call it several times for several topics.",
+            JSONObject().put("type", "object").put("properties", JSONObject()
+                .put("topic", JSONObject().put("type", "string").put("enum", JSONArray(all.map { it.first })))
+                .put("date", JSONObject().put("type", "string").put("description", "For a day's topics: YYYY-MM-DD, today or yesterday; today if left out"))
+                .put("days", JSONObject().put("type", "integer").put("description", "For trends: 7 to 28; 14 if left out"))
+                .put("limit", JSONObject().put("type", "integer").put("description", "For workouts: 1 to 10; 5 if left out")))
+                .put("required", JSONArray(listOf("topic"))))
+    }
+
+    val tools = listOf(tool())
+
+    /** Answers get_info for one of [topics]; null for any other tool or topic. Bad arguments come back as an error line. */
     suspend fun run(name: String, args: JSONObject): String? {
-        if (tools.none { it.name == name }) return null
+        if (name != "get_info") return null
+        val topic = args.optString("topic").trim().lowercase(Locale.ROOT)
+        if (topics.none { it.first == topic }) return null
         val day = when (val d = args.optString("date").trim().lowercase(Locale.ROOT)) {
             "", "today", "null" -> today()
             "yesterday" -> today().minusDays(1)
             else -> runCatching { LocalDate.parse(d) }.getOrNull() ?: return "Error: date must be YYYY-MM-DD, today or yesterday"
         }
         if (day.isAfter(today())) return "Error: $day is in the future"
-        return when (name) {
-            "get_heart_rate" -> heartRate(day)
-            "get_stress" -> stress(day)
-            "get_sleep" -> sleep(day)
-            "get_activity" -> activity(day)
-            "get_spo2_and_temperature" -> spo2AndTemperature(day)
-            "get_readiness" -> readiness()
-            "get_trends" -> trends(args.optInt("days", 14).coerceIn(7, 28))
+        return when (topic) {
+            "heart_rate" -> heartRate(day)
+            "stress" -> stress(day)
+            "sleep" -> sleep(day)
+            "activity" -> activity(day)
+            "spo2_temperature" -> spo2AndTemperature(day)
+            "readiness" -> readiness()
+            "trends" -> trends(args.optInt("days", 14).coerceIn(7, 28))
+            "hrv" -> hrv(day)
+            "notes" -> controller.notes.value.trim().let { if (it.isEmpty()) "The quick notes are empty." else "Quick notes:\n$it" }
+            "ai_insights" -> insights()
             else -> captures(args.optInt("limit", 5).coerceIn(1, 10))
         }
+    }
+
+    companion object {
+        val TOPICS = listOf(
+            "readiness" to "today's readiness score, what drove it, strain, sleep score, body battery and the suggestion",
+            "sleep" to "the night that ended on the morning of date: bed and wake time, stages, awakenings, timeline",
+            "heart_rate" to "a day's resting, lowest, average and highest heart rate, zones and hour by hour",
+            "hrv" to "heart rate variability: the night before date (each overnight sample, median, vs usual), daytime samples, heart checks, last 7 nights",
+            "stress" to "a day's stress (0 to 100): average, highest, bands, hour by hour",
+            "activity" to "a day's steps, distance, calories, active minutes, PAI and the watch's workouts",
+            "spo2_temperature" to "a day's blood oxygen readings and skin temperature",
+            "trends" to "daily values over recent days with the usual level, VO2max and training load",
+            "workouts" to "the newest workout captures recorded with Heartline (sets, reps, heart rate)",
+            "ai_insights" to "the latest AI insights report about their health",
+            "notes" to "the quick notes they keep in the Heartline app",
+        )
     }
 
     private val clock = DateTimeFormatter.ofPattern("HH:mm", Locale.ENGLISH)
@@ -202,5 +231,49 @@ class HealthTools(
             "${w.label}: ${Instant.ofEpochSecond(w.start).atZone(zone).format(DateTimeFormatter.ofPattern("EEE d MMM HH:mm", Locale.ENGLISH))}, ${hm(w.durationS / 60)}" +
                 listOfNotNull(w.avgHr?.let { "average heart rate $it" }, w.sets?.let { "$it sets" }, w.load?.let { "load ${r(it)}" }).joinToString(", ", ", ")
         }
+    }
+
+    private fun median(v: List<Double>): Double? = v.sorted().takeIf { it.isNotEmpty() }?.let { if (it.size % 2 == 1) it[it.size / 2] else (it[it.size / 2 - 1] + it[it.size / 2]) / 2 }
+
+    private fun hrv(d: LocalDate): String {
+        val o = controller.overnight.value
+        val lines = ArrayList<String>()
+        fun sample(x: dev.heartline.app.OvernightSampleUi) = "${at(x.ts)} " + (x.rmssd?.let { "${r(it)} ms" + (x.hr?.let { h -> ", ${r(h)} bpm" } ?: "") } ?: "set aside (${x.reason ?: "unclear signal"})")
+        val night = o.samples.filter { it.night == d }.sortedBy { it.ts }
+        val nights = o.samples.filter { it.rmssd != null && it.night != null }.groupBy { it.night!! }.mapValues { (_, v) -> median(v.map { it.rmssd!! })!! }
+        lines += "Overnight HRV checks: ${if (o.enabled) "on (every ${o.nightEvery} min, ${o.nightLen} min long), ${o.status}" else "off"}"
+        if (night.isEmpty()) lines += "No overnight samples for the night before ${label(d)}."
+        else {
+            val clean = night.mapNotNull { it.rmssd }
+            val earlier = nights.filterKeys { it < d && it >= d.minusDays(14) }.values.toList()
+            val usual = earlier.takeIf { it.isNotEmpty() }?.let { v -> kotlin.math.exp(v.sumOf { kotlin.math.ln(it) } / v.size) }
+            lines += "Night before ${label(d)}: ${clean.size} clean of ${night.size} samples" + (median(clean)?.let { m ->
+                ", median ${r(m)} ms (range ${r(clean.min())} to ${r(clean.max())})" + (usual?.let { u -> "; usual ${r(u)} ms over ${earlier.size} earlier night(s), so ${r((m / u - 1) * 100)}%" } ?: "")
+            } ?: "")
+            lines += "Samples: " + night.takeLast(30).joinToString("; ") { sample(it) }
+        }
+        val day = o.daySamples.filter { Instant.ofEpochSecond(it.ts).atZone(zone).toLocalDate() == d }.sortedBy { it.ts }
+        lines += "Daytime HRV checks: ${if (o.allDay) "on (every ${o.dayEvery} min, ${o.dayLen} min long), ${o.dayStatus}" else "off"}"
+        if (day.isNotEmpty()) {
+            val clean = day.mapNotNull { it.rmssd }
+            lines += "Daytime on ${label(d)}: ${clean.size} clean of ${day.size}" + (median(clean)?.let { ", median ${r(it)} ms" } ?: "") + ". " + day.takeLast(30).joinToString("; ") { sample(it) }
+        }
+        val checks = controller.checks.value.filter { Instant.ofEpochSecond(it.start).atZone(zone).toLocalDate() == d }.sortedBy { it.start }
+        if (checks.isNotEmpty()) lines += "Heart checks on ${label(d)}: " + checks.joinToString("; ") { c ->
+            "${at(c.start)} ${c.rmssd?.let { "${r(it)} ms" } ?: "HRV not measured"}, ${c.hr?.let { "${r(it)} bpm" } ?: "?"}, rhythm ${c.rhythm.name.lowercase(Locale.ROOT).replace('_', ' ')}"
+        }
+        nights.filterKeys { it <= d }.toSortedMap().entries.toList().takeLast(7).takeIf { it.isNotEmpty() }?.let { last ->
+            lines += "Last nights (median RMSSD): " + last.joinToString(", ") { (n, v) -> "${n.format(DateTimeFormatter.ofPattern("EEE d", Locale.ENGLISH))} ${r(v)} ms" }
+        }
+        return lines.joinToString("\n")
+    }
+
+    private fun insights(): String {
+        val u = controller.insights.value
+        val rep = u.report ?: return if (u.running) "Heartline is writing the AI insights now; none are saved yet." else "No AI insights have been written yet."
+        val lines = arrayListOf("AI insights from ${Instant.ofEpochSecond(rep.at).atZone(zone).format(DateTimeFormatter.ofPattern("EEE d MMM HH:mm", Locale.ENGLISH))}" +
+            (if (u.running) " (a newer report is being written)" else "") + ": ${rep.headline}")
+        rep.insights.forEach { i -> lines += "${i.area} (${i.tone}): ${i.title}. ${i.detail}" + (i.action?.takeIf { it.isNotBlank() }?.let { " Suggestion: $it" } ?: "") }
+        return lines.joinToString("\n")
     }
 }

@@ -34,4 +34,18 @@ class AlarmsTest {
         for (reply in listOf(byteArrayOf(), bytes(0x10, 2), bytes(0x10, 2, 0), bytes(0x10, 3, 1), bytes(0x11, 2, 1)))
             assertFalse(alarmWriteAccepted(reply))
     }
+
+    @Test fun readsTheWatchesAlarmSwitches() {
+        // The user's GTR 2e (2026-11-08): Heartline's slot 0 on, four alarms made on the watch (10 to 13) off.
+        val reply = byteArrayOf(0x10, 0x0d, 0x01, 0x03, 0x0b, 0x80.toByte(), 0x66, 0x02, 0x05, 0x10, 0x0a, 0x0b, 0x0c, 0x0d)
+        assertEquals(listOf(WatchAlarmSwitch(0, true), WatchAlarmSwitch(10, false), WatchAlarmSwitch(11, false), WatchAlarmSwitch(12, false), WatchAlarmSwitch(13, false)),
+            parseAlarmSwitches(reply))
+        assertEquals(emptyList(), parseAlarmSwitches(byteArrayOf(0x10, 0x0d, 0x01, 0x03, 0x0b, 0x80.toByte(), 0x66, 0x02, 0x00)))
+        assertEquals(null, parseAlarmSwitches(byteArrayOf(0x10, 0x0d, 0x02)))
+    }
+
+    @Test fun watchMadeSlotsCanOnlyBeCleared() {
+        assertContentEquals(byteArrayOf(2, 12, 0, 0, 0), alarmCommand(12, unused = true))
+        kotlin.test.assertFailsWith<IllegalArgumentException> { alarmCommand(12, enabled = true, hour = 7) }
+    }
 }
