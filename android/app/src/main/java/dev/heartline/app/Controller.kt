@@ -323,6 +323,8 @@ data class HealthConnectUi(val status: HealthConnectStatus = HealthConnectStatus
 data class BackgroundUi(
     val batteryUnrestricted: Boolean = false, val notificationAccess: Boolean = false, val miui: Boolean = false,
     val bluetoothOn: Boolean = true, val postNotifications: Boolean = true, val companionLinked: Boolean = false,
+    /** Do Not Disturb access: lets the watch and the assistant set the phone to silent rather than vibrate. Optional. */
+    val dndAccess: Boolean = false,
 )
 
 enum class LinkState { DISCONNECTED, SCANNING, CONNECTING, AUTHENTICATING, CONNECTED, ERROR }

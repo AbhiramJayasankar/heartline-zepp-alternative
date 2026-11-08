@@ -64,7 +64,7 @@ interface DataTools {
  */
 data class WatchAlarm(val slot: Int, val on: Boolean, val hour: Int?, val minute: Int?, val days: Set<DayOfWeek>, val madeOnWatch: Boolean) {
     fun describe(): String {
-        val time = if (hour != null && minute != null) "%02d:%02d".format(hour, minute) else "time unknown (made on the watch)"
+        val time = if (hour != null && minute != null) "%02d:%02d".format(hour, minute) else "made on the watch (time unknown; only changeable on the watch)"
         return "alarm $slot: $time, ${repeatWords(days)}, ${if (on) "on" else "off"}"
     }
     companion object {
@@ -339,8 +339,7 @@ class WatchAssistant(
             val repeat = if (soon != null) emptySet() else days ?: existing?.days ?: emptySet()
             val used = if (dryRun) slot ?: 0 else try { actions.setWatchAlarm(slot, at.hour, at.minute, repeat, on) } catch (e: Exception) { return "Error: ${e.message}" }
             val ring = if (repeat.isEmpty()) " (rings ${clock(next(t, at))})" else ""
-            return done("alarm $used set for %02d:%02d, %s, %s".format(at.hour, at.minute, WatchAlarm.repeatWords(repeat), if (on) "on" else "off") + ring +
-                if (slot != null && slot >= 10 && used != slot) " (it replaces alarm $slot, made on the watch)" else "")
+            return done("alarm $used set for %02d:%02d, %s, %s".format(at.hour, at.minute, WatchAlarm.repeatWords(repeat), if (on) "on" else "off") + ring)
         }
 
         private suspend fun deleteAlarms(args: JSONObject): String {
@@ -479,10 +478,18 @@ class WatchAssistant(
             }
         }
 
-        /** A reply that says an alarm, timer, reminder, workout or sync was set, cancelled, started or stopped. */
-        private val CLAIMED_ACTION = Regex("(?i)^\\W*(done|cancell?ed|deleted|removed|stopped|started)\\b" +
-            "|\\b(timers?|alarms?|reminders?|workout|capture|sync(ed)?)\\b[^.?!\\n]{0,40}\\b(set|cancell?ed|deleted|removed|started|stopped)\\b" +
-            "|\\b(set|cancell?ed|deleted|removed|started|stopped)\\b[^.?!\\n]{0,25}\\b(timers?|alarms?|reminders?|workout|capture)\\b")
+        private const val DID = "set|cancell?ed|deleted|removed|started|stopped|sent|sending|added|noted|saved|updated|changed|moved|" +
+            "switched|turned|paused|resumed|skipped|muted|unmuted|repeats?|synced|syncing"
+        private const val THING = "timers?|alarms?|reminders?|workout|capture|sync|notifications?|notes?|ringer|vibrate|silent|music|" +
+            "song|track|volume|media|heart check|check"
+        /**
+         * A reply that says something was set, sent, changed, started or stopped (2026-11-09: "I've sent a short summary to
+         * your watch notifications" and "Your 8:45 AM alarm now repeats every day" with no tool called).
+         */
+        private val CLAIMED_ACTION = Regex("(?i)^\\W*(done|cancell?ed|deleted|removed|stopped|started|sent|added|noted)\\b" +
+            "|\\bI(?:'ve| have)\\s+(?:just\\s+)?($DID)\\b" +
+            "|\\b($THING)\\b[^.?!\\n]{0,40}\\b($DID)\\b" +
+            "|\\b($DID)\\b[^.?!\\n]{0,50}\\b($THING)\\b")
 
         /** Sent as the next message when [reply] claimed an action no tool did. */
         private fun undone(reply: String) = "(Heartline, not the user: your reply \"$reply\" says something was done, but you called " +
@@ -516,7 +523,8 @@ class WatchAssistant(
          */
         val ACTION_TOOLS = listOf(
             Tool("alarms", "The watch's alarms. list: every alarm by slot with time, repeat days and on or off (alarms made on the watch show " +
-                "without a time, the watch doesn't share it). set: a new alarm (time, or in_seconds for \"in N minutes\", and days to repeat; " +
+                "without a time and can only be changed or deleted on the watch itself)." +
+                " set: a new alarm (time, or in_seconds for \"in N minutes\", and days to repeat; " +
                 "no slot), a change to one (slot and what changes), or switching one on or off (slot and on only). delete: by slots. " +
                 "List first when they refer to an existing alarm.",
                 obj(action("alarms", "list, set or delete"),

@@ -302,7 +302,7 @@ class WatchAssistantTest {
         val a = assistant()
         brain(call("alarms", """{"action":"list"}"""), say("You have two."))
         a.answer("What alarms do I have?")
-        assertEquals("Alarms on the watch, by slot:\nalarm 0: 07:00, Mon, on\nalarm 10: time unknown (made on the watch), once, off", toolResults().single())
+        assertEquals("Alarms on the watch, by slot:\nalarm 0: 07:00, Mon, on\nalarm 10: made on the watch (time unknown; only changeable on the watch), once, off", toolResults().single())
         brain(call("alarms", """{"action":"set","time":"6:30","days":["weekdays"]}"""), say("Set."))
         a.answer("Alarm at 6:30 on weekdays")
         assertEquals("Done: alarm 1 set for 06:30, weekdays, on", toolResults().single())
@@ -332,5 +332,16 @@ class WatchAssistantTest {
         val sent = a.answer("Send me a long story")
         assertEquals("Sent to your watch.", sent.text)
         assertEquals(listOf("media pause null", "ringer vibrate null", "note buy milk", "send Story 3"), did)
+    }
+
+    @Test fun claimedSendsAndAlarmChangesAreAskedAgain() = runBlocking {
+        val a = assistant()
+        // 2026-11-09: both replies claimed an action with no tool called.
+        brain(say("I've sent a short summary to your watch notifications."), call("show_on_watch", """{"action":"notifications","text":"Summary"}"""), say("Sent."))
+        a.answer("Send a test to my watch notifications")
+        assertTrue(did.contains("send Heartline 1"))
+        brain(say("Your 8:45 AM alarm now repeats every day."), call("alarms", """{"action":"set","slot":0,"days":["daily"]}"""), say("It repeats every day now."))
+        assertEquals("It repeats every day now.", a.answer("Make my morning alarm every day").text)
+        assertTrue(did.last().startsWith("set 0 07:00 [MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY]"))
     }
 }

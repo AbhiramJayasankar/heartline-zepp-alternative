@@ -254,11 +254,15 @@ class HealthTools(
         }
         val day = o.daySamples.filter { Instant.ofEpochSecond(it.ts).atZone(zone).toLocalDate() == d }.sortedBy { it.ts }
         lines += "Daytime HRV checks: ${if (o.allDay) "on (every ${o.dayEvery} min, ${o.dayLen} min long), ${o.dayStatus}" else "off"}"
-        if (day.isNotEmpty()) {
-            val clean = day.mapNotNull { it.rmssd }
-            lines += "Daytime on ${label(d)}: ${clean.size} clean of ${day.size}" + (median(clean)?.let { ", median ${r(it)} ms" } ?: "") + ". " + day.takeLast(30).joinToString("; ") { sample(it) }
-        }
         val checks = controller.checks.value.filter { Instant.ofEpochSecond(it.start).atZone(zone).toLocalDate() == d }.sortedBy { it.start }
+        if (day.isNotEmpty() || checks.any { it.rmssd != null }) {
+            // Daytime HRV counts the heart checks you started too, as the app's "HRV through the day" chart does.
+            val clean = day.mapNotNull { it.rmssd }
+            val all = clean + checks.mapNotNull { it.rmssd }
+            lines += "Daytime on ${label(d)}: ${clean.size} clean of ${day.size} automatic samples" +
+                (if (checks.any { it.rmssd != null }) " plus ${checks.count { it.rmssd != null }} heart check(s) you started" else "") +
+                (median(all)?.let { ", median ${r(it)} ms" } ?: "") + "." + (if (day.isNotEmpty()) " " + day.takeLast(30).joinToString("; ") { sample(it) } else "")
+        }
         if (checks.isNotEmpty()) lines += "Heart checks on ${label(d)}: " + checks.joinToString("; ") { c ->
             "${at(c.start)} ${c.rmssd?.let { "${r(it)} ms" } ?: "HRV not measured"}, ${c.hr?.let { "${r(it)} bpm" } ?: "?"}, rhythm ${c.rhythm.name.lowercase(Locale.ROOT).replace('_', ' ')}"
         }

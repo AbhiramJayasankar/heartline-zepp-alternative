@@ -102,6 +102,7 @@ object SystemScreens {
     fun miuiBatterySaver(ctx: Context) = ctx.open(dev.heartline.service.SystemIntents.miuiBatterySaver(ctx))
     fun notificationAccess(ctx: Context) = ctx.open(dev.heartline.service.SystemIntents.notificationListenerSettings(ctx))
     fun appDetails(ctx: Context) = ctx.open(dev.heartline.service.SystemIntents.appDetails(ctx))
+    fun dndAccess(ctx: Context) = ctx.open(Intent(android.provider.Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
 }
 
 @Composable
@@ -183,6 +184,13 @@ fun KeepRunningScreen(controller: HeartlineController, nav: Navigator) {
         ) { SystemScreens.notificationAccess(ctx) }
         CheckItem(bg.postNotifications, "Heartline's own notification", if (bg.postNotifications) "The small connection notification keeps the service alive." else "Without it Android may stop the connection service.", if (bg.postNotifications) null else "Open app settings") { SystemScreens.appDetails(ctx) }
         CheckItem(bg.bluetoothOn, "Bluetooth", if (bg.bluetoothOn) "On." else "Turn Bluetooth on so Heartline can reach the watch.", null) {}
+        // Optional, so it isn't counted above: without it "silent" from the watch or the assistant means vibrate.
+        CheckItem(
+            if (bg.dndAccess) true else null, "Do Not Disturb access (optional)",
+            if (bg.dndAccess) "The watch and the assistant can put the phone on silent."
+            else "Lets the watch and the assistant put the phone on silent. Without it, silent means vibrate. Find Heartline and allow it.",
+            if (bg.dndAccess) null else "Allow Do Not Disturb access",
+        ) { SystemScreens.dndAccess(ctx) }
         }
     }
 }

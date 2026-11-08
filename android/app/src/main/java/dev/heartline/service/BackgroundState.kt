@@ -27,5 +27,6 @@ internal fun backgroundState(context: Context): BackgroundUi {
         }.getOrDefault(false),
         postNotifications = Build.VERSION.SDK_INT < 33 || context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED,
         companionLinked = runCatching { CompanionLink.linked(context, (context.applicationContext as dev.heartline.HeartlineApp).settings.watch.value.mac) }.getOrDefault(false),
+        dndAccess = runCatching { context.getSystemService(android.app.NotificationManager::class.java).isNotificationPolicyAccessGranted }.getOrDefault(false),
     )
 }

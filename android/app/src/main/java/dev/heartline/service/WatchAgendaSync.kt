@@ -104,19 +104,19 @@ internal class WatchAgendaSync(
     }
 
     /**
-     * Sets an alarm on the watch and waits for the watch to take it. [slot] null picks a free one; a slot made on the watch
-     * (10 and up) is cleared and the alarm goes in a free slot of Heartline's. Returns the slot used.
+     * Sets an alarm on the watch and waits for the watch to take it. [slot] null picks a free one. Returns the slot used.
+     * Alarms made on the watch (slots 10 and up) can't be changed from the phone: the watch acknowledges writes to them
+     * and ignores them (tested 2026-11-09), so they are refused here.
      */
     suspend fun putAlarm(slot: Int?, hour: Int, minute: Int, days: Set<java.time.DayOfWeek>, on: Boolean): Int = alarmLock.withLock {
+        if (slot != null && slot >= ALARM_SLOTS) error(WATCH_MADE.format(slot))
         val (switches, stored) = followWatch()
-        val target = slot?.takeIf { it < ALARM_SLOTS }
-            ?: freeAlarmSlot(stored, switches.filter { it.slot != slot })
+        val target = slot ?: freeAlarmSlot(stored, switches)
             ?: error("all $ALARM_SLOTS of Heartline's alarm slots are in use; delete one first")
         val cmd = alarmCommand(target, on, hour, minute, days)
         service.command { it.writeAlarm(cmd) }
         val slots = db.meta.readSlots(ALARMS_WRITTEN_KEY)
         slots.written(target, cmd)
-        if (slot != null && slot >= ALARM_SLOTS) service.command { it.writeAlarm(alarmCommand(slot, unused = true)) }
         db.meta.saveSlots(ALARMS_WRITTEN_KEY, slots)
         db.meta.set(ALARMS_KEY, alarmsJson(stored.filter { it.slot != target } + AlarmUi(target, on, hour, minute, days)))
         target
@@ -125,22 +125,26 @@ internal class WatchAgendaSync(
     /** Switches alarm [slot] on or off; only Heartline's alarms, since the watch doesn't share the time of its own. */
     suspend fun switchAlarm(slot: Int, on: Boolean) {
         val a = alarmLock.withLock { followWatch() }.second.firstOrNull { it.slot == slot }
-            ?: error("alarm $slot was made on the watch, which doesn't share its time, so it can only be deleted or given a new time")
+            ?: error(WATCH_MADE.format(slot))
         putAlarm(slot, a.hour, a.minute, a.days, on)
     }
 
-    /** Deletes alarm [slot] from the watch, Heartline's or one made on the watch. */
+    /** Deletes one of Heartline's alarms from the watch, and checks with the watch that it's gone. */
     suspend fun deleteAlarm(slot: Int) = alarmLock.withLock {
         require(slot in 0..WATCH_ALARM_SLOT_MAX) { "slots are 0 to $WATCH_ALARM_SLOT_MAX" }
         val (switches, stored) = followWatch()
         if (switches.none { it.slot == slot } && stored.none { it.slot == slot }) error("there is no alarm $slot on the watch")
+        if (slot >= ALARM_SLOTS) error(WATCH_MADE.format(slot))
         val cmd = alarmCommand(slot, unused = true)
         service.command { it.writeAlarm(cmd) }
-        if (slot < ALARM_SLOTS) {
-            val slots = db.meta.readSlots(ALARMS_WRITTEN_KEY)
-            slots.written(slot, cmd); db.meta.saveSlots(ALARMS_WRITTEN_KEY, slots)
-            db.meta.set(ALARMS_KEY, alarmsJson(stored.filter { it.slot != slot }))
-        }
+        val slots = db.meta.readSlots(ALARMS_WRITTEN_KEY)
+        slots.written(slot, cmd); db.meta.saveSlots(ALARMS_WRITTEN_KEY, slots)
+        db.meta.set(ALARMS_KEY, alarmsJson(stored.filter { it.slot != slot }))
+        if (service.command { it.readAlarmSwitches() }.any { it.slot == slot }) error("the watch still lists alarm $slot after deleting it")
+    }
+
+    private companion object {
+        const val WATCH_MADE = "alarm %d was made on the watch, and the watch doesn't let the phone change or delete those; it can be changed on the watch (Alarm app)"
     }
     private suspend fun syncReminders(slots: AgendaSlots) {
         val prefs = readReminderPreferences(db.meta.get(REMINDERS_KEY))

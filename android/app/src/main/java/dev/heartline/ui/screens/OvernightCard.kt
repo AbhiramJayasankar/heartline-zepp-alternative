@@ -118,13 +118,19 @@ fun OvernightCard(controller: HeartlineController, date: LocalDate, night: Sleep
     }
 }
 
-/** Daytime HRV on [date]: the switch, its status, and the day's 2-minute samples taken while you were still. */
+/**
+ * Daytime HRV on [date]: the switch, its status, the day's automatic samples taken while you were still, and the heart
+ * checks you started yourself that day (from the app, the watch or the assistant), drawn as their own dots.
+ */
 @Composable
 fun DayHrvCard(controller: HeartlineController, date: LocalDate) {
     val c = HL.colors
     val o by controller.overnight.collectAsStateWithLifecycle()
+    val allChecks by controller.checks.collectAsStateWithLifecycle()
+    val zone = java.time.ZoneId.systemDefault()
     val samples = o.daySamples.filter { it.night == date }.sortedBy { it.ts }
     val clean = samples.filter { it.rmssd != null }
+    val manual = allChecks.filter { it.rmssd != null && java.time.Instant.ofEpochSecond(it.start).atZone(zone).toLocalDate() == date }.sortedBy { it.start }
     Heading("HRV through the day")
     Card(padding = 16.dp) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -137,7 +143,7 @@ fun DayHrvCard(controller: HeartlineController, date: LocalDate) {
         }
         if (o.allDay) RunningCheck(controller)
         if (o.allDay) Schedule(o.dayEvery, o.dayLen, OvernightSettings.DAY_EVERY, day = true) { e, l -> controller.setHrvSchedule(false, e, l) }
-        if (samples.isEmpty()) {
+        if (samples.isEmpty() && manual.isEmpty()) {
             Gap(8)
             MutedText(if (o.allDay) "No samples this day yet. Once the watch has counted no steps for a minute, a ${o.dayLen}-minute heart check runs, and checks keep going back to back until one is clean. " +
                 "Then it waits ${o.dayEvery} minutes, as it does after 7 checks without steps that weren't clean. A check you walk during waits 2, 4, 8, then 16 minutes before the next try." else
@@ -146,21 +152,31 @@ fun DayHrvCard(controller: HeartlineController, date: LocalDate) {
             return@Card
         }
         Gap(10)
-        val v = clean.mapNotNull { it.rmssd }.sorted()
+        val v = (clean.mapNotNull { it.rmssd } + manual.mapNotNull { it.rmssd }).sorted()
         Row(Modifier.fillMaxWidth()) {
             Fact("HRV, median", v.takeIf { it.isNotEmpty() }?.let { it[it.size / 2].roundToInt().toString() } ?: "–", Modifier.weight(1f), unit = "ms")
             Fact("Range", if (v.size >= 2) "${v.first().roundToInt()}–${v.last().roundToInt()}" else "–", Modifier.weight(1f), unit = "ms")
-            Fact("Clean", "${clean.size}", Modifier.weight(1f), unit = "of ${samples.size} tries")
+            if (samples.isNotEmpty()) Fact("Clean", "${clean.size}", Modifier.weight(1f), unit = "of ${samples.size} tries")
+            else Fact("Heart checks", "${manual.size}", Modifier.weight(1f), unit = "by you")
         }
-        if (clean.isNotEmpty()) {
+        if (manual.isNotEmpty() && samples.isNotEmpty()) {
+            Gap(4)
+            MutedText("Includes ${manual.size} heart check${if (manual.size == 1) "" else "s"} you started, shown as the separate dots.")
+        }
+        if (v.isNotEmpty()) {
             Gap(10)
-            val start = date.atStartOfDay(java.time.ZoneId.systemDefault()).toEpochSecond().toDouble()
+            val start = date.atStartOfDay(zone).toEpochSecond().toDouble()
             InteractiveChart(
                 listOf(
                     ChartLine(clean.map { SeriesPoint(it.ts.toDouble(), it.rmssd!!) }, c.pulse, "HRV", "ms", gap = 6 * 3600.0, spacing = 3600.0),
-                    ChartLine(clean.mapNotNull { s -> s.hr?.let { SeriesPoint(s.ts.toDouble(), it) } }, c.ink, "Heart rate", "bpm", width = 0.dp, axis = false, gap = 6 * 3600.0),
+                    // Heart checks you started: dots only (no joins), so they stand apart from the automatic line.
+                    ChartLine(manual.map { SeriesPoint(it.start.toDouble(), it.rmssd!!) }, c.ok, "Your heart check", "ms", gap = 1.0),
+                    ChartLine(clean.mapNotNull { s -> s.hr?.let { SeriesPoint(s.ts.toDouble(), it) } } + manual.mapNotNull { m -> m.hr?.let { SeriesPoint(m.start.toDouble(), it) } }
+                        .sortedBy { it.t }, c.ink, "Heart rate", "bpm", width = 0.dp, axis = false, gap = 6 * 3600.0),
                 ),
-                start, start + 86_400, height = 150.dp, idleHint = "Each dot is one 2-minute sample taken while you were still. Touch for its HRV and heart rate.",
+                start, start + 86_400, height = 150.dp,
+                idleHint = if (manual.isEmpty()) "Each dot is one 2-minute sample taken while you were still. Touch for its HRV and heart rate."
+                    else "The line's dots are automatic samples taken while you were still; the separate dots are heart checks you started. Touch for HRV and heart rate.",
             )
         }
         Gap(8)
