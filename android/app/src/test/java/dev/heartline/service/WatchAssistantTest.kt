@@ -302,7 +302,7 @@ class WatchAssistantTest {
         val a = assistant()
         brain(call("alarms", """{"action":"list"}"""), say("You have two."))
         a.answer("What alarms do I have?")
-        assertEquals("Alarms on the watch, by slot:\nalarm 0: 07:00, Mon, on\nalarm 10: made on the watch or by Alexa (time unknown; only changeable on the watch), once, off", toolResults().single())
+        assertEquals("Alarms on the watch, by slot:\nalarm 0: 07:00, Mon, on\nalarm 10: made on the watch or by Alexa (time unknown; switch or delete it on the watch: long press in the Alarm app), once, off", toolResults().single())
         brain(call("alarms", """{"action":"set","time":"6:30","days":["weekdays"]}"""), say("Set."))
         a.answer("Alarm at 6:30 on weekdays")
         assertEquals("Done: alarm 1 set for 06:30, weekdays, on", toolResults().single())
