@@ -31,7 +31,8 @@ data class AlexaSettings(
     /** Bytes of the answer on the reply screen; the rest goes out as notifications. */
     val replyBytes: Int = WatchAssistant.REPLY_TEXT,
     /** How long the watch is kept on "Thinking" before it's told the answer will come as a notification. */
-    val watchWaitS: Int = 34,
+    /** Seconds after the stop. The watch gives up between 28 s (an answer then showed) and 34 s (it said "I didn't hear you"). */
+    val watchWaitS: Int = 25,
     /** Notifications per answer, about 150 words each; the GTR 2e keeps at least 12 (2026-11-09). */
     val maxNotifications: Int = 100,
     /** Open the mic again after an answer that ends with a question. */
@@ -56,7 +57,7 @@ data class AlexaSettings(
         maxRounds = maxRounds.coerceIn(1, 40), answerTimeoutS = answerTimeoutS.coerceIn(15, 1800),
         memoryTurns = memoryTurns.coerceIn(0, 20), memoryMinutes = memoryMinutes.coerceIn(0, 120),
         maxAnswerChars = maxAnswerChars.coerceIn(500, 200_000),
-        replyBytes = replyBytes.coerceIn(100, WatchAssistant.REPLY_TEXT), watchWaitS = watchWaitS.coerceIn(5, 38),
+        replyBytes = replyBytes.coerceIn(100, WatchAssistant.REPLY_TEXT), watchWaitS = watchWaitS.coerceIn(5, 28),
         maxNotifications = maxNotifications.coerceIn(0, 150),
         geminiModel = geminiModel.trim().ifEmpty { GeminiSpeech.MODEL },
         languages = languages.map { it.trim() }.filter { it.isNotEmpty() }.ifEmpty { GeminiSpeech.LANGUAGES },
@@ -78,13 +79,16 @@ data class AlexaSettings(
         const val KEY = "alexa_settings"
         val REASONING = listOf("auto", "off", "low", "medium", "high")
         /** Version of the defaults below; saved settings from before it that still hold an old default get the new one. */
-        const val LIMITS = 2
-        private val OLD_DEFAULTS = mapOf("max_tokens" to 4000, "reasoning_max_tokens" to 6000, "max_rounds" to 6, "answer_timeout_s" to 90,
-            "max_answer_chars" to 20_000, "max_notifications" to 25)
+        const val LIMITS = 3
+        /** The defaults each version replaced: version 1's before 2, version 2's before 3 (the watch wait, 2026-11-09). */
+        private val OLD_DEFAULTS = mapOf(
+            1 to mapOf("max_tokens" to 4000, "reasoning_max_tokens" to 6000, "max_rounds" to 6, "answer_timeout_s" to 90,
+                "max_answer_chars" to 20_000, "max_notifications" to 25, "watch_wait_s" to 34),
+            2 to mapOf("watch_wait_s" to 34))
 
         fun parse(text: String?): AlexaSettings = runCatching {
             val o = JSONObject(text ?: "{}")
-            if (o.optInt("limits", 1) < LIMITS) OLD_DEFAULTS.forEach { (k, v) -> if (o.has(k) && o.optInt(k) == v) o.remove(k) }
+            (o.optInt("limits", 1) until LIMITS).forEach { v -> OLD_DEFAULTS[v]?.forEach { (k, old) -> if (o.has(k) && o.optInt(k) == old) o.remove(k) } }
             val d = AlexaSettings()
             fun strings(name: String, default: List<String>) = o.optJSONArray(name)?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: default
             AlexaSettings(

@@ -16,7 +16,7 @@ class AlexaSettingsTest {
         val wild = AlexaSettings.parse(JSONObject().put("reply_bytes", 9000).put("watch_wait_s", 90).put("reasoning", "maximum")
             .put("temperature", 5).put("languages", org.json.JSONArray()).toString())
         assertEquals(WatchAssistant.REPLY_TEXT, wild.replyBytes)
-        assertEquals(38, wild.watchWaitS)
+        assertEquals(28, wild.watchWaitS)
         assertEquals("auto", wild.reasoning)
         assertEquals(2.0, wild.temperature, 0.0)
         assertEquals(GeminiSpeech.LANGUAGES, wild.languages)

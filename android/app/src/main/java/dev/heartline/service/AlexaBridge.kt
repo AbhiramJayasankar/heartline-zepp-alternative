@@ -27,8 +27,9 @@ import java.io.File
  * text and [WatchAssistant] (an OpenRouter model) answers; if either fails, the watch shows why.
  *
  * The working sequence (2026-11-03): ack the start, take the live voice, send 06 (triggered) when speech ends, which
- * turns "Listening" into "Thinking", then a simple reply (09), which the watch shows. It waits ~40 s for the reply
- * before "I didn't hear you clearly". A reply tour (2026-11-03) found nothing else it shows: a ~700-character simple
+ * turns "Listening" into "Thinking", then a simple reply (09), which the watch shows. It waits about 30 s after the stop
+ * for the reply (an answer at 28 s showed, "Still thinking" at 34 s came too late, 2026-11-09), then says "I didn't hear
+ * you clearly". A reply tour (2026-11-03) found nothing else it shows: a ~700-character simple
  * reply with newlines scrolls in full (a trailing byte after it is ignored and does not reopen the mic); the 08 cards
  * (subtype 06 as Gadgetbridge sends it, 1-byte or big-endian subtype, subtypes 03 to 05, 07, no length) are ignored or
  * answered "not support this function"; weather (08/01) and reminders (08/02) are ignored; commands 07, 0c, 0d, 0e too.

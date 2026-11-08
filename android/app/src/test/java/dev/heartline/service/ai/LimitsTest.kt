@@ -19,6 +19,10 @@ class LimitsTest {
         // Once saved in the new version, a value equal to an old default is the owner's choice.
         val again = AlexaSettings.parse(s.copy(maxRounds = 6).json())
         assertEquals(6, again.maxRounds)
+        // Version 2 settings: only the watch wait moves (34 s was too late); the rest is the owner's.
+        val v2 = AlexaSettings.parse(JSONObject().put("limits", 2).put("watch_wait_s", 34).put("max_rounds", 6).toString())
+        assertEquals(25, v2.watchWaitS); assertEquals(6, v2.maxRounds)
+        assertEquals(20, AlexaSettings.parse(JSONObject().put("limits", 2).put("watch_wait_s", 20).toString()).watchWaitS)
     }
 
     @Test fun savedOldRequestTimeLimitsMoveUp() {

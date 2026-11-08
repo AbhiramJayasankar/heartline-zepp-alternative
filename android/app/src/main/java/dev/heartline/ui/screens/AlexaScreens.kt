@@ -401,7 +401,7 @@ private fun WatchPage(controller: HeartlineController, nav: Navigator) {
             controller.updateAlexaSettings { it.copy(replyBytes = v) } }
         NumberSetting("Most notifications", "Per answer (0 to 150), about 150 words each; a longer answer ends \"(cut short)\".", s.maxNotifications, 0..150) { v ->
             controller.updateAlexaSettings { it.copy(maxNotifications = v) } }
-        NumberSetting("Wait before \"Still thinking\"", "Seconds (5 to 38). The watch gives up at about 40 s, so a slower answer comes as a notification.", s.watchWaitS, 5..38) { v ->
+        NumberSetting("Wait before \"Still thinking\"", "Seconds after you stop talking (5 to 28). The watch gives up about 30 s after, so a slower answer comes as notifications.", s.watchWaitS, 5..28) { v ->
             controller.updateAlexaSettings { it.copy(watchWaitS = v) } }
         ToggleRow("Listen again after a question", "When an answer ends with a question, the watch opens the mic for your reply.", s.listenAgain) { v ->
             controller.updateAlexaSettings { it.copy(listenAgain = v) } }
