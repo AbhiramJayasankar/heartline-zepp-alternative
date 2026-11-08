@@ -289,7 +289,9 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
                 "listening again".takeIf { listen },
             ).joinToString(", ")
             log(u, stoppedAt, delivery, recording, s)
-            if (listen) { delay(600); watch.send2021(Endpoint2021.ALEXA, Alexa.listenAgain) }
+            // The watch needs time to draw the reply first: at 0.6 s its listening screen kept the reply before this one
+            // ("Knock knock!" never showed, 2026-11-09).
+            if (listen) { delay(LISTEN_AGAIN_DELAY_MS); watch.send2021(Endpoint2021.ALEXA, Alexa.listenAgain) }
         } catch (e: CancellationException) { if (!handedOff) work.cancel(); throw e }
     }
 
@@ -375,6 +377,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
     private companion object {
         const val FRAME = 960
         const val ESCALATE_MS = 1500L
+        const val LISTEN_AGAIN_DELAY_MS = 1800L
         val ORPHAN_STOPS = listOf("triggered (06)", "a card", "a simple reply", "an error (0f)", "end (02)")
         val STOPS = listOf("triggered (06)", "an error (0f)")
     }
