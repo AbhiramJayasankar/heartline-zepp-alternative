@@ -19,6 +19,7 @@ internal class CaptureController(
         scope.launch { service.collectLatest { s -> if (s != null) s.captureRunner.run.collect { run.value = it } } }
         scope.launch { db.meta.observeAll().collect { meta ->
             val log = gymLogFromJson(meta[GYM_LOG_KEY])
+            val friends = Friends.parse(meta[Friends.KEY])
             val facts = HashMap<String, TitleFacts>()
             items.value = withContext(Dispatchers.Default) {
                 meta.filterKeys { it.startsWith(CAPTURE_SESSION) }.values.mapNotNull { value ->
@@ -26,6 +27,7 @@ internal class CaptureController(
                         val session = captureSession(value ?: return@runCatching null)
                         val result = meta[CAPTURE_RESULT + session.id]?.let { runCatching { captureFromJson(it) }.getOrNull() }
                         val item = session.captureItem(result, System.currentTimeMillis() / 1000)
+                            .copy(friend = friends.isFriend(FriendMark.Kind.CAPTURE, session.id))
                         if (result != null && genericLabel(item.label)) facts[item.id] = titleFacts(result, log)
                         // The AI's name once it has one; until then the local name, worked out fresh so rule fixes show at once.
                         val stored = meta[CAPTURE_TITLE + item.id]?.let { runCatching { JSONObject(it) }.getOrNull() }
@@ -40,15 +42,14 @@ internal class CaptureController(
                 .forEach { db.meta.delete(it) }
         } }
     }
-    fun start(label: String, minutes: Int) {
+    fun start(label: String, minutes: Int, forFriend: Boolean = false) {
         if (running) return
         starting = true
         val pending = CaptureRunUi(label.trim().ifBlank { "Workout" }, System.currentTimeMillis() / 1000, minutes * 60, null, 0, 0)
         run.value = pending
         startJob = scope.launch {
-            try { ensureService().captureRunner.start(label, minutes) }
-            catch (e: CancellationException) { throw e }
-            catch (e: Exception) { run.value = (run.value ?: pending).copy(error = e.message ?: "Unable to start capture") }
+            try { ensureService().captureRunner.start(label, minutes, forFriend) }
+            catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); run.value = (run.value ?: pending).copy(error = e.message ?: "Unable to start capture") }
             finally { starting = false }
         }
     }
@@ -134,7 +135,6 @@ internal class CaptureController(
 
     fun delete(id: String) { scope.launch {
         try { ensureService().captureRunner.delete(id) }
-        catch (e: CancellationException) { throw e }
-        catch (e: Exception) { db.events.add("error", "Unable to delete capture: ${e.message}") }
+        catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); db.events.add("error", "Unable to delete capture: ${e.message}") }
     } }
 }

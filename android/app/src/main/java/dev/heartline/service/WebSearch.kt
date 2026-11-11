@@ -49,8 +49,8 @@ class WebSearch(
         if (!c.enabled) error("web search isn't set up: add a Tavily or Exa key in Heartline (Watch, Alexa, Web search)")
         val failures = ArrayList<String>()
         val n = results()
-        if (c.tavilyKey.isNotBlank()) try { return tavily(query, c.tavilyKey, n) } catch (e: CancellationException) { throw e } catch (e: Exception) { failures += "Tavily: ${e.message}" }
-        if (c.exaKey.isNotBlank()) try { return exa(query, c.exaKey, n) } catch (e: CancellationException) { throw e } catch (e: Exception) { failures += "Exa: ${e.message}" }
+        if (c.tavilyKey.isNotBlank()) try { return tavily(query, c.tavilyKey, n) } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); failures += "Tavily: ${e.message}" }
+        if (c.exaKey.isNotBlank()) try { return exa(query, c.exaKey, n) } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); failures += "Exa: ${e.message}" }
         error(failures.joinToString("; "))
     }
 

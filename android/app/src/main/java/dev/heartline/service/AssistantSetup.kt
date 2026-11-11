@@ -30,7 +30,7 @@ class PlaceWeather(private val db: HeartlineDatabase, private val settings: AppS
             ?: error("Heartline doesn't know where the phone is; allow location or pick a place in its weather settings")
         val key = "%.2f,%.2f".format(Locale.ROOT, place.lat, place.lon)
         cached?.takeIf { cachedFor == key && System.currentTimeMillis() / 1000 - it.fetchedAt < 30 * 60 }?.let { return it }
-        val fresh = try { client.fetch(place) } catch (e: CancellationException) { throw e } catch (_: Exception) { error("couldn't reach Open-Meteo") }
+        val fresh = try { client.fetch(place) } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); error("couldn't reach Open-Meteo") }
         cached = fresh; cachedFor = key
         return fresh
     }

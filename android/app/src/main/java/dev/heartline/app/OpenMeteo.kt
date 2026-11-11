@@ -53,7 +53,7 @@ class OpenMeteo {
         // AQI is optional: a failed AQ request must not discard the forecast.
         val air = try {
             get("https://air-quality-api.open-meteo.com/v1/air-quality?$coords&current=pm2_5,pm10,nitrogen_dioxide,ozone&timezone=auto").getJSONObject("current")
-        } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+        } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); null }
         currentCoroutineContext().ensureActive()
         val aqi = plumeAqi(air.number("pm2_5"), air.number("pm10"), air.number("nitrogen_dioxide"), air.number("ozone"))
         val weather = parseForecast(json, place, aqi)

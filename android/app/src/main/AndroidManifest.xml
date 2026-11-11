@@ -17,6 +17,8 @@
     <uses-permission android:name="android.permission.REQUEST_COMPANION_USE_DATA_IN_BACKGROUND" />
     <uses-permission android:name="android.permission.REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <!-- The watch's reject button ends the call. -->
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Weather for where the phone is: approximate only; "all the time" keeps it current while Heartline is closed. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />

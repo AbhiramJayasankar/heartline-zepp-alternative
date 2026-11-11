@@ -7,6 +7,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
@@ -53,8 +54,10 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     private var rawJob: Job? = null
     private var checkJob: Job? = null
 
-    override fun activityDay(date: LocalDate): Flow<ActivityDayUi> = flowOf(demoDay(date))
-    override fun healthDay(date: LocalDate): Flow<HealthDayUi> = flowOf(demoHealthDay(date))
+    override fun activityDay(date: LocalDate): Flow<ActivityDayUi> = friends.map { f -> demoDay(date).let { d ->
+        d.copy(workouts = d.workouts.filter { it.start !in f.hiddenWorkouts }.map { it.copy(friend = f.covers(it.start)) }) } }
+    override fun healthDay(date: LocalDate): Flow<HealthDayUi> = friends.map { f -> demoHealthDay(date).let { d ->
+        d.copy(workouts = d.workouts.filter { it.start !in f.hiddenWorkouts }.map { it.copy(friend = f.covers(it.start)) }) } }
     override suspend fun checkDetail(id: String): SessionUi = demoSession(id)
 
     override fun connect() { connection.value = ConnectionUi(LinkState.CONNECTED, since = now()) }
@@ -115,7 +118,19 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
         }
     }
 
-    override fun startCheck(seconds: Int) {
+    override val friends = MutableStateFlow(Friends())
+    override fun setFriend(kind: FriendMark.Kind, ref: String, from: Long, to: Long, friend: Boolean) {
+        friends.update { it.with(FriendMark(kind, ref, from, to), friend) }
+        when (kind) {
+            FriendMark.Kind.CHECK -> checks.update { l -> l.map { if (it.id == ref) it.copy(friend = friend) else it } }
+            FriendMark.Kind.CAPTURE -> captures.update { l -> l.map { if (it.id == ref) it.copy(friend = friend) else it } }
+            FriendMark.Kind.WORKOUT -> Unit
+        }
+    }
+    override fun deleteCheck(id: String) { checks.update { l -> l.filter { it.id != id } } }
+    override fun deleteWatchWorkout(start: Long) { friends.update { it.copy(hiddenWorkouts = it.hiddenWorkouts + start) } }
+    override fun deleteRecording(file: String) { recordings.update { l -> l.filter { it.file != file } } }
+    override fun startCheck(seconds: Int, forFriend: Boolean) {
         checkJob?.cancel()
         checkRun.value = CheckRunUi(seconds, now(), analysing = false, result = null, error = null)
         setRawSensors(setOf(Sensor.PPG, Sensor.ACCEL), true)
@@ -168,12 +183,6 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override val phoneLink = MutableStateFlow(PhoneLinkUi(musicEnabled = true, musicAccess = true, nowPlaying = "Kesariya, Arijit Singh"))
     override suspend fun searchPlaces(query: String): List<PlaceUi> =
         if (query.isBlank()) emptyList() else listOf(bengaluru, PlaceUi("Bengaluru Rural", "Karnataka, India", 13.28, 77.53)).filter { it.name.contains(query, true) }
-    override val assistantAi = MutableStateFlow(AssistantAiUi(null, dev.heartline.service.AssistantAiConfig.DEFAULT_MODEL))
-    override fun setAssistantAi(key: String?, model: String) { assistantAi.update { it.copy(keyEnd = key?.takeLast(4) ?: it.keyEnd, model = model) } }
-    override fun setAssistantAiExtraKey(slot: Int, key: String) {
-        val end = key.trim().takeLast(4).ifEmpty { null }
-        assistantAi.update { if (slot == 3) it.copy(key3End = end) else it.copy(key2End = end) }
-    }
     override val alexaSettings = MutableStateFlow(dev.heartline.service.AlexaSettings())
     override fun updateAlexaSettings(change: (dev.heartline.service.AlexaSettings) -> dev.heartline.service.AlexaSettings) { alexaSettings.update { change(it).clamped() } }
     override val alexaTurns = MutableStateFlow(listOf(dev.heartline.service.TurnRecord(System.currentTimeMillis() - 600_000, "Watch", "How did I sleep?", 2.1, 900,
@@ -187,7 +196,6 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override fun refreshInsights() {}
     override val insightsSettings = MutableStateFlow(dev.heartline.service.InsightsSettings())
     override fun setInsightsSettings(s: dev.heartline.service.InsightsSettings) { insightsSettings.value = s }
-    override suspend fun geminiModels(): List<String> = listOf("gemini-3.8-flash", "gemini-3.8-flash-lite")
     private val demoRefs = listOf(dev.heartline.service.ai.ModelRef("openrouter", "nvidia/nemotron-3.5-super-vl:free"), dev.heartline.service.ai.ModelRef("openrouter", "google/gemma-4-31b-it:free"),
         dev.heartline.service.ai.ModelRef("gemini", "gemini-3.8-flash"), dev.heartline.service.ai.ModelRef("gemini", "gemini-3.8-flash-lite"), dev.heartline.service.ai.ModelRef("gemini", "gemini-3.5-transcribe-live"))
     override val aiSetup = MutableStateFlow(dev.heartline.service.ai.AiSetup(
@@ -232,8 +240,6 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
         webSearch.update { if (service == "exa") it.copy(exaEnd = end) else it.copy(tavilyEnd = end) }
     }
     override suspend fun testAssistantAi(question: String) = "The watch would show: Alarm set for Sat 9:30 AM. (sets a watch alarm)\nOpenRouter took 0.9 s."
-    override val speech = MutableStateFlow(SpeechUi(null))
-    override fun setGeminiKey(key: String) { speech.value = SpeechUi(key.trim().takeLast(4).ifEmpty { null }) }
     override suspend fun testSpeech() = "Gemini heard \"Set an alarm for 9:30 a.m.\" (3.4 s of audio, 0.6 s).\nThe watch would show: Alarm set for Sat 9:30 AM. (sets a watch alarm)"
     override fun setWeather(enabled: Boolean, place: PlaceUi?) = weather.update { it.copy(enabled = enabled, place = place ?: it.place, useLocation = if (place != null) false else it.useLocation) }
     override fun setWeatherLocation(use: Boolean) = weather.update { it.copy(useLocation = use) }
@@ -270,7 +276,7 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
 
     override val captureRun = MutableStateFlow<CaptureRunUi?>(null)
     override val captures = MutableStateFlow(listOf(CaptureItemUi("demo-gym", "Gym", now() - 7200, 3600, 128, 14, 96.0)))
-    override fun startCapture(label: String, minutes: Int) { captureRun.value = CaptureRunUi(label, now(), minutes * 60, 92, 0, 0) }
+    override fun startCapture(label: String, minutes: Int, forFriend: Boolean) { captureRun.value = CaptureRunUi(label, now(), minutes * 60, 92, 0, 0) }
     override fun stopCapture() { captureRun.value = null }
     override suspend fun captureDetail(id: String): CaptureAnalysisUi? = demoCapture()
     override fun deleteCapture(id: String) = captures.update { l -> l.filter { it.id != id } }

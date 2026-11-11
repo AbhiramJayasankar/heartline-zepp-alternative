@@ -403,7 +403,7 @@ private fun WatchPage(controller: HeartlineController, nav: Navigator) {
             controller.updateAlexaSettings { it.copy(maxNotifications = v) } }
         NumberSetting("Wait before \"Still thinking\"", "Seconds after you stop talking (5 to 28). The watch gives up about 30 s after, so a slower answer comes as notifications.", s.watchWaitS, 5..28) { v ->
             controller.updateAlexaSettings { it.copy(watchWaitS = v) } }
-        ToggleRow("Listen again after a question", "When an answer ends with a question, the watch opens the mic for your reply.", s.listenAgain) { v ->
+        ToggleRow("Listen again for a reply", "When the answer needs your reply, the watch opens the mic again.", s.listenAgain) { v ->
             controller.updateAlexaSettings { it.copy(listenAgain = v) } }
         NumberSetting("Questions kept", "Recordings and log entries (1 to 200).", s.keepTurns, 1..200) { v -> controller.updateAlexaSettings { it.copy(keepTurns = v) } }
     }
@@ -414,13 +414,17 @@ private fun AlertsPage(controller: HeartlineController, nav: Navigator) {
     val alerts by controller.alexaAlerts.collectAsStateWithLifecycle()
     Screen("Set by voice", onBack = { nav.pop() }, subtitle = "Alarms, timers and reminders set with the Alexa button. Reminders use the watch's reminder slots, shared with the calendar.") {
         if (alerts.isEmpty()) MutedText("Nothing set by voice is still to come.")
+        else if (alerts.any { it.kind != "Reminder" }) {
+            MutedText("The watch keeps alarms and timers set by voice: removing one here takes it off this list only. Stop it on the watch, or delete it with a long press in the watch's Alarm app.")
+            Gap(8)
+        }
         alerts.forEach { a ->
             Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(a.kind, style = HL.type.bodyStrong, color = HL.colors.ink)
                     MutedText(a.text.replaceFirstChar { it.uppercase() })
                 }
-                PillButton("Cancel", { controller.cancelAlexaAlert(a.id) }, style = ButtonStyle.QUIET)
+                PillButton(if (a.kind == "Reminder") "Cancel" else "Remove", { controller.cancelAlexaAlert(a.id) }, style = ButtonStyle.QUIET)
             }
             HorizontalDivider(color = HL.colors.line)
         }

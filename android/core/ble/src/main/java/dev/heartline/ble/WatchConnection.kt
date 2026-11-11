@@ -103,8 +103,7 @@ class WatchConnection(
                     val key = keys.load() ?: error("Save the watch key first")
                     var c = GattClient(context); client = c
                     try { c.connect(remoteDevice(adapter, mac)) }
-                    catch (e: CancellationException) { throw e }
-                    catch (_: Exception) {
+                    catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e);
                         c.close()
                         link.value = ConnectionStatus(ConnectionState.SCANNING, error = lastError)
                         val found = scan(mac)
@@ -115,13 +114,12 @@ class WatchConnection(
                         link.value = ConnectionStatus(ConnectionState.CONNECTING, error = lastError)
                         c = GattClient(context); client = c
                         // Connectable and in range, yet refused: most often another phone grabbed it in between.
-                        try { c.connect(device) } catch (e: CancellationException) { throw e } catch (e: Exception) { throw IllegalStateException(WATCH_BUSY, e) }
+                        try { c.connect(device) } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); throw IllegalStateException(WATCH_BUSY, e) }
                     }
                     c.discoverServices(); c.connectionPriority()
                     receiver = scope.launch(start = CoroutineStart.UNDISPATCHED) {
                         try { c.notifications.collect { receive(it) } }
-                        catch (e: CancellationException) { throw e }
-                        catch (e: Exception) { log("error", "Notification processing failed: ${e.message}"); c.close() }
+                        catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); log("error", "Notification processing failed: ${e.message}"); c.close() }
                     }
                     link.value = ConnectionStatus(ConnectionState.AUTHENTICATING)
                     route(setOf(Uuids.AUTH)) { channel ->
@@ -163,8 +161,7 @@ class WatchConnection(
                         delay(30_001)
                         quietReconnects.overdue(android.os.SystemClock.elapsedRealtime())?.let { log("warn", it) }
                     }
-                } catch (e: CancellationException) { throw e }
-                catch (e: Exception) {
+                } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e);
                     link.value = ConnectionStatus(ConnectionState.ERROR, error = e.message)
                     // Retries repeat the same failure every backoff step; log it once until something changes.
                     if (e.message != lastError) log("error", "Connection failed: ${e.message}")
@@ -205,8 +202,8 @@ class WatchConnection(
         return if (random && android.os.Build.VERSION.SDK_INT >= 33) adapter.getRemoteLeDevice(mac, BluetoothDevice.ADDRESS_TYPE_RANDOM)
         else adapter.getRemoteDevice(mac)
     }
-    private suspend fun scan(mac: String): ScanResult = withTimeout(15_000) {
-        suspendCancellableCoroutine { continuation ->
+    private suspend fun scan(mac: String): ScanResult = withTimeoutOrNull(15_000) {
+        suspendCancellableCoroutine<ScanResult> { continuation ->
             val scanner = checkNotNull(context.getSystemService(BluetoothManager::class.java).adapter.bluetoothLeScanner) { "Bluetooth scanner unavailable" }
             val callback = object : ScanCallback() {
                 override fun onScanResult(type: Int, result: ScanResult) {
@@ -217,7 +214,7 @@ class WatchConnection(
             continuation.invokeOnCancellation { scanner.stopScan(callback) }
             scanner.startScan(listOf(ScanFilter.Builder().setDeviceAddress(mac).build()), ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), callback)
         }
-    }
+    } ?: error(NOT_FOUND)
     private fun requireClient(): GattClient {
         check(link.value.state == ConnectionState.CONNECTED) { "The watch is not connected" }
         return client ?: error("The watch is not connected")
@@ -409,11 +406,17 @@ class WatchConnection(
     }
     /** The watch's full-screen nudge with a small heart ([WatchIcon.CARE]), for a moment worth seeing at once. */
     suspend fun nudge(title: String, body: String) = notify(title, body, NotificationKind.MESSAGE, "Heartline", WatchIcon.CARE)
-    suspend fun notify(title: String, body: String, kind: NotificationKind = NotificationKind.MESSAGE, app: String = "Heartline", icon: Int = WatchIcon.GENERIC) {
+    /**
+     * A call alert rings for 15 s unless [autoEndCall] is off; then whoever sent it ends it with [endCall] (the call
+     * forwarder does when the phone stops ringing), with 2 minutes as a backstop.
+     */
+    suspend fun notify(title: String, body: String, kind: NotificationKind = NotificationKind.MESSAGE, app: String = "Heartline", icon: Int = WatchIcon.GENERIC,
+                       autoEndCall: Boolean = true) {
         val c = requireClient()
         actions.withLock { chunks(c, notificationPayload(title, body, kind, app, icon)) }
         if (kind == NotificationKind.CALL) {
-            callEnd?.cancel(); callEnd = scope.launch { delay(15_000); callEnd = null; if (client === c) optional("End call alert") { endCall() } }
+            val after = if (autoEndCall) 15_000L else 120_000L
+            callEnd?.cancel(); callEnd = scope.launch { delay(after); callEnd = null; if (client === c) optional("End call alert") { endCall() } }
         }
         log("info", "Sent notification: $title")
     }
@@ -597,12 +600,17 @@ class WatchConnection(
     suspend fun syncHealth() = syncLock.withLock {
         requireClient(); syncState.value = SyncStatus(true, "Syncing health…")
         try {
-            for (type in FetchType.entries.filter { it != FetchType.ACTIVITY && it != FetchType.WORKOUT_DETAILS }) {
+            val types = FetchType.entries.filter { it != FetchType.ACTIVITY && it != FetchType.WORKOUT_DETAILS }
+            val failed = ArrayList<String>()
+            for (type in types) {
                 currentCoroutineContext().ensureActive()
                 requireClient()
-                optional("Sync ${type.key}") { if (type == FetchType.WORKOUTS) syncWorkouts() else syncHealthType(type) }
+                if (!optional("Sync ${type.key}") { if (type == FetchType.WORKOUTS) syncWorkouts() else syncHealthType(type) }) failed += type.key
             }
-            persistence.meta("health_last_sync", now().toString()); log("info", "Health sync done")
+            // Nothing came through: not done, so the next connection tries again soon (audit, 2026-11-12).
+            check(failed.size < types.size) { "Health sync failed for every type" }
+            persistence.meta("health_last_sync", now().toString())
+            if (failed.isEmpty()) log("info", "Health sync done") else log("warn", "Health sync done, except ${failed.joinToString()}")
             onSuccessfulSync?.invoke()
         } finally { syncState.value = SyncStatus() }
     }
@@ -648,14 +656,15 @@ class WatchConnection(
         }
         persistence.meta("health_workouts_last_sync", now().toString())
     }
-    private suspend fun optional(name: String, block: suspend () -> Unit) {
-        try { block() } catch (e: CancellationException) { throw e } catch (e: Exception) { log("warn", "$name failed: ${e.message}") }
-    }
+    /** Runs [block], logging a failure instead of throwing it; false when it failed. */
+    private suspend fun optional(name: String, block: suspend () -> Unit): Boolean =
+        try { block(); true } catch (e: Exception) { rethrowIfCancelled(e); log("warn", "$name failed: ${e.message}"); false }
     private suspend fun log(level: String, message: String) { BleLog.note("$level: $message"); persistence.event(level, message) }
     private fun now() = System.currentTimeMillis() / 1000
 
     companion object {
         const val BLUETOOTH_OFF = "Turn on Bluetooth"
+        const val NOT_FOUND = "The watch isn't nearby, or its Bluetooth is off. Heartline keeps trying."
         const val WATCH_BUSY = "The watch is nearby but won't accept a connection. Another phone or the Zepp app is probably connected to it: turn off Bluetooth on that phone."
     }
 }

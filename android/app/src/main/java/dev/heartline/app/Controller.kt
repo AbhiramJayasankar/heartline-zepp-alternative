@@ -48,7 +48,15 @@ interface HeartlineController {
     fun connect()
     fun disconnect()
     fun setLiveHr(on: Boolean)
-    fun startCheck(seconds: Int)
+    /** [forFriend]: someone else is wearing the watch; the check is marked as theirs and kept out of your figures. */
+    fun startCheck(seconds: Int, forFriend: Boolean = false)
+    /** Heart checks, captures and watch workouts marked as a friend's, and watch workouts deleted here. */
+    val friends: StateFlow<Friends>
+    /** Marks one as a friend's (kept, labelled, and left out of every figure) or as yours again. */
+    fun setFriend(kind: FriendMark.Kind, ref: String, from: Long, to: Long, friend: Boolean)
+    fun deleteCheck(id: String)
+    fun deleteWatchWorkout(start: Long)
+    fun deleteRecording(file: String)
     fun cancelCheck()
     fun setRawSensors(sensors: Set<Sensor>, streaming: Boolean)
     fun vibrate()
@@ -87,13 +95,6 @@ interface HeartlineController {
     fun refreshWeather()
     fun setMusicControl(enabled: Boolean)
 
-    /** Alexa answers from an OpenRouter model; the key stays on the phone and only its last 4 characters are shown. */
-    val assistantAi: StateFlow<AssistantAiUi>
-    /** [key] null keeps the saved one, blank removes it. */
-    fun setAssistantAi(key: String?, model: String)
-    /** The second account's key, used when OpenRouter refuses the first; blank removes it. */
-    /** The OpenRouter key from another account in [slot] 2 or 3; blank removes it. */
-    fun setAssistantAiExtraKey(slot: Int, key: String)
     /** Everything the Alexa button does that the owner can change: instructions, tools, models, speech, limits. */
     val alexaSettings: StateFlow<dev.heartline.service.AlexaSettings>
     fun updateAlexaSettings(change: (dev.heartline.service.AlexaSettings) -> dev.heartline.service.AlexaSettings)
@@ -106,8 +107,6 @@ interface HeartlineController {
     /** Which AI writes the insights (Gemini or OpenRouter) and its model. */
     val insightsSettings: StateFlow<dev.heartline.service.InsightsSettings>
     fun setInsightsSettings(s: dev.heartline.service.InsightsSettings)
-    /** The Gemini text models the saved key can use. */
-    suspend fun geminiModels(): List<String>
 
     // ---- AI models: providers, keys, the models to choose from, and each AI section's chain and rules ----
     /** The setup with every key shown only as its last 4 characters ("…abcd"); keys are changed with [aiAddKey] and friends. */
@@ -147,10 +146,6 @@ interface HeartlineController {
     /** [question] through the saved key and model, without sending anything to the watch: what the watch would do. */
     suspend fun testAssistantAi(question: String): String
 
-    /** The Gemini key that turns Alexa questions into text (its last 4 characters only). */
-    val speech: StateFlow<SpeechUi>
-    /** Blank removes the key. */
-    fun setGeminiKey(key: String)
     /** The last Alexa recording through Gemini and then the answers model, without sending anything to the watch. */
     suspend fun testSpeech(): String
 
@@ -186,7 +181,7 @@ interface HeartlineController {
     val captureRun: StateFlow<CaptureRunUi?>
     val captures: StateFlow<List<CaptureItemUi>>
     /** Streams pulse, motion, gyroscope and compass plus the watch's own live heart rate until [minutes] pass or [stopCapture]. */
-    fun startCapture(label: String, minutes: Int)
+    fun startCapture(label: String, minutes: Int, forFriend: Boolean = false)
     /** Start a capture automatically when a workout is opened on the watch (if the watch reports it). */
     val autoCapture: StateFlow<Boolean>
     fun setAutoCapture(enabled: Boolean)
@@ -253,7 +248,8 @@ data class WorkoutDetailUi(
 )
 
 data class CaptureRunUi(val label: String, val startedAt: Long, val plannedS: Int, val hr: Int?, val seconds: Int, val samples: Long, val error: String? = null)
-data class CaptureItemUi(val id: String, val label: String, val start: Long, val durationS: Int, val avgHr: Int?, val sets: Int?, val load: Double?)
+data class CaptureItemUi(val id: String, val label: String, val start: Long, val durationS: Int, val avgHr: Int?, val sets: Int?, val load: Double?,
+                         /** Recorded while a friend wore the watch. */ val friend: Boolean = false)
 /** One repetition. [t] is seconds from the capture start; [slowS] + [fastS] = [durationS]; [arcDeg] is wrist rotation. */
 data class RepUi(val t: Double, val durationS: Double, val slowS: Double, val fastS: Double, val arcDeg: Double)
 /**
@@ -323,8 +319,6 @@ data class InsightsUi(val report: dev.heartline.service.InsightReport? = null, v
     /** Every request of the last failed run, to show which models were tried and what each answered. */
     val failedAttempts: List<dev.heartline.service.InsightAttempt> = emptyList())
 data class WebSearchUi(val tavilyEnd: String? = null, val exaEnd: String? = null)
-data class AssistantAiUi(val keyEnd: String?, val model: String, val key2End: String? = null, val key3End: String? = null)
-data class SpeechUi(val geminiKeyEnd: String?)
 
 data class WeatherUi(
     val enabled: Boolean = false, val place: PlaceUi? = null, val useLocation: Boolean = true, val tempC: Int? = null, val condition: String? = null,
@@ -410,7 +404,8 @@ data class NightSpan(val date: java.time.LocalDate, val start: Long?, val end: L
 enum class MinuteState { NOT_WORN, SLEEP_LIGHT, SLEEP_DEEP, SLEEP_REM, ACTIVE, IDLE, CHARGING, UNKNOWN }
 data class MinuteUi(val ts: Long, val state: MinuteState, val steps: Int, val hr: Int?, /** The watch's movement score for the minute. */ val intensity: Int = 0)
 data class RoutePoint(val t: Int, val lat: Double, val lon: Double, val altM: Double? = null)
-data class WorkoutUi(val start: Long, val durationS: Int, val type: String, val avgHr: Int?, val maxHr: Int?, val calories: Int?, val steps: Int?, val distanceM: Int?, val track: List<HrPoint>, val route: List<RoutePoint> = emptyList(), val detail: WorkoutDetailUi? = null)
+data class WorkoutUi(val start: Long, val durationS: Int, val type: String, val avgHr: Int?, val maxHr: Int?, val calories: Int?, val steps: Int?, val distanceM: Int?, val track: List<HrPoint>, val route: List<RoutePoint> = emptyList(), val detail: WorkoutDetailUi? = null,
+    /** Recorded while a friend wore the watch. */ val friend: Boolean = false)
 data class ActivityDayUi(
     val date: LocalDate, val minutes: List<MinuteUi>, val steps: Int, val activeMinutes: Int, val sleepMinutes: Int,
     val wornMinutes: Int, val hrMin: Int?, val hrAvg: Int?, val hrMax: Int?, val sleep: SleepNightUi?, val workouts: List<WorkoutUi>,
@@ -419,7 +414,8 @@ data class ActivityDayUi(
 )
 
 enum class RhythmStatus { REGULAR, IRREGULAR, POSSIBLE_AF, INSUFFICIENT }
-data class CheckUi(val id: String, val start: Long, val durationS: Int, val hr: Double?, val rmssd: Double?, val rhythm: RhythmStatus)
+data class CheckUi(val id: String, val start: Long, val durationS: Int, val hr: Double?, val rmssd: Double?, val rhythm: RhythmStatus,
+                   /** Taken for a friend. */ val friend: Boolean = false)
 data class RrUi(val t: Double, val rrMs: Double, val ectopic: Boolean)
 data class SessionUi(
     val id: String, val start: Long, val durationS: Double, val signalQuality: Double, val hr: Double?,

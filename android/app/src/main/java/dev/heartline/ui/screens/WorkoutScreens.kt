@@ -104,6 +104,7 @@ fun CaptureScreen(controller: HeartlineController, nav: Navigator) {
     val r = run
     var label by rememberSaveable { mutableStateOf("Gym") }
     var minutes by rememberSaveable { mutableIntStateOf(180) }
+    var forFriend by rememberSaveable { mutableStateOf(false) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(r != null) { while (r != null) { delay(1000); now = System.currentTimeMillis() } }
     // When a capture ends, open its report as soon as the analysis lands.
@@ -123,8 +124,11 @@ fun CaptureScreen(controller: HeartlineController, nav: Navigator) {
             Text("For how long?", style = HL.type.label, color = c.inkSoft)
             Gap(8)
             Segmented(listOf(45 to "45 min", 60 to "1 h", 90 to "1 h 30", 180 to "Until I stop"), minutes, { minutes = it })
-            Gap(24)
-            PillButton("Start capture", { controller.startCapture(label, minutes) }, Modifier.fillMaxWidth(), style = ButtonStyle.PULSE, enabled = conn.state == LinkState.CONNECTED)
+            Gap(10)
+            ForFriendToggle("session", forFriend) { forFriend = it }
+            Gap(14)
+            PillButton(if (forFriend) "Start a friend's capture" else "Start capture", { controller.startCapture(label, minutes, forFriend); forFriend = false },
+                Modifier.fillMaxWidth(), style = ButtonStyle.PULSE, enabled = conn.state == LinkState.CONNECTED)
             if (conn.state != LinkState.CONNECTED) { Gap(6); MutedText("Connect the watch first.") }
             Gap(20)
             val auto by controller.autoCapture.collectAsStateWithLifecycle()
@@ -211,7 +215,10 @@ fun CapturePanel(controller: HeartlineController, nav: Navigator) {
             DateChip(day)
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(s.label, style = HL.type.bodyStrong, color = c.ink)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(s.label, style = HL.type.bodyStrong, color = c.ink)
+                    if (s.friend) FriendTag(Modifier.padding(start = 8.dp))
+                }
                 MutedText(listOfNotNull(when (ago) { 0L -> "Today"; 1L -> "Yesterday"; in 2L..6L -> "$ago days ago"; else -> null },
                     dev.heartline.ui.components.epochClock(s.start.toDouble()), fmtHm(s.durationS / 60), s.sets?.let { "$it sets" }).joinToString(", "))
             }
@@ -247,8 +254,11 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
     val a = result
     // With a gym log over this capture: compare with the last session doing the same exercises, and its recording.
     val log by controller.gymLog.collectAsStateWithLifecycle()
-    val captures by controller.captures.collectAsStateWithLifecycle()
-    val base = remember(a, log) { a?.let { dev.heartline.app.sessionInsights(it, log) } }
+    val allCaptures by controller.captures.collectAsStateWithLifecycle()
+    // A friend's session isn't matched to your gym log or your other sessions, and its calories aren't worked out from your profile.
+    val friend = allCaptures.firstOrNull { it.id == id }?.friend == true
+    val captures = remember(allCaptures) { allCaptures.filter { !it.friend } }
+    val base = remember(a, log, friend) { if (friend) null else a?.let { dev.heartline.app.sessionInsights(it, log) } }
     val prevId = remember(base, captures) { base?.previous?.let { dev.heartline.app.captureForSession(it, captures) }?.id?.takeIf { it != id } }
     val prev by produceState<CaptureAnalysisUi?>(null, prevId) { value = prevId?.let { controller.captureDetail(it) } }
     val skin by produceState<Pair<Double, Double>?>(null, a?.id, base != null) {
@@ -266,7 +276,7 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
     val energyOf: (CaptureAnalysisUi) -> dev.heartline.app.CaptureEnergyUi? = remember(log, prefs.profile, trends?.hrRest, trends?.vo2max) {
         { x -> dev.heartline.app.captureEnergy(x, log, prefs.profile, trends?.hrRest, trends?.vo2max) }
     }
-    val energy = remember(a, energyOf) { a?.let(energyOf) }
+    val energy = remember(a, energyOf, friend) { if (friend) null else a?.let(energyOf) }
     val ins = remember(base, prev, skin) { if (base == null || a == null) null else dev.heartline.app.sessionInsights(a, log, prev?.recovery ?: emptyList(), skin) }
     Screen(a?.label ?: "Session", onBack = { nav.pop() }, subtitle = a?.let { "${dateTimeOf(it.start)}, ${fmtHm(it.durationS / 60)}" }, scroll = scroll,
         trailing = { TextButton({ confirm = true }) { Text("Delete", color = c.inkSoft) } }) {
@@ -277,6 +287,7 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
         }
         val restLengths = a.rests.filter { r -> r.end - r.start <= 600 && a.cardio.none { it.start < r.end && it.end > r.start } }.map { it.end - it.start }.sorted()
         val medianRest = restLengths.getOrNull(restLengths.size / 2)
+        if (friend) { dev.heartline.ui.components.Note("A friend's session: read on its own, not matched to your gym log, your days or your other sessions."); Gap(14) }
         StatGrid(listOf(
             Triple("Average", fmtInt(a.avgHr), "bpm"), Triple("Max", fmtInt(a.maxHr), "bpm"), Triple("Lowest", fmtInt(a.minHr), "bpm"),
             Triple("Load", a.load?.roundToInt()?.toString() ?: "–", null), Triple("Calories", fmtInt(energy?.total?.roundToInt() ?: a.calories), "kcal"), Triple("Steps", fmtInt(a.steps), null),
@@ -327,7 +338,7 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
         BaselineNote(a)
         ins?.let { Findings(it) }
         ins?.let { i -> CoachNote(controller, a, i) }
-        AroundSession(controller, a, nav)
+        if (!friend) AroundSession(controller, a, nav)
         if (a.activities.isNotEmpty()) WatchWorkouts(controller, a, nav, energy)
         if (a.sets.isNotEmpty()) Exercises(a, ins, energy, anchor = { key -> androidx.compose.ui.Modifier.onGloballyPositioned { tops[key] = it.positionInRoot().y } },
             openPrev = { e ->
@@ -349,7 +360,7 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
         a.cardio.filter { it.name != null || it.end - it.start >= 300 }.forEach { k ->
             // The same kind of block (the watch's name for it, a treadmill say) in the latest earlier recording that has one.
             val prevCardio by produceState<Pair<CaptureAnalysisUi, dev.heartline.app.CardioUi>?>(null, a.id, k.name, captures.size) {
-                val name = k.name ?: return@produceState
+                val name = k.name?.takeIf { !friend } ?: return@produceState
                 value = captures.filter { it.start < a.start && it.id != id }.sortedByDescending { it.start }.take(8).firstNotNullOfOrNull { item ->
                     controller.captureDetail(item.id)?.let { d -> d.cardio.firstOrNull { it.name.equals(name, ignoreCase = true) }?.let { d to it } }
                 }
@@ -394,9 +405,7 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
         Gap(4)
         MutedText(a.hrSource)
         a.notes.forEach { Gap(4); MutedText(it) }
-        Gap(28)
-        PillButton("Delete this recording", { confirm = true }, style = ButtonStyle.QUIET)
-        Gap(20)
+        WhoseSection("session", friend, { controller.setFriend(dev.heartline.app.FriendMark.Kind.CAPTURE, id, a.start, a.start + a.durationS, it) }, "Delete this recording", { confirm = true })
     }
     if (confirm) DeleteCaptureDialog(a?.label ?: "this session", a?.start, onDelete = { controller.deleteCapture(id); confirm = false; nav.pop() }, onDismiss = { confirm = false })
 }
@@ -474,8 +483,7 @@ private fun CoachNote(controller: HeartlineController, a: CaptureAnalysisUi, ins
         if (!again) delay(2500)
         handled[0] = refresh
         value = try { controller.captureCoach(a.id, facts, again) to null }
-            catch (e: kotlinx.coroutines.CancellationException) { throw e }
-            catch (e: Exception) { null to (e.message ?: "The coach couldn't write a note just now.") }
+            catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); null to (e.message ?: "The coach couldn't write a note just now.") }
     }
     Gap(24); SectionTitle("Coach's note"); Gap(8)
     Panel(wash = true, padding = PaddingValues(14.dp)) {
@@ -530,7 +538,7 @@ private fun AroundSession(controller: HeartlineController, a: CaptureAnalysisUi,
             "${l.roundToInt()} of the day's ${dayLoad.roundToInt()}, strain ${"%.1f".format(strain)} of 21" + (if (l > dayLoad * 1.05) ". The day's figure uses minute averages, so it can read below a session's" else "")
             else "${l.roundToInt()}, on the same scale as the day's load and strain") { nav.push(Route.Trend("strain")) }) }
         // The first heart check within three hours of finishing: how far heart rate and HRV had come back.
-        checks.filter { it.start >= end && it.start <= end + 3 * 3600 && it.rmssd != null }.minByOrNull { it.start }?.let { k ->
+        checks.filter { !it.friend && it.start >= end && it.start <= end + 3 * 3600 && it.rmssd != null }.minByOrNull { it.start }?.let { k ->
             add(Triple("Heart check after", "HRV ${k.rmssd!!.roundToInt()} ms at ${k.hr?.roundToInt() ?: "–"} bpm, ${((k.start - end) / 60).coerceAtLeast(0)} min after you finished") { nav.push(Route.CheckResult(k.id)) })
         }
         val next = day.plusDays(1)
@@ -1026,9 +1034,12 @@ fun WorkoutScreen(controller: HeartlineController, route: Route.Workout, nav: Na
     val c = HL.colors
     val day by remember(route.epochDay) { controller.activityDay(LocalDate.ofEpochDay(route.epochDay)) }.collectAsState(initial = null)
     val w = day?.workouts?.firstOrNull { it.start == route.start }
+    val friends by controller.friends.collectAsStateWithLifecycle()
+    var confirm by remember { mutableStateOf(false) }
     Screen(w?.type ?: "Workout", onBack = { nav.pop() }, subtitle = w?.let { "${dateTimeOf(it.start)}, ${fmtHm(it.durationS / 60)}" }) {
-        if (w == null) { MutedText("Loading…"); return@Screen }
+        if (w == null) { MutedText(if (day == null) "Loading…" else "This workout was deleted."); return@Screen }
         val d = w.detail ?: WorkoutDetailUi()
+        if (w.friend) { dev.heartline.ui.components.Note("A friend's workout: shown here, but left out of $LEFT_OUT_OF."); Gap(14) }
         StatGrid(listOf(
             Triple("Average", fmtInt(w.avgHr), "bpm"), Triple("Max", fmtInt(w.maxHr), "bpm"), Triple("Lowest", fmtInt(d.minHr), "bpm"),
             Triple("Duration", fmtHm(w.durationS / 60), null), Triple("Active", d.activeS?.let { fmtHm(it / 60) } ?: "–", null), Triple("Calories", fmtInt(w.calories), "kcal"),
@@ -1111,5 +1122,12 @@ fun WorkoutScreen(controller: HeartlineController, route: Route.Workout, nav: Na
                 HorizontalDivider(color = c.line)
             }
         }
+        // A workout inside a friend's capture or check is theirs through that; it's changed there, not here.
+        val own = friends.isFriend(dev.heartline.app.FriendMark.Kind.WORKOUT, w.start.toString())
+        WhoseSection("workout", w.friend, { controller.setFriend(dev.heartline.app.FriendMark.Kind.WORKOUT, w.start.toString(), w.start, w.start + w.durationS, it) },
+            "Delete this workout", { confirm = true }, lockedBy = if (w.friend && !own) "It ran inside a friend's capture or heart check; change that one to make it yours again." else null)
+        if (confirm) ConfirmDelete("Delete this workout?", "${w.type}, ${dateTimeOf(w.start)}. Heartline drops it from your days, trends, workout lists and Health Connect. " +
+            "The watch keeps its own copy in its workout history. This can't be undone.",
+            onDelete = { confirm = false; controller.deleteWatchWorkout(w.start); nav.pop() }, onDismiss = { confirm = false })
     }
 }

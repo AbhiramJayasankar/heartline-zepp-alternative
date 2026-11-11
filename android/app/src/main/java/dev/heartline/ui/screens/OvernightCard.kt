@@ -130,7 +130,7 @@ fun DayHrvCard(controller: HeartlineController, date: LocalDate) {
     val zone = java.time.ZoneId.systemDefault()
     val samples = o.daySamples.filter { it.night == date }.sortedBy { it.ts }
     val clean = samples.filter { it.rmssd != null }
-    val manual = allChecks.filter { it.rmssd != null && java.time.Instant.ofEpochSecond(it.start).atZone(zone).toLocalDate() == date }.sortedBy { it.start }
+    val manual = allChecks.filter { it.rmssd != null && !it.friend && java.time.Instant.ofEpochSecond(it.start).atZone(zone).toLocalDate() == date }.sortedBy { it.start }
     Heading("HRV through the day")
     Card(padding = 16.dp) {
         Row(verticalAlignment = Alignment.CenterVertically) {

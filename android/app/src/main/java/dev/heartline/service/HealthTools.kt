@@ -225,7 +225,7 @@ class HealthTools(
     }
 
     private fun captures(limit: Int): String {
-        val c = controller.captures.value.sortedByDescending { it.start }.take(limit)
+        val c = controller.captures.value.filter { !it.friend }.sortedByDescending { it.start }.take(limit)
         if (c.isEmpty()) return "No workout captures recorded with Heartline yet."
         return c.joinToString("\n") { w ->
             "${w.label}: ${Instant.ofEpochSecond(w.start).atZone(zone).format(DateTimeFormatter.ofPattern("EEE d MMM HH:mm", Locale.ENGLISH))}, ${hm(w.durationS / 60)}" +
@@ -254,7 +254,7 @@ class HealthTools(
         }
         val day = o.daySamples.filter { Instant.ofEpochSecond(it.ts).atZone(zone).toLocalDate() == d }.sortedBy { it.ts }
         lines += "Daytime HRV checks: ${if (o.allDay) "on (every ${o.dayEvery} min, ${o.dayLen} min long), ${o.dayStatus}" else "off"}"
-        val checks = controller.checks.value.filter { Instant.ofEpochSecond(it.start).atZone(zone).toLocalDate() == d }.sortedBy { it.start }
+        val checks = controller.checks.value.filter { !it.friend }.filter { Instant.ofEpochSecond(it.start).atZone(zone).toLocalDate() == d }.sortedBy { it.start }
         if (day.isNotEmpty() || checks.any { it.rmssd != null }) {
             // Daytime HRV counts the heart checks you started too, as the app's "HRV through the day" chart does.
             val clean = day.mapNotNull { it.rmssd }

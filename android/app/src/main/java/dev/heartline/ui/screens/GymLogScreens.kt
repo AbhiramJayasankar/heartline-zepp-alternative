@@ -141,7 +141,7 @@ fun GymLogScreen(controller: HeartlineController, nav: Navigator, focus: String?
             if (open == id) Column(Modifier.padding(start = 8.dp, bottom = 8.dp)) {
                 // The recording over the same time has the sets merged with heart rate and the watch's rep counts.
                 val a = s.start; val b = s.end
-                captures.filter { cap -> a != null && b != null && cap.start < b && cap.start + cap.durationS > a }.forEach { cap ->
+                captures.filter { cap -> !cap.friend && a != null && b != null && cap.start < b && cap.start + cap.durationS > a }.forEach { cap ->
                     NavRow("Open the recording", "${timeOf(cap.start)}, ${cap.durationS / 60} min, sets with heart rate and the watch's rep counts") {
                         nav.push(dev.heartline.ui.Route.CaptureResult(cap.id))
                     }

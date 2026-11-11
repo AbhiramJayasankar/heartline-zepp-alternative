@@ -42,16 +42,21 @@ class MusicControls(private val context: Context, private val scope: CoroutineSc
         scope.launch { db.meta.observe("music_enabled").collect { enabled = it == "true"; refreshAccess(); scheduleSend() } }
         scope.launch { watch.ready.collect { ready -> if (ready) { refreshAccess(); scheduleSend() } else sendJob?.cancel() } }
         scope.launch { for (request in sends) sendCurrent() }
-        // Access can be granted/revoked in system settings while the service is alive.
-        // Polling also catches volume changes made with the phone's hardware buttons.
+        // Access can be granted or taken away in Android's settings while the service runs.
         scope.launch {
-            while (isActive) {
-                refreshAccess()
-                val volume = volume()
-                if (enabled && access && volume != lastVolume) { lastVolume = volume; scheduleSend() }
-                delay(2_000)
-            }
+            while (isActive) { refreshAccess(); delay(30_000) }
         }
+    }
+
+    /** The phone's volume buttons: the watch's music screen shows the new volume. */
+    private val volumeChanged = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: Context, intent: android.content.Intent) {
+            scope.launch { val v = volume(); if (enabled && access && v != lastVolume) { lastVolume = v; scheduleSend() } }
+        }
+    }
+    init {
+        androidx.core.content.ContextCompat.registerReceiver(context, volumeChanged, android.content.IntentFilter(VOLUME_CHANGED),
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
     }
 
     private fun refreshAccess() {
@@ -115,8 +120,7 @@ class MusicControls(private val context: Context, private val scope: CoroutineSc
             musicPositionSeconds(playback?.position ?: 0, playback?.lastPositionUpdateTime ?: 0, SystemClock.elapsedRealtime(),
                 playback?.playbackSpeed ?: 0f, playback?.state == PlaybackState.STATE_PLAYING, duration))
         try { watch.sendMusic(music, volume()) }
-        catch (e: CancellationException) { throw e }
-        catch (e: Exception) { db.events.add("warn", "Couldn't send music to the watch: ${e.message}") }
+        catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); db.events.add("warn", "Couldn't send music to the watch: ${e.message}") }
     }
 
     fun event(event: PhoneEvent) {
@@ -144,5 +148,7 @@ class MusicControls(private val context: Context, private val scope: CoroutineSc
         callbacks.values.forEach { (c, cb) -> c.unregisterCallback(cb) }; callbacks.clear()
         controllers = emptyList(); selected = null
     }
-    fun close() { closed = true; detach() }
+    fun close() { closed = true; detach(); runCatching { context.unregisterReceiver(volumeChanged) } }
+
+    private companion object { const val VOLUME_CHANGED = "android.media.VOLUME_CHANGED_ACTION" }
 }

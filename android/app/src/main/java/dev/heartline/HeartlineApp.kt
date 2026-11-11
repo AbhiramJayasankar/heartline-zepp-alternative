@@ -11,9 +11,12 @@ import dev.heartline.data.KeyStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class HeartlineApp : Application() {
-    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + dev.heartline.ble.CrashGuard.handler)
+    /** For writing a background failure to the activity log. */
+    private val logScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     val db by lazy { HeartlineDatabase.get(this) }
     val settings by lazy { AppSettings(this) }
@@ -28,6 +31,9 @@ class HeartlineApp : Application() {
     override fun onCreate() {
         super.onCreate()
         dev.heartline.ble.BleLog.init(filesDir)
+        dev.heartline.ble.CrashGuard.report = { e ->
+            logScope.launch { runCatching { db.events.add("error", "Background task failed: ${e.message ?: e.javaClass.simpleName}") } }
+        }
         controller = realController
     }
 

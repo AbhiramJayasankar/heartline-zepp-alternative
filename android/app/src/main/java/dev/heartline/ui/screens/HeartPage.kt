@@ -67,6 +67,7 @@ fun HeartScreen(controller: HeartlineController, nav: Navigator) {
     val trends by controller.trends.collectAsStateWithLifecycle()
     var window by rememberSaveable { mutableLongStateOf(3600L) }
     var length by rememberSaveable { mutableStateOf(120) }
+    var forFriend by rememberSaveable { mutableStateOf(false) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis() / 1000) }
     LaunchedEffect(Unit) { while (true) { delay(5000); now = System.currentTimeMillis() / 1000 } }
     val connected = conn.state == LinkState.CONNECTED
@@ -175,8 +176,11 @@ fun HeartScreen(controller: HeartlineController, nav: Navigator) {
                     style = HL.type.body, color = c.inkSoft)
                 Gap(12)
                 Segmented(listOf(60 to "1 min", 120 to "2 min", 300 to "5 min"), length, { length = it })
-                Gap(12)
-                PillButton("Start heart check", { controller.startCheck(length); nav.push(Route.CheckRun) }, Modifier.fillMaxWidth(), enabled = connected)
+                Gap(4)
+                ForFriendToggle("check", forFriend) { forFriend = it }
+                Gap(8)
+                PillButton(if (forFriend) "Start a friend's heart check" else "Start heart check",
+                    { controller.startCheck(length, forFriend); forFriend = false; nav.push(Route.CheckRun) }, Modifier.fillMaxWidth(), enabled = connected)
                 if (!connected) { Gap(6); MutedText("Connect to the watch first.") }
             }
             Gap(8)
@@ -187,7 +191,10 @@ fun HeartScreen(controller: HeartlineController, nav: Navigator) {
                     Dot(rhythmColor(ch.rhythm), 10.dp)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(dateTimeOf(ch.start), style = HL.type.bodyStrong, color = c.ink)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(dateTimeOf(ch.start), style = HL.type.bodyStrong, color = c.ink)
+                            if (ch.friend) FriendTag(Modifier.padding(start = 8.dp))
+                        }
                         MutedText(rhythmText(ch.rhythm))
                     }
                     Column(horizontalAlignment = Alignment.End) {

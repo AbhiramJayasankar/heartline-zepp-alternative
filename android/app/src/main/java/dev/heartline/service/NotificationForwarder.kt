@@ -17,6 +17,11 @@ class NotificationForwarder : NotificationListenerService() {
     private val dedupe = NotificationDeduplicator()
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val app = application as HeartlineApp
+        // The phone app's incoming call: its title is who is calling, for the watch's call alert (CallForwarder).
+        if (sbn.notification.category == Notification.CATEGORY_CALL) {
+            sbn.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.let { CallForwarder.callerSeen(it) }
+            return
+        }
         val config = app.settings.notificationForwarding.value
         if (!config.enabled || sbn.packageName == packageName || sbn.packageName !in config.allowedPackages) return
         val flags = sbn.notification.flags

@@ -24,7 +24,7 @@ internal class AgendaController(context: Context, private val scope: CoroutineSc
     init {
         scope.launch {
             val changes = db.meta.observeAll().map { Triple(it[ALARMS_KEY], it[REMINDERS_KEY], it[REMINDERS_SYNC_KEY]) }.distinctUntilChanged().map { Unit }
-            val tick = flow { while (currentCoroutineContext().isActive) { emit(Unit); delay(30_000) } }
+            val tick = flow { while (currentCoroutineContext().isActive) { emit(Unit); delay(5 * 60_000L) } }
             merge(changes, tick).conflate().collect { runAction { refresh() } }
         }
     }
@@ -60,7 +60,6 @@ internal class AgendaController(context: Context, private val scope: CoroutineSc
     }
     private fun edit(block: suspend () -> Unit) { scope.launch { runAction { withContext(Dispatchers.IO) { edits.withLock { block() } } } } }
     private suspend fun runAction(block: suspend () -> Unit) {
-        try { block() } catch (e: CancellationException) { throw e }
-        catch (e: Exception) { db.events.add("error", "Alarms/calendar: ${e.message}") }
+        try { block() } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); db.events.add("error", "Alarms/calendar: ${e.message}") }
     }
 }

@@ -100,8 +100,7 @@ class AiRouter(
                         lastGood[p.id] = key
                         return AiOutcome(v, target, attempts)
                     } catch (e: TimeoutCancellationException) { AiError("no answer within ${pol.timeoutS} s", FailKind.TIMEOUT) }
-                    catch (e: CancellationException) { throw e }
-                    catch (e: Exception) { AiErrors.of(e) }
+                    catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); AiErrors.of(e) }
                     attempts += AiAttempt(t0, section.key, p.id, ref.model, index, key.takeLast(4), level, clock() - t0, err.kind, err.message, waited)
                     waited = 0
                     fun nextKey(restMs: Long): Boolean {

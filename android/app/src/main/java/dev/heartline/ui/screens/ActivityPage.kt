@@ -218,7 +218,10 @@ fun ActivityScreen(controller: HeartlineController, nav: Navigator) {
                 Row(Modifier.fillMaxWidth().clickable(onClickLabel = "Open workout", role = Role.Button) { nav.push(Route.Workout(w.start, epochDay)) }
                     .semantics(mergeDescendants = true) {}.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text(w.type, style = HL.type.bodyStrong, color = c.ink)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(w.type, style = HL.type.bodyStrong, color = c.ink)
+                            if (w.friend) FriendTag(Modifier.padding(start = 8.dp))
+                        }
                         MutedText("${timeOf(w.start)}, ${w.durationS / 60} min" + (w.calories?.let { ", $it kcal" } ?: "") + (w.distanceM?.takeIf { it > 0 }?.let { ", %.2f km".format(it / 1000.0) } ?: ""))
                     }
                     Column(horizontalAlignment = Alignment.End) {

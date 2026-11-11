@@ -16,6 +16,7 @@ class InsightRepository(private val db: HeartlineDatabase) {
             "usable_s" to session.usableS, "hr" to session.hr, "rmssd" to session.rmssd,
             "sdnn" to session.sdnn, "rhythm" to session.rhythm, "resp" to session.resp, "result" to session.result))
     }
+    suspend fun delete(file: String) = db.write(setOf("insight_sessions")) { it.delete("insight_sessions", "file = ?", arrayOf(file)); Unit }
     suspend fun cached(file: String, mtime: Double): String? = db.read {
         it.select("SELECT result FROM insight_sessions WHERE file = ? AND mtime = ?", listOf(file, mtime)) { c -> c.getString(0) }
             .firstOrNull()

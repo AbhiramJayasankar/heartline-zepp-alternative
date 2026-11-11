@@ -94,7 +94,8 @@ data class WatchAlarm(val slot: Int, val on: Boolean, val hour: Int?, val minute
 
 /** What the Alexa button can make Heartline do. Each throws with a message when it can't. */
 interface AssistantActions {
-    fun startWorkout(label: String, minutes: Int)
+    /** [forFriend]: someone else wears the watch, so the capture is kept out of the owner's data. */
+    fun startWorkout(label: String, minutes: Int, forFriend: Boolean)
     /** The capture that was stopped, as words, or null if none was running. */
     fun stopWorkout(): String?
     fun sync()
@@ -105,7 +106,7 @@ interface AssistantActions {
     suspend fun switchWatchAlarm(slot: Int, on: Boolean): Unit = error("only the watch service can switch alarms")
     suspend fun deleteWatchAlarm(slot: Int): Unit = error("only the watch service can delete alarms")
     /** Starts a heart check of [seconds]; the result goes to the watch as a notification when it's done. */
-    suspend fun startHeartCheck(seconds: Int): Unit = error("only the watch service can start a heart check")
+    suspend fun startHeartCheck(seconds: Int, forFriend: Boolean): Unit = error("only the watch service can start a heart check")
     /** Adds [text] as a new line at the end of the app's quick notes. */
     suspend fun addNote(text: String): Unit = error("only the app can change notes")
     /** Sends [parts] as watch notifications titled [title], in order; returns how many will be sent. */
@@ -119,7 +120,7 @@ interface AssistantActions {
 
     /** For the app's test buttons, which never act. */
     object None : AssistantActions {
-        override fun startWorkout(label: String, minutes: Int) = error("only the watch can start a capture")
+        override fun startWorkout(label: String, minutes: Int, forFriend: Boolean) = error("only the watch can start a capture")
         override fun stopWorkout(): String? = error("only the watch can stop a capture")
         override fun sync() = error("only the watch can sync")
     }
@@ -202,7 +203,7 @@ class WatchAssistant(
                 else ai.converse(undone(first.text), context, history.toList() + (transcript to first.text), runner, s, trace)
                     .let { AssistantAi.Reply(it.text, first.toolCalls + it.toolCalls) }
             } ?: return turn.answer("The AI isn't working: no answer within ${s.answerTimeoutS} s.", emptyList(), "no answer within ${s.answerTimeoutS} s")
-        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
+        } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e);
             return turn.answer("The AI isn't working: ${e.message}", emptyList(), e.message ?: e.toString())
         }
         if (!dryRun) {
@@ -276,14 +277,17 @@ class WatchAssistant(
                 "recording" -> when (what) {
                     "heart_check" -> {
                         val minutes = args.optInt("minutes", 2).coerceIn(1, 5)
-                        if (!dryRun) try { actions.startHeartCheck(minutes * 60) } catch (e: Exception) { return "Error: ${e.message}" }
-                        done("started a ${spoken(minutes * 60)} heart check; they should keep the wrist still, and the result comes as a watch notification")
+                        val friend = args.optBoolean("for_friend", false)
+                        if (!dryRun) try { actions.startHeartCheck(minutes * 60, friend) } catch (e: Exception) { return "Error: ${e.message}" }
+                        done("started a ${spoken(minutes * 60)} heart check" + (if (friend) " for a friend (kept out of the owner's data)" else "") +
+                            "; the wrist should stay still, and the result comes as a watch notification")
                     }
                     "start_workout" -> {
                         val label = args.optString("label").trim().takeIf { it.isNotEmpty() && it != "null" } ?: "Workout"
                         val minutes = args.optInt("minutes", 60).coerceIn(1, 720)
-                        if (!dryRun) try { actions.startWorkout(label, minutes) } catch (e: Exception) { return "Error: ${e.message}" }
-                        done("started the $label capture for ${spoken(minutes * 60)}")
+                        val friend = args.optBoolean("for_friend", false)
+                        if (!dryRun) try { actions.startWorkout(label, minutes, friend) } catch (e: Exception) { return "Error: ${e.message}" }
+                        done("started the $label capture for ${spoken(minutes * 60)}" + if (friend) " for a friend (kept out of the owner's data)" else "")
                     }
                     "stop_workout" -> {
                         val stopped = if (dryRun) "the workout capture" else try { actions.stopWorkout() } catch (e: Exception) { return "Error: ${e.message}" }
@@ -377,8 +381,12 @@ class WatchAssistant(
             if (gone.isEmpty()) return "Error: none of those ids are set; the list is ${if (alerts.isEmpty()) "empty" else alerts.joinToString { "${it.id}: ${it.describe(t)}" }}"
             alerts = alerts - gone.toSet()
             if (!dryRun) saveAlerts(alerts)
-            gone.filter { it.kind != Alexa.ALERT_REMINDER }.forEach { frames += Alexa.deleteAlert(it.kind, it.token) }
-            return done("cancelled " + gone.joinToString(" and ") { it.describe(t) })
+            val onWatch = gone.filter { it.kind != Alexa.ALERT_REMINDER }
+            onWatch.forEach { frames += Alexa.deleteAlert(it.kind, it.token) }
+            // This watch ignores Alexa deletes (tested 2026-11-09), so only the reminders are really gone.
+            return done("cancelled " + gone.joinToString(" and ") { it.describe(t) }) + if (onWatch.isEmpty()) "" else
+                ". Tell them the watch keeps alarms and timers set by voice: the ${onWatch.joinToString(" and ") { it.describe(t) }} must be " +
+                    "stopped on the watch, or deleted with a long press in its Alarm app"
         }
 
         private fun table(args: JSONObject): String {
@@ -563,7 +571,9 @@ class WatchAssistant(
                 "watch's sensors). stop_workout: stop the capture.",
                 obj(action("recording", "heart_check, start_workout or stop_workout"),
                     "minutes" to prop("integer", "heart_check: 1 to 5, 2 if they don't say; start_workout: how long to capture, 60 if they don't say"),
-                    "label" to prop("string", "start_workout: the workout they named, such as Gym or Run"), required = listOf("action"))),
+                    "label" to prop("string", "start_workout: the workout they named, such as Gym or Run"),
+                    "for_friend" to prop("boolean", "heart_check or start_workout: true when it's for someone else wearing the watch, so it stays out of the owner's data"),
+                    required = listOf("action"))),
             Tool("phone", "Control the phone: media playing on it (play, pause, play_pause, next, previous, stop, volume_up, volume_down, " +
                 "set_volume, mute, unmute) and its ringer (ringer_normal, ringer_vibrate, ringer_silent, ring_volume). Returns the state after.",
                 obj(action("phone", "what to do"), "percent" to prop("integer", "set_volume or ring_volume: 0 to 100"), required = listOf("action"))),

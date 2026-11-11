@@ -59,7 +59,7 @@ data class LoggedSet(
  * (sessions, exercises, sets). [bodyWeightKg] turns assistance into weight moved.
  */
 fun parseGymLog(text: String, bodyWeightKg: Double?): List<LoggedSet> {
-    val trimmed = text.trimStart('﻿', ' ', '\n', '\r', '\t')
+    val trimmed = text.trimStart('\uFEFF', ' ', '\n', '\r', '\t')
     return if (trimmed.startsWith("{")) parseJsonLog(JSONObject(trimmed), bodyWeightKg) else parseCsvLog(trimmed, bodyWeightKg)
 }
 

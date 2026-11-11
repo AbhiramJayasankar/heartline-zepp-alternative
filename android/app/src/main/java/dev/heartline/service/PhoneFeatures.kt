@@ -26,8 +26,7 @@ class PhoneFeatures(private val context: Context, private val scope: CoroutineSc
                         // Do not block event collection: a watch stop must work even during a long GATT write.
                         scope.launch {
                             try { watch.acknowledgeFindPhone() }
-                            catch (e: CancellationException) { throw e }
-                            catch (e: Exception) { db.events.add("warn", "Find phone acknowledgement failed: ${e.message}") }
+                            catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); db.events.add("warn", "Find phone acknowledgement failed: ${e.message}") }
                         }
                     }
                     PhoneEvent.FIND_STOP -> find.stop()

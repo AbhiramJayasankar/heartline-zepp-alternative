@@ -179,6 +179,13 @@ object AlexaLog {
         (0 until a.length()).mapNotNull { runCatching { TurnRecord.parse(a.getJSONObject(it)) }.getOrNull() }
     }.getOrDefault(emptyList())
 
-    fun added(json: String?, record: TurnRecord, keep: Int): String =
-        JSONArray((listOf(record) + parse(json)).take(keep).map { it.json() }).toString()
+    /** Characters the whole log may take: the oldest turns go first beyond it, so the log stays a cheap read. */
+    const val MAX_CHARS = 1_000_000
+
+    fun added(json: String?, record: TurnRecord, keep: Int): String {
+        val turns = (listOf(record) + parse(json)).take(keep).map { it.json().toString() }
+        var size = 2
+        val kept = turns.takeWhile { t -> size += t.length + 1; size <= MAX_CHARS }.ifEmpty { turns.take(1) }
+        return kept.joinToString(",", "[", "]")
+    }
 }

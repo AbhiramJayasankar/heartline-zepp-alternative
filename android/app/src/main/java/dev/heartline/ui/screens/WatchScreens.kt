@@ -206,9 +206,11 @@ fun SensorsScreen(controller: HeartlineController, nav: Navigator) {
         }
         Gap(10)
         val probe by controller.probe.collectAsStateWithLifecycle()
-        SectionTitle("Unknown sensors")
-        Gap(8)
-        Panel {
+        // A research tool: only in builds made for development.
+        val debug = (androidx.compose.ui.platform.LocalContext.current.applicationContext as? dev.heartline.HeartlineApp)?.debuggable == true
+        if (debug) SectionTitle("Unknown sensors")
+        if (debug) Gap(8)
+        if (debug) Panel {
             MutedText("Two of the watch's sensor switches have never been mapped; one may be the red and infrared light it uses for SpO2. Wear the watch, stop streaming, then probe and keep your arm still for about 2½ minutes: eleven combinations run for 12 seconds each.")
             Gap(10)
             PillButton("Probe unknown sensors", { controller.probeUnknownSensors() }, style = ButtonStyle.QUIET, enabled = connected && !s.streaming)
@@ -238,7 +240,11 @@ private fun AxisPanel(title: String, data: Array<FloatArray>, symmetric: Boolean
 private fun RecordingRow(controller: HeartlineController, file: String, detail: String, hasAudio: Boolean) {
     val ctx = LocalContext.current
     var player by remember { mutableStateOf<MediaPlayer?>(null) }
+    var confirm by remember { mutableStateOf(false) }
     DisposableEffect(Unit) { onDispose { player?.release() } }
+    if (confirm) ConfirmDelete("Delete $file?", "Its samples" + (if (hasAudio) " and sound" else "") + " are removed from this phone, with the heart check made from it, if any. " +
+        "A workout capture's recording is deleted from the capture's page instead. This can't be undone.",
+        onDelete = { confirm = false; player?.release(); player = null; controller.deleteRecording(file) }, onDismiss = { confirm = false })
     Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(file, style = HL.type.bodyStrong, color = HL.colors.ink)
@@ -252,6 +258,7 @@ private fun RecordingRow(controller: HeartlineController, file: String, detail: 
                 }
             }, style = ButtonStyle.QUIET)
         }
+        androidx.compose.material3.TextButton({ confirm = true }) { Text("Delete", style = HL.type.label, color = HL.colors.pulse) }
     }
     HorizontalDivider(color = HL.colors.line)
 }

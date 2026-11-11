@@ -16,7 +16,7 @@ import kotlin.math.roundToInt
 
 class WatchService : Service() {
     private val dispatcher = Dispatchers.IO.limitedParallelism(1)
-    private val scope = CoroutineScope(SupervisorJob() + dispatcher)
+    private val scope = CoroutineScope(SupervisorJob() + dispatcher + CrashGuard.handler)
     private val app get() = application as HeartlineApp
     lateinit var watch: WatchConnection
         private set
@@ -41,14 +41,14 @@ class WatchService : Service() {
         scope.launch(kotlinx.coroutines.Dispatchers.IO) { backfillWatchWorkouts() }
         val phone = PhoneControl(this)
         val alexaActions = object : AssistantActions {
-            override fun startWorkout(label: String, minutes: Int) = captureRunner.start(label, minutes)
+            override fun startWorkout(label: String, minutes: Int, forFriend: Boolean) = captureRunner.start(label, minutes, forFriend)
             override fun stopWorkout(): String? = captureRunner.run.value?.let { r -> captureRunner.stop(); "${r.label} after ${WatchAssistant.spoken(r.seconds)}" }
             override fun sync() = app.realController.syncNow()
             override suspend fun watchAlarms() = agenda.watchAlarms()
             override suspend fun setWatchAlarm(slot: Int?, hour: Int, minute: Int, days: Set<java.time.DayOfWeek>, on: Boolean) = agenda.putAlarm(slot, hour, minute, days, on)
             override suspend fun switchWatchAlarm(slot: Int, on: Boolean) = agenda.switchAlarm(slot, on)
             override suspend fun deleteWatchAlarm(slot: Int) = agenda.deleteAlarm(slot)
-            override suspend fun startHeartCheck(seconds: Int) = assistantHeartCheck(seconds)
+            override suspend fun startHeartCheck(seconds: Int, forFriend: Boolean) = assistantHeartCheck(seconds, forFriend)
             override suspend fun addNote(text: String) {
                 val old = app.db.meta.get("notes").orEmpty().trimEnd()
                 app.db.meta.set("notes", if (old.isEmpty()) text else "$old\n$text")
@@ -61,8 +61,7 @@ class WatchService : Service() {
                     delay(2_500)
                     sent.forEachIndexed { i, p ->
                         try { watch.notify(if (sent.size > 1) "$title ${i + 1}/${sent.size}" else title, p) }
-                        catch (e: CancellationException) { throw e }
-                        catch (e: Exception) { app.db.events.add("warn", "Send to watch: notification ${i + 1} failed: ${e.message}"); return@launch }
+                        catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); app.db.events.add("warn", "Send to watch: notification ${i + 1} failed: ${e.message}"); return@launch }
                         delay(1_500)
                     }
                     app.db.events.add("info", "Sent \"$title\" to the watch as ${sent.size} notification(s)")
@@ -88,11 +87,11 @@ class WatchService : Service() {
                 (check?.let { r -> "Taking a ${r.seconds / 60}-minute heart check until " +
                     java.time.Instant.ofEpochSecond(r.startedAt + r.seconds).atZone(java.time.ZoneId.systemDefault()).toLocalTime().let { "%02d:%02d".format(it.hour, it.minute) } + ". " } ?: "") +
                 state.state.name.lowercase().replaceFirstChar { it.uppercase() } + (battery?.let { ", battery ${it.level}%" } ?: "")
-            }.collect { manager.notify(ID, notification(it)) }
+            }.collect { status = it; manager.notify(ID, notification(it)) }
         }
         scope.launch {
             watch.ready.collectLatest { connected ->
-                if (connected) coroutineScope {
+                if (connected) supervisorScope {
                     launch { phoneFeatures.sendSilentState() }
                     // An alarm switched or changed on the watch: let Heartline's list follow it, so the next sync keeps it.
                     launch {
@@ -106,8 +105,14 @@ class WatchService : Service() {
                         watch.deviceEvents.collect { data ->
                             val w = dev.heartline.protocol.watchWorkoutStart(data) ?: return@collect
                             app.db.events.add("info", "Watch started a workout: ${w.name}" + if (w.needsGps) " (asks for phone GPS)" else "")
-                            if (app.db.meta.get(AUTO_CAPTURE) == "true" && captureRunner.run.value == null)
-                                runCatching { captureRunner.start(w.name, 180) }.onFailure { app.db.events.add("warn", "Auto capture did not start: ${it.message}") }
+                            if (app.db.meta.get(AUTO_CAPTURE) == "true" && captureRunner.run.value == null) {
+                                // Remembered like a start from the event log, so that start (arriving later) doesn't begin
+                                // a second capture and the workout's end stops this one (audit, 2026-11-12).
+                                val now = System.currentTimeMillis() / 1000
+                                runCatching { captureRunner.start(w.name, 180) }
+                                    .onSuccess { autoCaptureStartedAt = now; app.db.meta.set(AUTO_CAPTURE_HANDLED, now.toString()) }
+                                    .onFailure { app.db.events.add("warn", "Auto capture did not start: ${it.message}") }
+                            }
                         }
                     }
                     // Zepp sends the profile on every connection; resend when it changes.
@@ -116,6 +121,8 @@ class WatchService : Service() {
                     launch { periodic(15 * 60_000L, "activity_last_sync") { watch.syncActivity() } }
                     launch { periodic(60 * 60_000L, "health_last_sync") { watch.syncHealth() } }
                     launch { periodic(5 * 60_000L, "quick_last_sync") { watch.syncQuick(); app.db.meta.set("quick_last_sync", (System.currentTimeMillis() / 1000).toString()) } }
+                    // The watch's clock, every 6 hours (Zepp sets it on connecting); a time zone change sends it at once.
+                    launch { periodic(6 * 3600_000L, CLOCK_SET) { watch.syncTime(); app.db.meta.set(CLOCK_SET, (System.currentTimeMillis() / 1000).toString()) } }
                     launch { periodic(30 * 60_000L, "battery_last_read") { watch.readBattery(); app.db.meta.set("battery_last_read", (System.currentTimeMillis() / 1000).toString()) } }
                     // Short heart checks while asleep, when turned on (Sleep page).
                     launch { OvernightHrv(app, watch, { watch.raw.value.streaming || captureRunner.active }, java.io.File(filesDir, "raw")).run() }
@@ -123,17 +130,54 @@ class WatchService : Service() {
             }
         }
         scope.launch { app.settings.notificationForwarding.collect { calls.refresh() } }
+        scope.launch(Dispatchers.IO) {
+            while (isActive) {
+                try { housekeeping() } catch (e: Exception) { rethrowIfCancelled(e); app.db.events.add("warn", "Housekeeping failed: ${e.message}") }
+                delay(24 * 3600_000L)
+            }
+        }
+        // Started without the app's screen (after a reboot, or the watch coming into range): the controller still needs
+        // this service, or forwarded notifications go nowhere until the app is opened (audit, 2026-11-12).
+        app.realController.attach(this)
+        androidx.core.content.ContextCompat.registerReceiver(this, clockChanged,
+            IntentFilter().apply { addAction(Intent.ACTION_TIMEZONE_CHANGED); addAction(Intent.ACTION_TIME_CHANGED) }, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
+    }
+
+    /** The phone's time zone or clock changed (travel, a manual change): the watch follows at once. */
+    private val clockChanged = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            scope.launch {
+                if (!watch.ready.value) { app.db.meta.delete(CLOCK_SET); return@launch }
+                try { watch.syncTime(); app.db.meta.set(CLOCK_SET, (System.currentTimeMillis() / 1000).toString()) }
+                catch (e: Exception) { rethrowIfCancelled(e); app.db.events.add("warn", "Setting the watch's clock failed: ${e.message}") }
+            }
+        }
+    }
+
+    /**
+     * Once a day: the Bluetooth log keeps a week, the activity log 60 days, and the raw copies of the frequent syncs two
+     * weeks (their readings are in the health table already). Workout transfers and resting heart rates are kept: the
+     * workout pages and the Health Connect export read them.
+     */
+    private suspend fun housekeeping() {
+        val now = System.currentTimeMillis() / 1000.0
+        val logs = BleLog.prune()
+        val keepRaw = setOf(dev.heartline.protocol.FetchType.WORKOUTS.key, dev.heartline.protocol.FetchType.WORKOUT_DETAILS.key,
+            dev.heartline.protocol.FetchType.RESTING_HR.key)
+        val raw = app.db.health.pruneRawFetches(dev.heartline.protocol.FetchType.entries.map { it.key }.toSet() - keepRaw, now - 14 * 86_400)
+        val events = app.db.events.prune(now - 60 * 86_400)
+        if (logs + raw + events > 0) app.db.events.add("info", "Housekeeping: removed $logs old Bluetooth log file(s), $raw raw sync copies and $events old log lines")
     }
     /**
      * A heart check started by the watch assistant: fails at once when one can't start, and sends the result to the
      * watch as a notification when it's done.
      */
-    private suspend fun assistantHeartCheck(seconds: Int) {
+    private suspend fun assistantHeartCheck(seconds: Int, forFriend: Boolean) {
         val c = app.realController
         c.checkRun.value?.let { if (it.result == null && it.error == null) error("a heart check is already running") }
         check(!captureRunner.active) { "a workout capture is running; stop it first" }
         check(OvernightHrv.running.value == null) { "an automatic HRV check is recording right now; try again in a few minutes" }
-        c.startCheck(seconds)
+        c.startCheck(seconds, forFriend)
         delay(1_500)
         val run = c.checkRun.value ?: error("the heart check didn't start")
         run.error?.let { error(it) }
@@ -191,7 +235,9 @@ class WatchService : Service() {
             val start = runCatching { org.json.JSONObject(last.extra ?: "{}").optString("event") }.getOrNull() == "start"
             if (app.db.meta.get(AUTO_CAPTURE) != "true") return@collect
             val handled = app.db.meta.get(AUTO_CAPTURE_HANDLED)?.toLongOrNull()
-            if (start && now - last.ts < 60 * 60 && captureRunner.run.value == null && autoCaptureStartedAt != last.ts && handled != last.ts) {
+            // A start within 15 minutes of the one already handled is the same workout (the watch's own start event, then its log).
+            val seen = handled != null && kotlin.math.abs(handled - last.ts) <= 15 * 60
+            if (start && now - last.ts < 60 * 60 && captureRunner.run.value == null && autoCaptureStartedAt != last.ts && !seen) {
                 autoCaptureStartedAt = last.ts
                 app.db.meta.set(AUTO_CAPTURE_HANDLED, last.ts.toString())
                 runCatching { captureRunner.start(name, 180) }
@@ -214,13 +260,15 @@ class WatchService : Service() {
         val last = app.db.meta.get(lastKey)?.toDoubleOrNull()?.let { (it * 1000).toLong() }
         if (last != null) delay((last + interval - System.currentTimeMillis()).coerceIn(0, interval))
         while (currentCoroutineContext().isActive) {
-            try { action() } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { app.db.events.add("warn", "Scheduled watch task failed: ${e.message}") }
+            try { action() } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); app.db.events.add("warn", "Scheduled watch task failed: ${e.message}") }
             delay(interval)
         }
     }
+    /** What the notification says: the link's state and battery, or "Starting" until the first update. */
+    @Volatile private var status = "Starting"
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(ID, notification("Starting"), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+        // Opening the app starts the service again; the notification keeps the status it already shows.
+        startForeground(ID, notification(status), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
         if (intent?.action == FindPhone.STOP) { phoneFeatures.stopFindPhone(); return START_STICKY }
         if (intent?.action != IDLE && KeyStore(this).load() != null && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
             app.settings.watch.value.mac?.let { mac -> scope.launch { watch.connect(mac) } }
@@ -241,6 +289,8 @@ class WatchService : Service() {
     }
     fun refreshCalls() { scope.launch { calls.refresh() } }
     override fun onDestroy() {
+        app.realController.detach(this)
+        runCatching { unregisterReceiver(clockChanged) }
         agenda.close()
         calls.close()
         // Keep the dispatcher alive until ATT and recording resources have been closed.
@@ -253,6 +303,8 @@ class WatchService : Service() {
         /** The watch workout start (epoch seconds) that already began a capture. */
         const val AUTO_CAPTURE_HANDLED = "auto_capture_handled_start"
         const val IDLE = "dev.heartline.IDLE"
+        /** meta key: when the watch's clock was last set (epoch seconds). */
+        private const val CLOCK_SET = "clock_last_set"
         private const val CHANNEL = "watch_connection"
         private const val ID = 1
     }

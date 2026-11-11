@@ -104,7 +104,7 @@ class AssistantAi(private val store: AiStore) {
                 for (call in reply.calls) {
                     called += call.name
                     val c0 = System.currentTimeMillis()
-                    val result = try { runner.run(call.name, call.args) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "Error: ${e.message}" }
+                    val result = try { runner.run(call.name, call.args) } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); "Error: ${e.message}" }
                     logs += ToolCallLog(call.name, call.args.toString(), result, System.currentTimeMillis() - c0)
                     messages += ChatMsg.ToolResult(call.id, call.name, result)
                 }

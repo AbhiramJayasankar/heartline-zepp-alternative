@@ -21,6 +21,19 @@ object BleLog {
 
     fun init(filesDir: File) { dir = File(filesDir, "blelog").apply { mkdirs() } }
 
+    /**
+     * Deletes the day files older than [keepDays] days and returns how many. They hold forwarded notification text and
+     * the assistant's voice, and grew without end before (audit, 2026-11-12).
+     */
+    fun prune(keepDays: Long = KEEP_DAYS): Int {
+        val oldest = LocalDate.now().minusDays(keepDays - 1)
+        return dir?.listFiles { f -> f.name.endsWith(".log") }.orEmpty().count { f ->
+            val day = runCatching { LocalDate.parse(f.name.removeSuffix(".log")) }.getOrNull()
+            day != null && day.isBefore(oldest) && f.delete()
+        }
+    }
+    const val KEEP_DAYS = 7L
+
     fun rx(uuid: UUID, value: ByteArray) = line("rx", uuid, value)
     fun tx(uuid: UUID, value: ByteArray) = line("tx", uuid, value)
     fun note(text: String) = append("--  $text")

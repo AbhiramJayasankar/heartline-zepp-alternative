@@ -140,7 +140,7 @@ stored_profile = json.loads(profile_row[0]) if profile_row else {}
 db.rollback()
 db.close()
 snapshot = dict(now=now, days=14, minute_columns=columns, minutes=minutes, health=health, checks=checks,
-                profile={"age": 28, "sex": "male", "weight_kg": 70}, source_profile=stored_profile)
+                profile={"age": 28, "sex": "male", "weight_kg": 70}, source_profile={"age": 28, "sex": "male", "weight_kg": 70})  # never the real profile: this file is public
 dump(RES / "daily_snapshot.json", snapshot)
 assert (RES / "daily_snapshot.json").stat().st_size < 3_000_000
 dump(GOLD / "daily_real.json", daily_output(snapshot))

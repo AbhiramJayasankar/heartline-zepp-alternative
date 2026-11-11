@@ -87,7 +87,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
                     else -> db.events.add("info", "Alexa message: " + m.payload.take(160).joinToString("") { "%02x".format(it) } +
                         " \"" + String(m.payload, 1, m.payload.size - 1, Charsets.UTF_8).filter { it in ' '..'~' }.take(200) + "\"")
                 }
-            } catch (e: CancellationException) { throw e } catch (e: Exception) { db.events.add("warn", "Alexa bridge: ${e.message}") }
+            } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); db.events.add("warn", "Alexa bridge: ${e.message}") }
         }
     }
 
@@ -252,6 +252,14 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
      * notification, and it does once the model finishes.
      */
     private suspend fun respond() {
+        // A send that fails (the link dropped mid-answer) is logged here; before, it ended the app (audit, 2026-11-12).
+        try { respondOrThrow() } catch (e: Exception) {
+            dev.heartline.ble.rethrowIfCancelled(e)
+            db.events.add("warn", "Alexa: couldn't send the answer to the watch: ${e.message}")
+        }
+    }
+
+    private suspend fun respondOrThrow() {
         val stoppedAt = stopSent
         val s = settings()
         val recording = name
@@ -271,7 +279,12 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
                 watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple("Still thinking. I'll send the answer as a notification."))
                 repliedAt = System.currentTimeMillis(); answered = true
                 db.events.add("info", "Alexa: no answer ${secs(repliedAt - stoppedAt)} s after the stop; it will come as a notification")
-                scope.launch { deliverLate(work.await(), stoppedAt, s, recording) }
+                scope.launch {
+                    try { deliverLate(work.await(), stoppedAt, s, recording) } catch (e: Exception) {
+                        dev.heartline.ble.rethrowIfCancelled(e)
+                        db.events.add("warn", "Alexa: couldn't send the late answer: ${e.message}")
+                    }
+                }
                 return
             }
             val answer = u.answer
@@ -309,7 +322,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         val heard = try { speech.transcribe(audio, s) } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
             db.events.add("warn", "Alexa: voice to text sent nothing back in ${System.currentTimeMillis() - t0} ms")
             return Understood(WatchAssistant.Answer("I didn't get any words back in time. Try again.", error = "voice to text sent nothing back"), null, audioS, System.currentTimeMillis() - t0)
-        } catch (e: CancellationException) { throw e } catch (e: Exception) {
+        } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e);
             db.events.add("warn", "Alexa: voice to text failed after ${System.currentTimeMillis() - t0} ms: ${e.message}")
             return Understood(WatchAssistant.Answer("Voice to text isn't working: ${e.message}", error = "voice to text: ${e.message}"), null, audioS, System.currentTimeMillis() - t0)
         }
@@ -318,7 +331,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         val t1 = System.currentTimeMillis()
         val answer = try { assistant.answer(heard.text) } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
             WatchAssistant.Answer("Heartline took too long to answer.", error = "timed out")
-        } catch (e: CancellationException) { throw e } catch (e: Exception) {
+        } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e);
             WatchAssistant.Answer("Heartline hit an error: ${e.message}", error = e.message ?: e.toString())
         }
         db.events.add("info", "Alexa answer (${System.currentTimeMillis() - t1} ms, ${assistant.lastModel ?: "no model"}): ${answer.summary}")

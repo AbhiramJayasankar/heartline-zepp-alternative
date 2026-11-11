@@ -54,7 +54,7 @@ class WatchWeatherSync(private val scope: CoroutineScope, private val db: Heartl
         val fetched = try {
             cached?.takeUnless { force || WeatherPolicy.needsFetch(it.fetchedAt, System.currentTimeMillis() / 1000) }
                 ?: client.fetch(place).also { cachedFor = key }
-        } catch (e: CancellationException) { throw e } catch (_: Exception) {
+        } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e);
             state.update { it.copy(error = "Couldn't reach the weather service. Try again later.") }; return@withLock
         }
         currentCoroutineContext().ensureActive()
@@ -69,7 +69,7 @@ class WatchWeatherSync(private val scope: CoroutineScope, private val db: Heartl
             // The existing GATT operation deadlines still bound a failed transfer.
             withContext(NonCancellable) { watch.sendWeather(w, settings.units.value == Units.IMPERIAL) }
             state.update { it.copy(sentToWatchAt = System.currentTimeMillis() / 1000) }
-        } catch (e: CancellationException) { throw e } catch (_: Exception) {
+        } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e);
             state.update { it.copy(error = "Couldn't send weather to the watch. Reconnect and try again.") }
         }
     }

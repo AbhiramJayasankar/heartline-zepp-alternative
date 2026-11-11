@@ -40,7 +40,7 @@ private fun yours(history: List<SessionUi>, pick: (SessionUi) -> Double?): Yours
  */
 /** What stood out in a check, worst first, for the top of the result page. */
 @Composable
-fun CheckGlance(s: SessionUi, history: List<SessionUi>, resting: Double?) {
+fun CheckGlance(s: SessionUi, history: List<SessionUi>, resting: Double?, friend: Boolean = false) {
     val c = HL.colors
     val q = s.signalQuality
     val hrvUsual = yours(history) { it.rmssd }
@@ -50,6 +50,8 @@ fun CheckGlance(s: SessionUi, history: List<SessionUi>, resting: Double?) {
     val findings = buildList {
         when {
             q < 0.5 -> add(Finding(Level.LOOK, "Too little clean signal (${pct(q)})", "Fewer than half the beats were clean, so treat every number here as rough. Tighten the strap a notch, rest your arm on a table and keep your hand still."))
+            friend -> add(Finding(if (q < 0.7) Level.INFO else Level.OK, (if (q < 0.7) "Usable but noisy signal" else "Clean signal") + " (${pct(q)})",
+                if (q < 0.7) "Rhythm was checked, but treat the HRV numbers as rough: they need 70% clean beats." else "Enough clean beats to trust these numbers."))
             q < 0.7 -> add(Finding(Level.INFO, "Usable but noisy signal (${pct(q)})", "Rhythm was checked, but this reading is left out of your HRV trend, which needs 70% clean beats."))
             s.usableS > 0 && s.usableS < 45 -> add(Finding(Level.INFO, "Clean, but short (${s.usableS.roundToInt()} s of usable beats)", "The numbers are fine to read, but your HRV trend and readiness only use checks with 45 s of clean beats, so this one isn't counted there. A 2-minute check leaves room for a few dropped beats."))
             else -> add(Finding(Level.OK, "Clean signal (${pct(q)})", "Enough clean beats to trust these numbers; this check counts toward your HRV trend and readiness."))
@@ -70,6 +72,7 @@ fun CheckGlance(s: SessionUi, history: List<SessionUi>, resting: Double?) {
             }
         }
         if (s.rmssd != null) when {
+            friend -> add(Finding(Level.OK, "HRV ${s.rmssd.roundToInt()} ms", "One reading on its own. HRV varies a lot between people, so it says most when compared with the same person's other checks."))
             hrvUsual == null || hrvUsual.n < 3 -> add(Finding(Level.INFO, "HRV ${s.rmssd.roundToInt()} ms: still learning your usual", "Take a check at the same time each day, ideally soon after waking. After three clean ones Heartline can tell you whether a reading is high or low for you."))
             s.rmssd > hrvUsual.avg * 1.25 -> add(Finding(Level.OK, "HRV well above your usual", "${s.rmssd.roundToInt()} ms against your usual ${hrvUsual.avg.roundToInt()}. Usually a sign of good recovery" + if (slowBreathing) ", though slow breathing in this check will have pushed it up too." else "."))
             s.rmssd < hrvUsual.avg * 0.75 -> add(Finding(Level.LOOK, "HRV well below your usual", "${s.rmssd.roundToInt()} ms against your usual ${hrvUsual.avg.roundToInt()}. Common after short sleep, hard training, alcohol, a late meal, stress or the start of an illness. One low check means little; several in a row are worth easing off for."))
@@ -108,7 +111,7 @@ fun CheckGlance(s: SessionUi, history: List<SessionUi>, resting: Double?) {
 
 /** Each number of a check explained: what it is, how it's worked out, your range, the typical range, whether it's worth a look. */
 @Composable
-fun CheckExplained(s: SessionUi, history: List<SessionUi>, resting: Double?, age: Int?, nav: Navigator) {
+fun CheckExplained(s: SessionUi, history: List<SessionUi>, resting: Double?, age: Int?, nav: Navigator, friend: Boolean = false) {
     val c = HL.colors
     val q = s.signalQuality
     val hrvUsual = yours(history) { it.rmssd }
@@ -122,7 +125,7 @@ fun CheckExplained(s: SessionUi, history: List<SessionUi>, resting: Double?, age
             ?: resting?.let { "Your awake resting rate lately: ${it.roundToInt()} bpm." },
         typical = "60–100 bpm is the usual adult range at rest; fit people often sit in the 50s or lower. During a check it is normally close to your awake resting rate and a few beats above your sleeping one.",
         worth = "Only if it is below 40 or above 100 while you are truly at rest, or far from your usual without a reason.",
-        link = "Awake resting heart rate, Heart tab" to { openTrend(nav, "awake_rhr") })
+        link = ("Awake resting heart rate, Heart tab" to { openTrend(nav, "awake_rhr") }).takeIf { !friend })
     Metric("HRV (RMSSD)", s.rmssd?.roundToInt()?.toString(), "ms",
         verdict = s.rmssd?.let { v -> hrvUsual?.takeIf { it.n >= 3 }?.let { if (v < it.avg * 0.75) Level.LOOK else Level.OK } ?: Level.INFO },
         what = "Heart rate variability: how much the gap between one beat and the next changes. It mostly reflects the vagus nerve, your " +
@@ -131,7 +134,7 @@ fun CheckExplained(s: SessionUi, history: List<SessionUi>, resting: Double?, age
         yours = hrvUsual?.let { "Your clean checks: ${it.avg.roundToInt()} ms on average, ${it.low.roundToInt()}–${it.high.roundToInt()} (${it.n} checks)." },
         typical = "About 19–75 ms in short resting readings from healthy adults (Nunan et al., 2010). It falls with age${age?.let { a -> if (a < 30) ", and people in their 20s usually sit in the upper half" else "" } ?: ""}. Genes make a big difference, so your own trend matters far more than anyone else's number.",
         worth = "When it stays well below your usual for several days, especially with a raised resting heart rate. That combination feeds straight into readiness.",
-        link = "HRV, Heart tab" to { openTrend(nav, "hrv") })
+        link = ("HRV, Heart tab" to { openTrend(nav, "hrv") }).takeIf { !friend })
     Metric("SDNN", s.sdnn?.roundToInt()?.toString(), "ms", verdict = s.sdnn?.let { Level.OK },
         what = "The overall spread of your beat gaps: both quick beat-to-beat changes and slower swings with breathing and posture.",
         how = "The standard deviation of every clean beat gap in the check.",
@@ -180,7 +183,7 @@ fun CheckExplained(s: SessionUi, history: List<SessionUi>, resting: Double?, age
         typical = "70% clean and 45 s of clean beats count toward your HRV trend and readiness; 50% is enough to judge rhythm.",
         worth = "Below 50%: measure again with the strap a notch tighter, arm resting on a table, hand relaxed.")
     Gap(4)
-    Card(onClick = { nav.push(Route.Readiness("HRV")) }, onClickLabel = "How HRV feeds readiness", padding = 14.dp) {
+    if (!friend) Card(onClick = { nav.push(Route.Readiness("HRV")) }, onClickLabel = "How HRV feeds readiness", padding = 14.dp) {
         Text("How this feeds readiness ›", style = HL.type.bodyStrong, color = c.ink)
         MutedText("Clean checks (70% signal, 45 s of beats) set the day's HRV, which is 35% of readiness. If you take more than one in a day, readiness uses their median. Take them the same way each day, ideally soon after waking.")
     }

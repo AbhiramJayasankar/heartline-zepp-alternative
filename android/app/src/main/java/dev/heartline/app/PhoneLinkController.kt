@@ -8,7 +8,8 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
 @OptIn(ExperimentalCoroutinesApi::class)
-class TaskAController(private val context: Context, private val scope: CoroutineScope, private val db: HeartlineDatabase,
+/** Weather on the watch, find phone and music controls, from the app's side (the service does the work). */
+class PhoneLinkController(private val context: Context, private val scope: CoroutineScope, private val db: HeartlineDatabase,
     service: StateFlow<WatchService?>, private val ensureService: suspend () -> WatchService) {
     private val client = OpenMeteo()
     val weather = service.flatMapLatest { s ->
@@ -18,7 +19,7 @@ class TaskAController(private val context: Context, private val scope: Coroutine
     }.stateIn(scope, SharingStarted.Eagerly, WeatherUi())
     val phoneLink = service.flatMapLatest { s ->
         s?.phoneFeatures?.phoneLink ?: combine(db.meta.observe("music_enabled"), flow {
-            while (currentCoroutineContext().isActive) { emit(musicAccess(context)); delay(2_000) }
+            while (currentCoroutineContext().isActive) { emit(musicAccess(context)); delay(10_000) }
         }) { enabled, access -> PhoneLinkUi(musicEnabled = enabled == "true", musicAccess = access) }
     }.stateIn(scope, SharingStarted.Eagerly, PhoneLinkUi())
 
@@ -38,8 +39,7 @@ class TaskAController(private val context: Context, private val scope: Coroutine
     fun stopFindPhone() = launch { ensureService().phoneFeatures.stopFindPhone() }
     private fun launch(block: suspend () -> Unit) {
         scope.launch {
-            try { block() } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { db.events.add("error", e.message ?: "Phone feature failed") }
+            try { block() } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); db.events.add("error", e.message ?: "Phone feature failed") }
         }
     }
 }

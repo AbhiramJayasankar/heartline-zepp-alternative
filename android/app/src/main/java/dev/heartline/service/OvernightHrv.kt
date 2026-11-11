@@ -127,11 +127,11 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
             watch.steps.collect { st -> st?.steps?.let { n -> if (last != null && n != last) lastStepChange = System.currentTimeMillis() / 1000; last = n } }
         }
         while (true) {
-            try { tick() } catch (e: CancellationException) { throw e } catch (e: Exception) { status.value = "Error: ${e.message}" }
+            try { tick() } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); status.value = "Error: ${e.message}" }
             val now = System.currentTimeMillis() / 1000
             if (now - lastPrune >= 3600) {
                 lastPrune = now
-                try { prune(now) } catch (e: CancellationException) { throw e } catch (e: Exception) { app.db.events.add("error", "Pruning HRV sample recordings failed: ${e.message}") }
+                try { prune(now) } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); app.db.events.add("error", "Pruning HRV sample recordings failed: ${e.message}") }
             }
             delay(30_000)
         }
@@ -275,7 +275,7 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         try {
             file = watch.startRaw(setOf(RawSensor.ACCEL))
             delay(POSE_LEN_S * 1000L)
-        } catch (e: CancellationException) { throw e } catch (e: Exception) {
+        } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e);
             app.db.events.add("warn", "Accurate positions: recording failed: ${e.message}")
         } finally { withContext(NonCancellable) { runCatching { watch.stopRaw() } } }
         val f = file ?: return

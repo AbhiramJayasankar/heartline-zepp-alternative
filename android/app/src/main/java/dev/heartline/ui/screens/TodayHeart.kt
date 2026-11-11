@@ -155,14 +155,18 @@ fun CheckResultScreen(controller: HeartlineController, id: String, nav: Navigato
     }
     // Earlier checks for "your range": the last 15 besides this one.
     val checks by controller.checks.collectAsStateWithLifecycle()
-    val history by produceState(emptyList<SessionUi>(), id, checks.size) {
-        value = checks.filter { it.id != id && it.rhythm != RhythmStatus.INSUFFICIENT }.sortedByDescending { it.start }.take(15).mapNotNull { controller.checkDetail(it.id) }
+    // A friend's check stands alone: your range, resting heart rate and age don't describe them.
+    val friend = checks.firstOrNull { it.id == id }?.friend == true
+    var confirm by remember { mutableStateOf(false) }
+    val history by produceState(emptyList<SessionUi>(), id, checks.size, friend) {
+        value = if (friend) emptyList() else checks.filter { it.id != id && !it.friend && it.rhythm != RhythmStatus.INSUFFICIENT }
+            .sortedByDescending { it.start }.take(15).mapNotNull { controller.checkDetail(it.id) }
     }
     val todayUi by controller.today.collectAsStateWithLifecycle()
     val trendsUi by controller.trends.collectAsStateWithLifecycle()
     val prefs by controller.prefs.collectAsStateWithLifecycle()
     // Checks are taken awake and still, so they are compared with the awake resting rate (the sleeping one as a fallback).
-    val resting = todayUi?.awakeRestingHr?.toDouble() ?: trendsUi?.series?.firstOrNull { it.key == "awake_rhr" }?.baseline
+    val resting = if (friend) null else todayUi?.awakeRestingHr?.toDouble() ?: trendsUi?.series?.firstOrNull { it.key == "awake_rhr" }?.baseline
         ?: todayUi?.restingHr?.toDouble() ?: trendsUi?.series?.firstOrNull { it.key == "rhr" }?.let { s -> s.baseline ?: s.points.lastOrNull { it.value != null }?.value }
     Screen("Heart check", onBack = { nav.pop() }, subtitle = session?.let { "${dateTimeOf(it.start)}, ${it.durationS.toInt()} s" }) {
         val s = session ?: run { MutedText("Loading…"); return@Screen }
@@ -174,7 +178,8 @@ fun CheckResultScreen(controller: HeartlineController, id: String, nav: Navigato
                 MutedText((s.notes.filterNot { it.contains("diagnosis") } + DISCLAIMER).joinToString(" "))
             }
         }
-        CheckGlance(s, history, resting)
+        if (friend) { Gap(10); dev.heartline.ui.components.Note("A friend's check, so it is read on its own: nothing here is compared with your range or resting heart rate.") }
+        CheckGlance(s, history, resting, friend)
         Heading("The numbers")
         val grid = listOf(
             Triple("Heart rate", fmtInt(s.hr?.roundToInt()), "bpm"), Triple("HRV (RMSSD)", fmtInt(s.rmssd?.roundToInt()), "ms"),
@@ -210,7 +215,11 @@ fun CheckResultScreen(controller: HeartlineController, id: String, nav: Navigato
             Gap(6)
             MutedText("The raw light signal from the watch's green LED, filtered. Each dot is a beat Heartline found; smooth, even waves mean a good fit and a still arm.")
         }
-        CheckExplained(s, history, resting, prefs.profile.age, nav)
+        CheckExplained(s, history, resting, if (friend) null else prefs.profile.age, nav, friend)
+        WhoseSection("check", friend, { controller.setFriend(dev.heartline.app.FriendMark.Kind.CHECK, id, s.start, s.start + s.durationS.toLong() + 1, it) },
+            "Delete this check", { confirm = true })
+        if (confirm) ConfirmDelete("Delete this heart check?", "Taken ${dateTimeOf(s.start)}. Its recording and results are removed from this phone. This can't be undone.",
+            onDelete = { confirm = false; controller.deleteCheck(id); nav.pop() }, onDismiss = { confirm = false })
     }
 }
 

@@ -19,7 +19,7 @@
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
-> **Status: 0.3.1.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
+> **Status: 0.4.0.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
 > Other Huami/Zepp watches of the same generation (GTR 2, GTS 2, GTS 2e) speak a similar protocol but are untested.
 
 ## Highlights
@@ -129,12 +129,20 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
   settings merge into the capture; treadmill walks give a VO2max estimate.
 
 **Watch control, like Zepp**
-- **Phone notifications** on your wrist (per-app icons), incoming calls, find phone, music control.
+- **Phone notifications** on your wrist (per-app icons), find phone, music control.
+- **Incoming calls** with the caller's name, ringing on the wrist until you answer or the call ends; reject or
+  silence them from the watch.
 - **Watch settings**: all-day heart rate and stress monitoring, lift-to-wake (scheduled), do not disturb
   (scheduled), move reminders, high heart rate alerts, disconnect alert, language, wrist, step goal and more.
 - **Watch app list**: choose and order the apps, and what goes in the More screen.
 - **Alarms, calendar reminders, weather** for where your phone is (Open-Meteo, no API key), vibration counts, set
   clock, find watch.
+
+**Lent the watch to a friend?**
+- Start a heart check or a gym capture **for a friend** (in the app, or by asking the watch's assistant), or mark one
+  afterwards, along with any watch workout. It stays in Heartline with a Friend label, and its time on the wrist is
+  left out of your days, trends, readiness, Health Connect and the assistant's answers.
+- **Delete** heart checks, captures, sensor recordings and watch workouts you don't want.
 
 **AI insights**
 - The model you choose under AI models, with its fallbacks. Two weeks of readiness, trends, sleep, heart rate,
@@ -152,8 +160,9 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
 - **Every request is logged** with its model, key, time and any error.
 
 **Your data stays yours**
-- Everything is stored in a local database on the phone. Export it, back it up, or share it with other apps through
-  **Health Connect** (heart rate, steps, sleep, SpO2, HRV, resting HR, skin temperature, workouts).
+- Everything is stored in a local database on the phone. Export it (your API keys stay out of the export), back it
+  up, or share it with other apps through **Health Connect** (heart rate, steps, sleep, SpO2, HRV, resting HR, skin
+  temperature, workouts).
 - **Sensors lab**: live raw pulse, motion, compass, GPS and microphone, saved to CSV.
 
 ## Download
@@ -193,6 +202,9 @@ cd heartline-zepp-alternative/android
 ./gradlew test                 # unit tests, including real recorded sessions
 ```
 
+`./gradlew assembleRelease` signs with your own key when `android/keystore.properties` names one (`storeFile`,
+`storePassword`, `keyAlias`, `keyPassword`; keep it out of git), and with the debug key otherwise.
+
 ## How it works
 
 Heartline speaks the watch's Bluetooth LE protocol directly: the Huami authentication handshake, the activity and
@@ -225,6 +237,9 @@ analysis methods in [`android/core/analytics/`](android/core/analytics) and
   arrives as notifications.
 - **Alexa alarms and reminders** made by voice can't be deleted from the phone (the watch ignores it); long-press
   them in the watch's Alarm app.
+- **Deleting a watch workout** removes it from Heartline only; the watch keeps its own copy in its workout history.
+- **Housekeeping:** raw sync data is kept for 14 days (workouts and resting heart rate for good), the Bluetooth log
+  for 7 days and the event log for 60. Your daily figures, checks and captures are kept.
 - Heart rhythm screening and all health scores are estimates for personal use, not medical advice.
 
 ## FAQ

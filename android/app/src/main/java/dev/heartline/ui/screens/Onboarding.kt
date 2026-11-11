@@ -69,7 +69,9 @@ import dev.heartline.ui.components.paper
 import dev.heartline.ui.theme.HL
 import dev.heartline.ui.theme.hue
 
-private val PERMISSIONS = arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.POST_NOTIFICATIONS)
+/** Notification permission exists from Android 13; on 12 notifications are allowed already. */
+private val PERMISSIONS = listOfNotNull(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT,
+    if (android.os.Build.VERSION.SDK_INT >= 33) Manifest.permission.POST_NOTIFICATIONS else null).toTypedArray()
 private val ADDRESS = Regex("([0-9A-F]{2}:){5}[0-9A-F]{2}")
 
 /** First run: what Heartline is, the two permissions it needs, then the watch's address and key. */
@@ -120,7 +122,7 @@ fun OnboardingScreen(controller: HeartlineController) {
                     PermissionRow(Icons.watch, "Nearby devices", "To find the watch and talk to it over Bluetooth.",
                         has(Manifest.permission.BLUETOOTH_CONNECT) && has(Manifest.permission.BLUETOOTH_SCAN))
                     PermissionRow(Icons.bell, "Notifications", "For the small notice that keeps the connection alive in the background, and for alerts.",
-                        has(Manifest.permission.POST_NOTIFICATIONS))
+                        android.os.Build.VERSION.SDK_INT < 33 || has(Manifest.permission.POST_NOTIFICATIONS))
                     if (asked && !permsOk) {
                         Gap(8)
                         Text("Some were refused. Allow them in Android Settings, Apps, Heartline, Permissions, then come back.", style = HL.type.small, color = c.pulse)

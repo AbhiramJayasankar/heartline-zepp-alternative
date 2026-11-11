@@ -65,10 +65,18 @@ class HealthRepository(private val db: HeartlineDatabase) {
     }
     suspend fun addRawFetch(ts: Double, type: String, start: Double?, reply: ByteArray, data: ByteArray) =
         addRawFetch(RawFetch(ts, type, start, Hex.encode(reply), data))
-    suspend fun rawFetches(from: Double, to: Double = Double.MAX_VALUE): List<RawFetch> = db.read {
-        it.select("SELECT ts,type,start,reply,data FROM raw_fetches WHERE ts >= ? AND ts <= ? ORDER BY ts,rowid",
-            listOf(from, to)) { c -> RawFetch(c.getDouble(0), c.getString(1), c.doubleOrNull(2), c.getString(3), c.getBlob(4)) }
+    /** Saved transfers from [from] to [to], only of [types] when given (the quick syncs add one every few minutes). */
+    suspend fun rawFetches(from: Double, to: Double = Double.MAX_VALUE, types: Set<String>? = null): List<RawFetch> = db.read {
+        val typed = types?.takeIf { t -> t.isNotEmpty() }
+        val where = typed?.let { t -> " AND type IN (" + t.joinToString(",") { "?" } + ")" }.orEmpty()
+        it.select("SELECT ts,type,start,reply,data FROM raw_fetches WHERE ts >= ? AND ts <= ?$where ORDER BY ts,rowid",
+            listOf<Any>(from, to) + typed.orEmpty()) { c -> RawFetch(c.getDouble(0), c.getString(1), c.doubleOrNull(2), c.getString(3), c.getBlob(4)) }
     }
-    fun observeRawFetches(from: Double, to: Double = Double.MAX_VALUE): Flow<List<RawFetch>> =
-        db.observe("raw_fetches") { rawFetches(from, to) }
+    fun observeRawFetches(from: Double, to: Double = Double.MAX_VALUE, types: Set<String>? = null): Flow<List<RawFetch>> =
+        db.observe("raw_fetches") { rawFetches(from, to, types) }
+    /** Deletes saved transfers of [types] from before [before]; returns how many. */
+    suspend fun pruneRawFetches(types: Set<String>, before: Double): Int = db.write(setOf("raw_fetches")) {
+        if (types.isEmpty()) 0 else it.delete("raw_fetches", "ts < ? AND type IN (" + types.joinToString(",") { "?" } + ")",
+            arrayOf(before.toString()) + types.toTypedArray())
+    }
 }

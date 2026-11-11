@@ -49,6 +49,8 @@ class RealController(
     override val events = MutableStateFlow<List<EventUi>>(emptyList())
     override val prefs = MutableStateFlow(PrefsUi())
     private val service = MutableStateFlow<WatchService?>(null)
+    /** Heart checks, captures and watch workouts that were a friend's, and the watch workouts deleted here. */
+    override val friends: StateFlow<Friends> = db.meta.observe(Friends.KEY).map { Friends.parse(it) }.stateIn(scope, SharingStarted.Eagerly, Friends())
     private var bound = false
     private var checkJob: Job? = null
     private var buffers = SensorBuffers()
@@ -80,9 +82,9 @@ class RealController(
         scope.launch { runCatching { importDroppedGymLogs() } }
         scope.launch { db.events.observeRecent(200).collect { list -> events.value = list.map { EventUi(it.ts.toLong(), it.level == "warn", it.level == "error", it.msg) } } }
         scope.launch { db.meta.observeAll().collect { meta -> sync.update { it.copy(lastActivity = meta["activity_last_sync"]?.toDoubleOrNull()?.toLong(), lastHealth = meta["health_last_sync"]?.toDoubleOrNull()?.toLong()) } } }
-        scope.launch { db.checks.observeRange().collect { list -> checks.value = list.map { c ->
+        scope.launch { db.checks.observeRange().combine(friends) { list, f -> list to f }.collect { (list, f) -> checks.value = list.map { c ->
             val duration = c.json?.let { runCatching { JSONObject(it).optDouble("duration_s").toInt() }.getOrNull() } ?: 0
-            CheckUi(c.start.toString(), c.start.toLong(), duration, c.hr, c.rmssd, rhythmStatus(c.rhythm))
+            CheckUi(c.start.toString(), c.start.toLong(), duration, c.hr, c.rmssd, rhythmStatus(c.rhythm), friend = f.isFriend(FriendMark.Kind.CHECK, c.start.toString()))
         } } }
         scope.launch { db.recordings.observeAll().collect { list -> recordings.value = list.map { r ->
             val names = r.sensors?.let { runCatching { JSONArray(it).let { a -> (0 until a.length()).map { a.getString(it) } } }.getOrNull() }.orEmpty()
@@ -101,7 +103,8 @@ class RealController(
         launch { w.battery.collect { b -> battery.value = b?.let { BatteryUi(it.level, it.charging, chargedLabel(it.lastChargeB ?: it.lastChargeA)) } } }
         launch { w.deviceInfo.collect { i -> device.value = DeviceUi("Amazfit GTR 2e", settings.watch.value.mac.orEmpty(), i["software"], i["hardware"], i["serial"]) } }
         launch { w.heartRate.collect { h -> liveHr.update { it.copy(streaming = h.streaming, bpm = h.bpm, ts = h.ts) } } }
-        launch { db.heartRate.observeSince(System.currentTimeMillis() / 1000.0 - 86400).collect { list -> liveHr.update { it.copy(recent = list.takeLast(600).map { HrPoint(it.ts.toLong(), it.bpm) }) } } }
+        launch { db.heartRate.observeSince(System.currentTimeMillis() / 1000.0 - 86400).combine(friends) { list, f -> list.filter { !f.covers(it.ts.toLong()) } }
+            .collect { list -> liveHr.update { it.copy(recent = list.takeLast(600).map { HrPoint(it.ts.toLong(), it.bpm) }) } } }
         launch { w.steps.collect { s -> steps.value = s?.let { StepsUi(it.steps, it.distanceM, it.calories) } } }
         launch { w.sync.collect { state -> sync.update { it.copy(running = state.running, message = state.message) } } }
         launch { w.raw.collect { r ->
@@ -119,10 +122,13 @@ class RealController(
     private suspend fun observeDaily() {
         val from = LocalDate.now(zone).minusDays(40).atStartOfDay(zone).toEpochSecond().toDouble()
         val tick = flow { while (currentCoroutineContext().isActive) { emit(ZonedDateTime.now(zone)); delay(60_000) } }
-        combine(db.activity.observeRange(from, Double.MAX_VALUE), db.health.observeByType(from), db.insights.observeAll(), settings.profile, tick) { rows, health, insights, p, now ->
+        combine(db.activity.observeRange(from, Double.MAX_VALUE), db.health.observeByType(from), db.insights.observeAll(), settings.profile,
+            tick.combine(friends) { now, f -> now to f }) { rows, allHealth, allInsights, p, (now, f) ->
             val previousKind = db.activity.prevKind(from)
+            val health = allHealth.mapValues { (_, list) -> list.filter { !f.covers(it.ts) } }
+            val insights = allInsights.filter { i -> i.start?.let { !f.covers(it.toLong()) } ?: true }
             withContext(Dispatchers.Default) {
-                val minutes = analyticsMinutes(rows, previousKind)
+                val minutes = analyticsMinutes(friendFree(rows, f, previousKind), previousKind)
                 // Skin temperature only: readings off the wrist, settling or spiking are left out of the daily values.
                 val hrMinutes = minutes.filter { it.hr != null && it.hr in 30..220 }.map { it.ts / 60 }.toHashSet()
                 val skin = skinTemperatures(health["temperature"].orEmpty().mapNotNull { h -> h.value?.let { TempReading(h.ts.toLong(), it, sensor2(h.extra)) } }, hrMinutes)
@@ -134,7 +140,7 @@ class RealController(
                     skin.map { HealthValue("temperature", it.ts, it.value) }
                 val summaries = insights.mapNotNull { i -> i.start?.let { CheckSummary(it, i.rmssd, i.hr, i.quality ?: 0.0, i.usableS ?: 0.0, i.rhythm) } }
                 val profile = Profile(p.age, p.sex?.name?.lowercase(), p.weightKg, p.heightCm, p.maxHr, p.restingHr)
-                val watchRows = db.health.workouts(from)
+                val watchRows = db.health.workouts(from).filter { !f.dropsWorkout(it.start) }
                 val log = gymLogFromJson(db.meta.get(GYM_LOG_KEY))
                 val efforts = watchRows.mapNotNull { w -> runCatching { org.json.JSONObject(w.data) }.getOrNull()?.let { j ->
                     WorkoutEffort(j.optLong("start", w.start), j.optString("type"), j.optInt("active_s", j.optInt("duration_s")),
@@ -161,10 +167,11 @@ class RealController(
     override fun healthDay(date: LocalDate): Flow<HealthDayUi> {
         val from = date.atStartOfDay(zone).toEpochSecond(); val to = date.plusDays(1).atStartOfDay(zone).toEpochSecond()
         return combine(activityDay(date), db.heartRate.observeRange(from.toDouble(), to - 1.0), db.health.observeByType(from.toDouble(), to - 1.0),
-            settings.profile, steps) { day, live, health, p, st ->
+            settings.profile.combine(friends) { p, f -> p to f }, steps) { day, allLive, health, (p, f), st ->
+            val live = allLive.filter { !f.covers(it.ts.toLong()) }
             withContext(Dispatchers.Default) {
-                val minutes = analyticsMinutes(db.activity.range(from - 86_400.0, to - 1.0))
-                val (values, spo2Aside) = cleanSleepSpo2(health.values.flatten().mapNotNull { h -> h.value?.let { DayHealthValue(h.type, h.ts, it, h.extra) } }, minutes)
+                val minutes = analyticsMinutes(friendFree(db.activity.range(from - 86_400.0, to - 1.0), f))
+                val (values, spo2Aside) = cleanSleepSpo2(health.values.flatten().filter { !f.covers(it.ts) }.mapNotNull { h -> h.value?.let { DayHealthValue(h.type, h.ts, it, h.extra) } }, minutes)
                 val daily = computeDaily(minutes,
                     values.map { HealthValue(it.type, it.ts, it.value) }, emptyList(),
                     Profile(p.age, p.sex?.name?.lowercase(), p.weightKg, p.heightCm, p.maxHr, p.restingHr), 2, date.atTime(23, 59).atZone(zone))
@@ -182,12 +189,15 @@ class RealController(
         val from = date.atStartOfDay(zone).toEpochSecond().toDouble()
         val to = date.plusDays(1).atStartOfDay(zone).toEpochSecond().toDouble() - 1
         return combine(db.activity.observeRange(from, to), db.health.observeWorkouts(from, to), today,
-            db.health.observeRawFetches(-Double.MAX_VALUE).map { withContext(Dispatchers.Default) { storedWorkoutDetails(it) } },
-            settings.profile) { rows, workouts, _, details, profile ->
-            val minutes = mappedMinutes(rows, db.activity.prevKind(from))
+            db.health.observeRawFetches(-Double.MAX_VALUE, types = setOf("workouts", "workout_details")).map { withContext(Dispatchers.Default) { storedWorkoutDetails(it) } },
+            settings.profile.combine(friends) { p, f -> p to f }) { rows, allWorkouts, _, details, (profile, f) ->
+            val prevKind = db.activity.prevKind(from)
+            val minutes = mappedMinutes(friendFree(rows, f, prevKind), prevKind)
             val hr = minutes.mapNotNull { it.hr }
             val sleepFrom = from - 86400
-            val allRows = db.activity.range(sleepFrom, to)
+            val allRows = friendFree(db.activity.range(sleepFrom, to), f)
+            // Deleted workouts go; a friend's stays on the day's list, marked, and out of the totals.
+            val workouts = allWorkouts.filter { it.start !in f.hiddenWorkouts }
             val daily = withContext(Dispatchers.Default) { computeDaily(analyticsMinutes(allRows), emptyList(), emptyList(), Profile(), 2, date.atTime(23, 59).atZone(zone)) }
             // Workout load on the daily scale wants the same resting heart rate the daily figures use.
             val dailyRest = dev.heartline.service.captureRest(db)
@@ -198,7 +208,7 @@ class RealController(
                 minutes.count { it.state !in setOf(MinuteState.NOT_WORN, MinuteState.CHARGING) }, hr.minOrNull(), hr.takeIf { it.isNotEmpty() }?.average()?.toInt(), hr.maxOrNull(),
                 daily.days.lastOrNull { it.date == date.toString() }?.sleepUi(), workouts.map { workout ->
                     workout.ui().withWorkoutDetail(details[workout.start], ProfileUi(age = profile.age, maxHr = profile.maxHr,
-                        sex = profile.sex?.name?.lowercase(), restingHr = profile.restingHr ?: dailyRest))
+                        sex = profile.sex?.name?.lowercase(), restingHr = profile.restingHr ?: dailyRest)).copy(friend = f.covers(workout.start))
                 }, naps = daily.days.lastOrNull { it.date == date.toString() }?.naps.orEmpty())
         }
     }
@@ -208,6 +218,10 @@ class RealController(
             val path = recordingFile(file); if (path.isFile) analyzeSession(readRecording(path), file).sessionUi(id) else null
         }
     }
+    /** The watch service, started without the app's screen, hands itself over (see WatchService.onCreate). */
+    fun attach(s: WatchService) { if (service.value == null) service.value = s }
+    fun detach(s: WatchService) { if (service.value === s) { service.value = null; connection.value = ConnectionUi() } }
+
     fun startFromActivity(idle: Boolean = false) {
         if (startupHandled) return
         suppressAutomaticConnection = idle
@@ -222,7 +236,7 @@ class RealController(
         return withTimeout(10_000) { service.filterNotNull().first() }
     }
     private fun launchAction(block: suspend () -> Unit) {
-        scope.launch { try { block() } catch (e: CancellationException) { throw e } catch (e: Exception) { db.events.add("error", e.message ?: e.javaClass.simpleName) } }
+        scope.launch { try { block() } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); db.events.add("error", e.message ?: e.javaClass.simpleName) } }
     }
     private fun action(block: suspend (WatchConnection) -> Unit) = launchAction { ensureService().command(block) }
     override fun connect() {
@@ -238,7 +252,7 @@ class RealController(
         this.sensors.update { it.copy(selected = sensors) }
         action { if (!captureTask.running) { if (streaming) it.startRaw(selected) else it.stopRaw() } }
     }
-    override fun startCheck(seconds: Int) {
+    override fun startCheck(seconds: Int, forFriend: Boolean) {
         if (checkJob?.isActive == true || captureTask.running) return
         require(seconds in 10..600)
         checkRun.value = CheckRunUi(seconds, System.currentTimeMillis() / 1000, false, null, null)
@@ -261,12 +275,46 @@ class RealController(
                 db.recordings.setAnalysis(file.name, json)
                 db.insights.save(dev.heartline.data.model.InsightSession(file.name, file.lastModified() / 1000.0, result.start, result.durationS, result.signalQuality,
                     result.usableS, result.hrBpm, result.hrv.rmssdMs, result.hrv.sdnnMs, result.rhythm.status, result.respiratoryRate, json))
+                if (forFriend) FriendStore.update(db) { it.with(FriendMark(FriendMark.Kind.CHECK, result.start.toString(), result.start.toLong(),
+                    (result.start + result.durationS).toLong() + 1), true) }
                 checkRun.update { it?.copy(analysing = false, result = result.sessionUi(result.start.toString())) }
-            } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { checkRun.update { it?.copy(analysing = false, error = e.message) }; db.events.add("error", "Heart check failed: ${e.message}") }
+            } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); checkRun.update { it?.copy(analysing = false, error = e.message) }; db.events.add("error", "Heart check failed: ${e.message}") }
             finally { withContext(NonCancellable) { if (ownsRecording && s?.watch?.raw?.value?.streaming == true) runCatching { s.command { it.stopRaw() } } } }
         }
     }
+    override fun setFriend(kind: FriendMark.Kind, ref: String, from: Long, to: Long, friend: Boolean) = launchAction {
+        FriendStore.update(db) { it.with(FriendMark(kind, ref, from, to), friend) }
+        db.events.add("info", (if (friend) "Marked as a friend's: " else "Marked as yours again: ") + kind.name.lowercase() + " from " +
+            java.time.Instant.ofEpochSecond(from).atZone(zone).toLocalDateTime().toString().replace('T', ' ').take(16))
+    }
+    /** Deletes a heart check: its result, its analysis and its recording. */
+    override fun deleteCheck(id: String) = launchAction {
+        val c = db.checks.list().firstOrNull { it.start.toString() == id } ?: return@launchAction
+        db.checks.delete(c.start)
+        c.file?.let { name -> db.insights.delete(name); deleteRecordingFiles(name) }
+        FriendStore.update(db) { it.without(FriendMark.Kind.CHECK, id) }
+        db.events.add("info", "Deleted the heart check from ${dateLabel(c.start.toLong())}")
+    }
+    /** Hides a watch workout: the watch keeps its own copy and would send it again, so it is remembered as deleted. */
+    override fun deleteWatchWorkout(start: Long) = launchAction {
+        FriendStore.update(db) { f -> f.without(FriendMark.Kind.WORKOUT, start.toString()).copy(hiddenWorkouts = f.hiddenWorkouts + start) }
+        db.events.add("info", "Deleted the watch workout from ${dateLabel(start)}")
+    }
+    /** Deletes a raw recording that isn't part of a workout capture (delete the capture for those). */
+    override fun deleteRecording(file: String) = launchAction {
+        val name = File(file).name
+        val inCapture = db.meta.all().filterKeys { it.startsWith(dev.heartline.service.CAPTURE_SESSION) }.values.any { it?.contains("\"$name\"") == true }
+        check(!inCapture) { "That recording is part of a workout capture: delete the capture instead" }
+        db.checks.list().firstOrNull { it.file == name }?.let { c -> db.checks.delete(c.start); db.insights.delete(name); FriendStore.update(db) { it.without(FriendMark.Kind.CHECK, c.start.toString()) } }
+        deleteRecordingFiles(name)
+        db.events.add("info", "Deleted the recording $name")
+    }
+    private suspend fun deleteRecordingFiles(name: String) {
+        val csv = recordingFile(name)
+        withContext(Dispatchers.IO) { csv.delete(); File(csv.parentFile, csv.nameWithoutExtension + ".wav").delete() }
+        db.recordings.delete(name)
+    }
+    private fun dateLabel(ts: Long) = java.time.Instant.ofEpochSecond(ts).atZone(zone).toLocalDateTime().toString().replace('T', ' ').take(16)
     override fun cancelCheck() { checkJob?.cancel(); checkJob = null; checkRun.value = null }
     override fun vibrate() = action { it.vibrate() }
     override fun sendNotification(title: String, body: String, kind: NotifyKind, asPackage: String) = action {
@@ -281,8 +329,7 @@ class RealController(
     override fun syncNow() = launchAction {
         for (attempt in 1..2) {
             try { ensureService().command { it.readBattery(); it.syncActivity(); it.syncHealth() }; return@launchAction }
-            catch (e: CancellationException) { throw e }
-            catch (e: Exception) {
+            catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e);
                 if (attempt == 2) throw e
                 db.events.add("warn", "Sync interrupted (${e.message}); retrying once the watch reconnects")
                 delay(2000)
@@ -298,7 +345,8 @@ class RealController(
     override fun setMetric(metric: Boolean) = settings.setUnits(if (metric) Units.METRIC else Units.IMPERIAL)
     override fun setForwarding(update: ForwardingUi) {
         settings.setNotificationForwarding(NotificationForwarding(update.enabled, update.allowed, update.quietStart?.times(60), update.quietEnd?.times(60), update.calls))
-        if (update.enabled && update.calls && context.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) requestCallPermission?.invoke()
+        if (update.enabled && update.calls && listOf(Manifest.permission.READ_PHONE_STATE, Manifest.permission.ANSWER_PHONE_CALLS)
+                .any { context.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }) requestCallPermission?.invoke()
         service.value?.refreshCalls()
     }
     fun callPermissionResult(granted: Boolean) {
@@ -369,7 +417,7 @@ class RealController(
     }
     override fun exportData(uri: Uri) = launchAction {
         withContext(Dispatchers.IO) {
-            context.contentResolver.openOutputStream(uri, "wt").use { out -> Exporter.exportCsvZip(db, checkNotNull(out), -Double.MAX_VALUE, Double.MAX_VALUE) }
+            context.contentResolver.openOutputStream(uri, "wt").use { out -> Exporter.exportCsvZip(db, checkNotNull(out), -Double.MAX_VALUE, Double.MAX_VALUE, SECRET_META) }
             db.events.add("info", "Exported data")
         }
     }
@@ -401,27 +449,9 @@ class RealController(
         val wav = File(csv.parentFile, csv.nameWithoutExtension + ".wav")
         return if (wav.isFile) FileProvider.getUriForFile(context, "${context.packageName}.recordings", wav) else null
     }
-    // ---- Task A: weather on the watch, find phone, music controls. Replace these stubs. ----
-    private val taskA = TaskAController(context, scope, db, service) { ensureService() }
-    override val weather = taskA.weather
-    override val assistantAi: StateFlow<AssistantAiUi> = db.meta.observe(dev.heartline.service.AssistantAiConfig.KEY)
-        .map { dev.heartline.service.AssistantAiConfig.parse(it).let { c -> AssistantAiUi(c.apiKey.takeIf { k -> k.isNotBlank() }?.takeLast(4), c.model,
-            c.apiKey2.takeIf { k -> k.isNotBlank() }?.takeLast(4), c.apiKey3.takeIf { k -> k.isNotBlank() }?.takeLast(4)) } }
-        .stateIn(scope, SharingStarted.Eagerly, AssistantAiUi(null, dev.heartline.service.AssistantAiConfig.DEFAULT_MODEL))
-    override fun setAssistantAi(key: String?, model: String) {
-        scope.launch {
-            val saved = dev.heartline.service.AssistantAiConfig.parse(db.meta.get(dev.heartline.service.AssistantAiConfig.KEY))
-            db.meta.set(dev.heartline.service.AssistantAiConfig.KEY, saved.copy(apiKey = key?.trim() ?: saved.apiKey,
-                model = model.trim().ifEmpty { dev.heartline.service.AssistantAiConfig.DEFAULT_MODEL }).json())
-        }
-    }
-    override fun setAssistantAiExtraKey(slot: Int, key: String) {
-        scope.launch {
-            val saved = dev.heartline.service.AssistantAiConfig.parse(db.meta.get(dev.heartline.service.AssistantAiConfig.KEY))
-            val next = if (slot == 3) saved.copy(apiKey3 = key.trim()) else saved.copy(apiKey2 = key.trim())
-            db.meta.set(dev.heartline.service.AssistantAiConfig.KEY, next.json())
-        }
-    }
+    // ---- Weather on the watch, find phone, music controls ----
+    private val phone = PhoneLinkController(context, scope, db, service) { ensureService() }
+    override val weather = phone.weather
     private val alexaLock = kotlinx.coroutines.sync.Mutex()
     override val alexaSettings: StateFlow<dev.heartline.service.AlexaSettings> = db.meta.observe(dev.heartline.service.AlexaSettings.KEY)
         .map { dev.heartline.service.AlexaSettings.parse(it) }.stateIn(scope, SharingStarted.Eagerly, dev.heartline.service.AlexaSettings())
@@ -447,9 +477,6 @@ class RealController(
     override val insightsSettings: StateFlow<dev.heartline.service.InsightsSettings> = db.meta.observe(dev.heartline.service.InsightsSettings.KEY)
         .map { dev.heartline.service.InsightsSettings.parse(it) }.stateIn(scope, SharingStarted.Eagerly, dev.heartline.service.InsightsSettings())
     override fun setInsightsSettings(s: dev.heartline.service.InsightsSettings) { scope.launch { db.meta.set(dev.heartline.service.InsightsSettings.KEY, s.json()) } }
-    override suspend fun geminiModels(): List<String> = dev.heartline.service.GeminiText().listModels(
-        dev.heartline.service.SpeechConfig.parse(db.meta.get(dev.heartline.service.SpeechConfig.KEY)).geminiKey)
-
     private fun masked(s: dev.heartline.service.ai.AiSetup) = s.copy(providers = s.providers.map { p -> p.copy(keys = p.keys.map { "…" + it.takeLast(4) }) })
     override val aiSetup: StateFlow<dev.heartline.service.ai.AiSetup> = db.meta.observe(dev.heartline.service.ai.AiSetup.KEY)
         .map { masked(dev.heartline.service.ai.AiSetup.parse(it) ?: ai.setup()) }.stateIn(scope, SharingStarted.Eagerly, dev.heartline.service.ai.AiSetup())
@@ -508,7 +535,7 @@ class RealController(
     }
 
     /** Heart checks for the insights, newest first (they aren't among the Alexa tools). */
-    private fun checksSummary(): String = checks.value.take(8).takeIf { it.isNotEmpty() }?.joinToString("\n", "## heart checks (HRV from a 1 to 5 minute rest recording, newest first)\n") { c ->
+    private fun checksSummary(): String = checks.value.filter { !it.friend }.take(8).takeIf { it.isNotEmpty() }?.joinToString("\n", "## heart checks (HRV from a 1 to 5 minute rest recording, newest first)\n") { c ->
         val t = java.time.Instant.ofEpochSecond(c.start).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("EEE d MMM HH:mm", java.util.Locale.ENGLISH))
         "$t: HRV (RMSSD) ${c.rmssd?.let { "%.0f ms".format(it) } ?: "not measured"}, heart rate ${c.hr?.let { "%.0f bpm".format(it) } ?: "-"}, rhythm ${c.rhythm.name.lowercase().replace('_', ' ')}"
     }.orEmpty()
@@ -521,7 +548,10 @@ class RealController(
             val failure = try {
                 val writer = dev.heartline.service.HealthInsights(dev.heartline.service.HealthTools(this@RealController), ai, extra = { checksSummary() })
                 db.meta.set(dev.heartline.service.InsightReport.KEY, writer.generate(auto).json()); null
-            } catch (e: CancellationException) { throw e } catch (e: dev.heartline.service.InsightsFailed) { e
+            } catch (e: dev.heartline.service.InsightsFailed) { e
+            } catch (e: CancellationException) {
+                currentCoroutineContext().ensureActive()
+                dev.heartline.service.InsightsFailed(listOf(dev.heartline.service.InsightAttempt("heartline", "-", 0, "timed out")))
             } catch (e: Exception) { dev.heartline.service.InsightsFailed(listOf(dev.heartline.service.InsightAttempt("heartline", "-", 0, e.message ?: e.toString()))) }
             insightsRun.value = InsightsRun(false, failure?.message, failure?.attempts ?: emptyList())
             if (auto) autoInsights.lastTry = System.currentTimeMillis()
@@ -600,12 +630,6 @@ class RealController(
             db.meta.set(dev.heartline.service.WebSearchConfig.KEY, next.json())
         }
     }
-    override val speech: StateFlow<SpeechUi> = db.meta.observe(dev.heartline.service.SpeechConfig.KEY)
-        .map { SpeechUi(dev.heartline.service.SpeechConfig.parse(it).geminiKey.takeIf { k -> k.isNotBlank() }?.takeLast(4)) }
-        .stateIn(scope, SharingStarted.Eagerly, SpeechUi(null))
-    override fun setGeminiKey(key: String) {
-        scope.launch { db.meta.set(dev.heartline.service.SpeechConfig.KEY, dev.heartline.service.SpeechConfig(key.trim()).json()) }
-    }
     /** The same assistant the watch uses; the test buttons run it as a dry run. */
     private val testAssistant by lazy { dev.heartline.service.watchAssistant(context, db, settings, this) }
     override suspend fun testSpeech(): String = withContext(Dispatchers.IO) {
@@ -614,7 +638,7 @@ class RealController(
         val d = wav.readBytes()
         val pcm = ShortArray((d.size - 44) / 2) { i -> ((d[44 + 2 * i].toInt() and 255) or (d[45 + 2 * i].toInt() shl 8)).toShort() }
         val started = System.nanoTime()
-        val heard = try { dev.heartline.service.VoiceToText(ai).transcribe(pcm, alexaSettings.value) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
+        val heard = try { dev.heartline.service.VoiceToText(ai).transcribe(pcm, alexaSettings.value) } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e);
             return@withContext "Voice to text failed after ${"%.1f".format((System.nanoTime() - started) / 1e9)} s: ${e.message}"
         }
         "${heard.engine} heard \"${heard.text}\" (${"%.1f".format(pcm.size / 16_000.0)} s of audio, ${"%.1f".format((System.nanoTime() - started) / 1e9)} s).\n" + testAssistantAi(heard.text)
@@ -632,12 +656,12 @@ class RealController(
         }
         return "The watch would show: ${answer.summary}\n${testAssistant.lastModel ?: "OpenRouter"} took ${"%.1f".format(ms / 1000.0)} s."
     }
-    override val phoneLink = taskA.phoneLink
-    override suspend fun searchPlaces(query: String): List<PlaceUi> = taskA.searchPlaces(query)
-    override fun setWeather(enabled: Boolean, place: PlaceUi?) = taskA.setWeather(enabled, place)
-    override fun setWeatherLocation(use: Boolean) = taskA.setWeatherLocation(use)
-    override fun refreshWeather() = taskA.refreshWeather()
-    override fun setMusicControl(enabled: Boolean) = taskA.setMusicControl(enabled)
+    override val phoneLink = phone.phoneLink
+    override suspend fun searchPlaces(query: String): List<PlaceUi> = phone.searchPlaces(query)
+    override fun setWeather(enabled: Boolean, place: PlaceUi?) = phone.setWeather(enabled, place)
+    override fun setWeatherLocation(use: Boolean) = phone.setWeatherLocation(use)
+    override fun refreshWeather() = phone.refreshWeather()
+    override fun setMusicControl(enabled: Boolean) = phone.setMusicControl(enabled)
     private val customize = WatchCustomizeController(scope, db) { block -> action(block) }
     override val watchMenu = customize.watchMenu
     override val autoCapture = db.meta.observe(dev.heartline.service.WatchService.AUTO_CAPTURE).map { it == "true" }.stateIn(scope, SharingStarted.Eagerly, false)
@@ -647,27 +671,17 @@ class RealController(
     override val vibrations = customize.vibrations
     override fun setVibration(kind: String, profile: String, repeat: Int) = customize.setVibration(kind, profile, repeat)
     override fun tryVibration(kind: String, profile: String, repeat: Int) { customize.tryVibration(kind, profile, repeat) }
-    override fun stopFindPhone() = taskA.stopFindPhone()
-    // ---- end Task A ----
+    override fun stopFindPhone() = phone.stopFindPhone()
 
-
-
-
-
-    // ---- Task B: alarms and calendar reminders. Replace these stubs. ----
+    // ---- Alarms and calendar reminders ----
     private val agenda = AgendaController(context, scope, db)
     override val alarms = agenda.alarms
     override val reminders = agenda.reminders
     override fun saveAlarm(alarm: AlarmUi) = agenda.saveAlarm(alarm)
     override fun deleteAlarm(slot: Int) = agenda.deleteAlarm(slot)
     override fun setReminderSync(enabled: Boolean, calendars: Set<Long>) = agenda.setReminderSync(enabled, calendars)
-    // ---- end Task B ----
 
-
-
-
-
-    // ---- Task C: Health Connect and background state. Replace these stubs. ----
+    // ---- Health Connect and background state ----
     private val healthExporter = HealthConnectExporter.get(context)
     override val healthConnect = healthExporter.status
     override val background = MutableStateFlow(BackgroundUi())
@@ -679,24 +693,19 @@ class RealController(
         healthExporter.refresh()
     }
     init { refreshBackground() }
-    // ---- end Task C ----
 
-
-
-
-
-    // ---- Task E: workout capture. Replace these stubs. ----
+    // ---- Workout capture ----
     private val captureTask = CaptureController(scope, db, service, ai) { ensureService() }
     override val captureRun = captureTask.run
     override val captures = captureTask.items
-    override fun startCapture(label: String, minutes: Int) { if (checkJob?.isActive != true) captureTask.start(label, minutes) }
+    override fun startCapture(label: String, minutes: Int, forFriend: Boolean) { if (checkJob?.isActive != true) captureTask.start(label, minutes, forFriend) }
     override fun stopCapture() = captureTask.stop()
     override suspend fun captureDetail(id: String): CaptureAnalysisUi? = captureTask.detail(id)
     override fun deleteCapture(id: String) = captureTask.delete(id)
     override suspend fun captureCoach(id: String, facts: String, refresh: Boolean): CoachUi = captureTask.coach(id, facts, refresh)
     override suspend fun savedCaptureCoach(id: String): CoachUi? = captureTask.savedCoach(id)
     override suspend fun sleepMovement(start: Long, end: Long): SleepMovement? = withContext(Dispatchers.IO) {
-        val minutes = analyticsMinutes(db.activity.range(start - 60.0, end + 60.0))
+        val minutes = analyticsMinutes(friendFree(db.activity.range(start - 60.0, end + 60.0), friends.value))
         if (minutes.isEmpty()) return@withContext null
         val rawDir = File(context.filesDir, "raw")
         // Each overnight HRV sample's facing; samples saved before it was kept get it from their raw file while that exists.
@@ -712,8 +721,6 @@ class RealController(
         }
         sleepMovement(minutes, start, end, poses.sortedBy { it.ts })
     }
-    // ---- end Task E ----
-
 
     override val probe = MutableStateFlow<List<String>>(emptyList())
     override val watchReadback = MutableStateFlow<List<Pair<String, String>>>(emptyList())
@@ -731,7 +738,8 @@ class RealController(
         db.health.observeSeries(dev.heartline.service.OvernightHrv.DAY_SAMPLE, System.currentTimeMillis() / 1000.0 - 40 * 86_400)) { cfg, status, dayStatus, rows, dayRows ->
         val s = dev.heartline.service.OvernightSettings.parse(cfg)
         OvernightUi(s.enabled, status, rows.map(::sampleUi), s.allDay, dayStatus, dayRows.map(::sampleUi), s.nightEvery, s.nightLen, s.dayEvery, s.dayLen, s.positions)
-    }.stateIn(scope, SharingStarted.Eagerly, OvernightUi())
+    }.combine(friends) { o, f -> if (f.marks.isEmpty()) o else o.copy(samples = o.samples.filter { !f.covers(it.ts) }, daySamples = o.daySamples.filter { !f.covers(it.ts) }) }
+        .stateIn(scope, SharingStarted.Eagerly, OvernightUi())
     override val notes: StateFlow<String> = db.meta.observe("notes").map { it.orEmpty() }.stateIn(scope, SharingStarted.Eagerly, "")
     override fun saveNotes(text: String) { scope.launch { db.meta.set("notes", text) } }
     override fun setHrvSchedule(night: Boolean, everyMin: Int, lengthMin: Int) {
@@ -787,6 +795,10 @@ class RealController(
         launchAction { s.command { it.notify(title, body, kind, app, icon) } }
     }
 }
+
+/** Saved settings that hold API keys, left out of data exports. */
+internal val SECRET_META = setOf(dev.heartline.service.ai.AiSetup.KEY, dev.heartline.service.AssistantAiConfig.KEY,
+    dev.heartline.service.SpeechConfig.KEY, dev.heartline.service.WebSearchConfig.KEY)
 
 private fun sensorFromName(name: String): Sensor? = when (name.lowercase()) {
     "gyro", "gyroscope" -> Sensor.GYRO; "mag", "magnetometer" -> Sensor.MAG; "mic", "microphone" -> Sensor.MIC

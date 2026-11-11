@@ -14,5 +14,7 @@ class EventRepository(private val db: HeartlineDatabase) {
             Event(c.getDouble(0), c.getString(1), c.getString(2))
         }
     }
+    /** Deletes events from before [before]; returns how many. */
+    suspend fun prune(before: Double): Int = db.write(setOf("events")) { it.delete("events", "ts < ?", arrayOf(before.toString())) }
     fun observeRecent(limit: Int): Flow<List<Event>> = db.observe("events") { recent(limit) }
 }

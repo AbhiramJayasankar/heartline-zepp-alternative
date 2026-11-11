@@ -17,8 +17,10 @@ import dev.heartline.ui.theme.HeartlineTheme
 import dev.heartline.ui.theme.ThemeMode
 
 class MainActivity : ComponentActivity() {
-    private val callPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        (application as HeartlineApp).realController.callPermissionResult(granted)
+    private val callPermission = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+        // Ending calls from the watch is optional; seeing that the phone rings is what call alerts need.
+        (application as HeartlineApp).realController.callPermissionResult(granted[android.Manifest.permission.READ_PHONE_STATE] == true ||
+            checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) == android.content.pm.PackageManager.PERMISSION_GRANTED)
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -29,7 +31,7 @@ class MainActivity : ComponentActivity() {
         // Debug only: "demo" plus "onboarding" shows the welcome screens over the demo data, to check their design.
         if (demo && intent.getBooleanExtra("onboarding", false)) (controller as? dev.heartline.app.DemoController)?.prefs?.update { it.copy(onboarded = false) }
         // Only setForwarding (the forwarding screen's call switch) invokes this permission request.
-        app.realController.requestCallPermission = { callPermission.launch(android.Manifest.permission.READ_PHONE_STATE) }
+        app.realController.requestCallPermission = { callPermission.launch(arrayOf(android.Manifest.permission.READ_PHONE_STATE, android.Manifest.permission.ANSWER_PHONE_CALLS)) }
         if (!demo) app.realController.startFromActivity(app.debuggable && intent.getBooleanExtra("verify_idle", false))
         setContent {
             val prefs by controller.prefs.collectAsStateWithLifecycle()

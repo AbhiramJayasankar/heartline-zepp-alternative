@@ -47,8 +47,7 @@ class CaptureRunner(
                     else { save(); if (watch.ready.value) resumeStreams() }
                 }
                 for (s in stored.filter { it.end != null && (db.meta.get(CAPTURE_RESULT + it.id) == null || db.meta.get(CAPTURE_ENGINE + it.id) != captureEngineKey(db, it).first) }) {
-                    try { analyze(s) } catch (e: CancellationException) { throw e }
-                    catch (e: Exception) { db.events.add("warn", "Capture ${s.id} needs analysis retry: ${e.message}") }
+                    try { analyze(s) } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); db.events.add("warn", "Capture ${s.id} needs analysis retry: ${e.message}") }
                 }
             } } finally { initialized.complete(Unit) }
         }
@@ -71,8 +70,7 @@ class CaptureRunner(
         launchTask {
             watch.ready.collect { ready -> if (ready) lock.withLock {
                 if (session != null && !stopping) {
-                    try { resumeStreams() } catch (e: CancellationException) { throw e }
-                    catch (e: Exception) { session = session?.copy(error = "Waiting to resume: ${e.message}"); save(); publish() }
+                    try { resumeStreams() } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); session = session?.copy(error = "Waiting to resume: ${e.message}"); save(); publish() }
                 }
             } }
         }
@@ -90,7 +88,8 @@ class CaptureRunner(
         }
     }
 
-    fun start(label: String, minutes: Int) {
+    /** [forFriend]: someone else wears the watch; the capture and its time are marked as theirs ([Friends]). */
+    fun start(label: String, minutes: Int, forFriend: Boolean = false) {
         require(minutes in 1..720) { "Capture duration must be 1–720 minutes" }
         check(initialized.isCompleted) { "Capture history is still loading; try again shortly" }
         check(!active) { "A workout capture is already running" }
@@ -103,15 +102,14 @@ class CaptureRunner(
             session = CaptureSession(UUID.randomUUID().toString(), run.value!!.label, now(), minutes * 60,
                 restoreHr = watch.heartRate.value.streaming).availability(now(), false)
             save()
+            session?.let { s -> if (forFriend) FriendStore.update(db) { it.with(FriendMark(FriendMark.Kind.CAPTURE, s.id, s.start, s.start + s.plannedS), true) } }
             try { resumeStreams() }
-            catch (e: CancellationException) { throw e }
-            catch (e: Exception) {
+            catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e);
                 // A startup link loss is resumable too. A connected command failure leaves a reviewable partial capture.
                 if (!watch.ready.value) { session = session?.copy(error = "Watch disconnected; capture will resume after reconnect"); save(); publish() }
                 else finish("Capture startup failed: ${e.message}")
             }
-        } } catch (e: CancellationException) { throw e }
-        catch (e: Exception) {
+        } } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e);
             active = session != null
             run.update { it?.copy(error = "Unable to start capture: ${e.message}") }
             db.events.add("error", "Unable to start capture: ${e.message}")
@@ -134,13 +132,15 @@ class CaptureRunner(
         try {
             // Both commands also clear wanted-stream flags while disconnected, preventing a post-stop restart.
             val failures = ArrayList<String>()
-            try { watch.stopRaw() } catch (e: CancellationException) { throw e } catch (e: Exception) { failures += "Stopping motion: ${e.message}" }
-            try { watch.setLiveHr(current.restoreHr) } catch (e: CancellationException) { throw e } catch (e: Exception) { failures += "Restoring live HR: ${e.message}" }
+            try { watch.stopRaw() } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); failures += "Stopping motion: ${e.message}" }
+            try { watch.setLiveHr(current.restoreHr) } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); failures += "Restoring live HR: ${e.message}" }
             val s = (session ?: current).finish(endAt).copy(error = (listOfNotNull(error) + failures).takeIf { it.isNotEmpty() }?.joinToString(" "))
             session = s; save()
+            // A friend's capture covers the time it really ran, not the time planned.
+            if (FriendStore.read(db).isFriend(FriendMark.Kind.CAPTURE, s.id))
+                FriendStore.update(db) { it.with(FriendMark(FriendMark.Kind.CAPTURE, s.id, s.start, s.end ?: endAt), true) }
             try { analyze(s) }
-            catch (e: CancellationException) { throw e }
-            catch (e: Exception) {
+            catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e);
                 session = s.copy(error = "Capture analysis failed: ${e.message}"); save()
                 db.events.add("error", "Capture analysis failed: ${e.message}")
             }
@@ -181,6 +181,7 @@ class CaptureRunner(
         check(session?.id != id) { "Stop the capture before deleting it" }
         // Its AI name goes too, even when the session itself is already gone.
         db.meta.delete(dev.heartline.app.CAPTURE_TITLE + id); db.meta.delete(dev.heartline.app.CAPTURE_COACH + id)
+        FriendStore.update(db) { it.without(FriendMark.Kind.CAPTURE, id) }
         val s = db.meta.get(CAPTURE_SESSION + id)?.let(::captureSession) ?: return@withLock
         for (name in s.files) {
             val file = captureFile(folder, name)
@@ -188,13 +189,11 @@ class CaptureRunner(
             db.recordings.delete(name)
         }
         db.meta.delete(CAPTURE_RESULT + id); db.meta.delete(CAPTURE_SESSION + id); db.meta.delete(CAPTURE_ENGINE + id)
-    } } catch (e: CancellationException) { throw e }
-    catch (e: Exception) { db.events.add("error", "Unable to delete capture: ${e.message}") } } }
+    } } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); db.events.add("error", "Unable to delete capture: ${e.message}") } } }
 
     private suspend fun save() { session?.let { db.meta.set(CAPTURE_SESSION + it.id, it.json()) } }
     private fun launchTask(block: suspend () -> Unit) = scope.launch {
-        try { block() } catch (e: CancellationException) { throw e }
-        catch (e: Exception) {
+        try { block() } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e);
             run.update { it?.copy(error = "Capture task failed: ${e.message}") }
             runCatching { db.events.add("error", "Capture task failed: ${e.message}") }
         }

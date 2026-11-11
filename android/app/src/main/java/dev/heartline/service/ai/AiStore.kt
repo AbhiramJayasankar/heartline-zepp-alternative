@@ -53,7 +53,7 @@ class AiStore(
                     val list = api.models(p, key)
                     cat = AiCatalog(cat.models.filter { it.ref.provider != p.id } + list, cat.fetchedAt + (p.id to clock() / 1000), cat.errors - p.id)
                     err = null; break
-                } catch (e: CancellationException) { throw e } catch (e: Exception) { err = AiErrors.of(e).message }
+                } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); err = AiErrors.of(e).message }
             }
             if (err != null) cat = cat.copy(errors = cat.errors + (p.id to err))
         }
@@ -68,7 +68,7 @@ class AiStore(
     suspend fun testKeys(providerId: String): List<String?> {
         val p = setup().provider(providerId) ?: return emptyList()
         return p.keys.map { key ->
-            try { api.models(p, key).let { null } } catch (e: CancellationException) { throw e } catch (e: Exception) {
+            try { api.models(p, key).let { null } } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e);
                 val a = AiErrors.of(e); "${a.kind.label}: ${a.message}"
             }
         }

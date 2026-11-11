@@ -490,7 +490,7 @@ private fun formatTick(v0: Double): String = (v0 + 0.0).let { v -> if (abs(v) >=
 /** A chart on its own, full screen and turned to landscape, with a close button. [content] gets the height to fill. */
 @Composable
 fun FullscreenChart(title: String, onClose: () -> Unit, content: @Composable (Dp) -> Unit) {
-    val activity = androidx.compose.ui.platform.LocalContext.current as? android.app.Activity
+    val activity = androidx.activity.compose.LocalActivity.current
     androidx.compose.runtime.DisposableEffect(Unit) {
         val before = activity?.requestedOrientation
         activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE

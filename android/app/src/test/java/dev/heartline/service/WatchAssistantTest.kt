@@ -34,7 +34,7 @@ class WatchAssistantTest {
     private val did = ArrayList<String>()
     private var running: String? = null
     private val actions = object : AssistantActions {
-        override fun startWorkout(label: String, minutes: Int) { check(running == null) { "A workout capture is already running" }; running = label; did += "start $label $minutes" }
+        override fun startWorkout(label: String, minutes: Int, forFriend: Boolean) { check(running == null) { "A workout capture is already running" }; running = label; did += "start $label $minutes" }
         override fun stopWorkout(): String? = running?.let { did += "stop"; running = null; "$it after 12 minutes" }
         override fun sync() { did += "sync" }
         val alarms = mutableListOf(WatchAlarm(0, true, 7, 0, setOf(java.time.DayOfWeek.MONDAY), false), WatchAlarm(10, false, null, null, emptySet(), true))

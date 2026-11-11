@@ -63,8 +63,7 @@ internal class HealthConnectExporter(private val context: Application, private v
                 skin = hc.features.getFeatureStatus(HealthConnectFeatures.FEATURE_SKIN_TEMPERATURE) == HealthConnectFeatures.FEATURE_STATUS_AVAILABLE
                 if (!hc.permissionController.getGrantedPermissions().containsAll(permissions)) availability = HealthConnectStatus.NEEDS_PERMISSION
             } else { client = null; skin = false }
-        } catch (e: CancellationException) { throw e }
-        catch (_: Exception) { availability = HealthConnectStatus.UNAVAILABLE }
+        } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); availability = HealthConnectStatus.UNAVAILABLE }
         state.value = HealthConnectUi(availability, enabled, last, result)
         return enabled && availability == HealthConnectStatus.READY
     }
@@ -77,6 +76,8 @@ internal class HealthConnectExporter(private val context: Application, private v
         val version = maxOf(System.currentTimeMillis(), (db.meta.get("health_connect_version")?.toLongOrNull() ?: 0) + 1)
         db.meta.set("health_connect_version", version.toString())
         val mapper = HealthRecordMapping(version, ZoneId.systemDefault())
+        // A friend's time on the watch, and deleted watch workouts, never go to Health Connect.
+        val friends = FriendStore.read(db)
         val counts = linkedMapOf<String, Int>()
         try {
             suspend fun write(type: String, label: String, load: suspend (Long) -> List<ExportItem<Record>>) {
@@ -106,16 +107,20 @@ internal class HealthConnectExporter(private val context: Application, private v
                 counts[label] = written
             }
             // Read complete buckets and whole sleep nights even if the replay window begins mid-bucket/night.
-            suspend fun minutes(from: Long) = db.activity.minutes(Math.floorDiv(from, 86400).toDouble() * 86400, (now - 60).toDouble())
+            suspend fun minutes(from: Long): List<dev.heartline.data.model.ActivityMinute> {
+                val start = Math.floorDiv(from, 86400).toDouble() * 86400
+                val prev = db.activity.prevKind(start)
+                return dev.heartline.data.activityMinutes(friendFree(db.activity.range(start, (now - 60).toDouble()), friends, prev), prev)
+            }
             write("hr", "heart rate samples") { from ->
-                mapper.heartRate(minutes(from), db.heartRate.range(Math.floorDiv(from, 86400).toDouble() * 86400, now.toDouble()))
+                mapper.heartRate(minutes(from), db.heartRate.range(Math.floorDiv(from, 86400).toDouble() * 86400, now.toDouble()).filter { !friends.covers(it.ts.toLong()) })
             }
             write("steps", "step buckets") { mapper.steps(minutes(it)) }
             write("sleep", "nights of sleep") { from ->
                 val complete = Instant.ofEpochSecond(from).atZone(ZoneId.systemDefault()).minusDays(1).toLocalDate().atStartOfDay(ZoneId.systemDefault()).toEpochSecond()
                 mapper.sleep(minutes(complete))
             }
-            write("oxygen", "oxygen readings") { mapper.oxygen(db.health.byType(it.toDouble(), now.toDouble()).values.flatten()) }
+            write("oxygen", "oxygen readings") { mapper.oxygen(db.health.byType(it.toDouble(), now.toDouble()).values.flatten().filter { p -> !friends.covers(p.ts) }) }
             write("resting", "daily resting heart rates") { from ->
                 val dayStart = Instant.ofEpochSecond(from).atZone(ZoneId.systemDefault()).toLocalDate().atStartOfDay(ZoneId.systemDefault()).toEpochSecond()
                 val points = db.health.series("resting_hr", dayStart.toDouble(), now.toDouble()).toMutableList()
@@ -126,15 +131,16 @@ internal class HealthConnectExporter(private val context: Application, private v
                             .map { HealthPoint(it.type, it.ts, it.value) }
                     }
                 }
-                mapper.resting(points.distinctBy { it.ts })
+                mapper.resting(points.distinctBy { it.ts }.filter { !friends.covers(it.ts) })
             }
-            suspend fun checks(from: Long): List<ExportCheck> = db.checks.list(from.toDouble(), now.toDouble()).map { c ->
+            suspend fun checks(from: Long): List<ExportCheck> = db.checks.list(from.toDouble(), now.toDouble())
+                .filter { !friends.isFriend(FriendMark.Kind.CHECK, it.start.toString()) && !friends.covers(it.start.toLong()) }.map { c ->
                 val j = c.json?.let { JSONObject(it) }
                 ExportCheck(c.start, c.rmssd, j?.number("respiratory_rate"))
             }
             write("hrv", "HRV measurements") { mapper.checks(checks(it), false) }
             write("respiratory", "breathing measurements") { mapper.checks(checks(it), true) }
-            suspend fun workouts(from: Long) = db.health.workouts(from.toDouble(), now.toDouble()).map { row ->
+            suspend fun workouts(from: Long) = db.health.workouts(from.toDouble(), now.toDouble()).filter { !friends.dropsWorkout(it.start) }.map { row ->
                 val j = JSONObject(row.data)
                 ExportWorkout(row.start, j.number("end")?.toLong() ?: (row.start + (j.number("duration_s")?.toLong() ?: 0)),
                     j.optString("type", "Workout"), j.number("distance_m"), j.number("calories"))
@@ -143,7 +149,7 @@ internal class HealthConnectExporter(private val context: Application, private v
                 write(type, label) { mapper.workouts(workouts(it), type) }
             }
             if (skin) write("temperature", "skin temperature buckets") {
-                mapper.temperature(db.health.series("temperature", Math.floorDiv(it, 900).toDouble() * 900, now.toDouble()))
+                mapper.temperature(db.health.series("temperature", Math.floorDiv(it, 900).toDouble() * 900, now.toDouble()).filter { p -> !friends.covers(p.ts) })
             }
             val written = counts.filterValues { it > 0 }
             val result = if (written.isEmpty()) "Health Connect is up to date." else "Wrote " + written.entries.joinToString(", ") { (label, count) ->
@@ -153,8 +159,7 @@ internal class HealthConnectExporter(private val context: Application, private v
             db.meta.set("health_connect_last_export", now.toString())
             db.meta.set("health_connect_last_result", result)
             refreshLocked()
-        } catch (e: CancellationException) { throw e }
-        catch (e: Exception) {
+        } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e);
             val result = "Health Connect export stopped; completed batches are safe to retry. ${e.message ?: e.javaClass.simpleName}"
             db.meta.set("health_connect_last_result", result)
             refreshLocked()

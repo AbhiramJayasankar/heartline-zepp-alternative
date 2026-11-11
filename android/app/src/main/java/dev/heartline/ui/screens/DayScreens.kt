@@ -230,7 +230,10 @@ internal fun HeartDay(d: HealthDayUi, nav: Navigator) {
         d.workouts.forEach { w ->
             Row(Modifier.fillMaxWidth().clickable { nav.push(Route.Workout(w.start, d.date.toEpochDay())) }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(w.type, style = HL.type.bodyStrong, color = c.ink)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(w.type, style = HL.type.bodyStrong, color = c.ink)
+                        if (w.friend) FriendTag(Modifier.padding(start = 8.dp))
+                    }
                     MutedText("${dev.heartline.ui.components.epochClock(w.start.toDouble())}, ${fmtHm(w.durationS / 60)}")
                 }
                 Text("${fmtInt(w.avgHr)} avg · ${fmtInt(w.maxHr)} max", style = HL.type.label, color = c.ink)
