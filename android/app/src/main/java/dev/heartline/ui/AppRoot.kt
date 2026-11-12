@@ -58,6 +58,8 @@ enum class Tab(val label: String, val icon: ImageVector) {
 
 /** Screens pushed on top of a tab. */
 sealed interface Route {
+    /** A-GPS for the watch's GPS. */
+    data object Agps : Route
     data object CheckRun : Route
     data class CheckResult(val id: String) : Route
     data class Workout(val start: Long, val epochDay: Long) : Route
@@ -151,6 +153,15 @@ fun AppRoot(controller: HeartlineController) {
     val c = HL.colors
     val top = nav.stack.lastOrNull()
     val tabScroll = remember { Tab.entries.associateWith { androidx.compose.foundation.ScrollState(0) } }
+    // Each tab, and each screen in the back stack, keeps its own state (the day it shows, how far it is scrolled, what is
+    // open) while another screen is on top; Back returns to it as it was. A screen's state goes when it is closed.
+    val saved = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+    val routeKeys = remember { mutableSetOf<String>() }
+    val liveKeys = nav.stack.mapIndexed { i, r -> "route:$i:$r" }.toSet()
+    androidx.compose.runtime.SideEffect {
+        (routeKeys - liveKeys).forEach { saved.removeState(it) }
+        routeKeys.retainAll(liveKeys); routeKeys += liveKeys
+    }
 
     Scaffold(
         containerColor = c.paper,
@@ -187,6 +198,8 @@ fun AppRoot(controller: HeartlineController) {
             dev.heartline.ui.screens.HrvCheckBanner(controller) { night -> nav.stack.clear(); tab = if (night) Tab.SLEEP else Tab.HEART }
             androidx.compose.runtime.CompositionLocalProvider(dev.heartline.ui.screens.LocalStatusBarCovered provides covered) {
             AnimatedContent(targetState = top ?: tab, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "screen") { target ->
+                val stateKey = if (target is Tab) "tab:${target.name}" else "route:${nav.stack.lastIndexOf(target).coerceAtLeast(0)}:$target"
+                saved.SaveableStateProvider(stateKey) {
                 Column(Modifier.fillMaxSize()) {
                     val syncUi by controller.sync.collectAsStateWithLifecycle()
                     val link by controller.connection.collectAsStateWithLifecycle()
@@ -213,6 +226,7 @@ fun AppRoot(controller: HeartlineController) {
                         Route.GymLog -> dev.heartline.ui.screens.GymLogScreen(controller, nav)
                         is Route.GymLogAt -> dev.heartline.ui.screens.GymLogScreen(controller, nav, target.session)
                         Route.Sensors -> SensorsScreen(controller, nav)
+                        Route.Agps -> dev.heartline.ui.screens.AgpsScreen(controller, nav)
                         Route.WatchSettings -> WatchSettingsScreen(controller, nav)
                         Route.Notes -> dev.heartline.ui.screens.NotesScreen(controller, nav)
                         is Route.Readiness -> dev.heartline.ui.screens.ReadinessScreen(controller, target.focus, nav)
@@ -240,6 +254,7 @@ fun AppRoot(controller: HeartlineController) {
                         else -> Unit
                     }
                     }
+                }
                 }
             }
             }

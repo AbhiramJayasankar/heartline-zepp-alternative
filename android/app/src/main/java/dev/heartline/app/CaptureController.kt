@@ -17,15 +17,17 @@ internal class CaptureController(
     val running: Boolean get() = starting || service.value?.captureRunner?.active == true
     init {
         scope.launch { service.collectLatest { s -> if (s != null) s.captureRunner.run.collect { run.value = it } } }
-        scope.launch { db.meta.observeAll().collect { meta ->
+        scope.launch { db.meta.observeMatching(listOf(CAPTURE_SESSION, CAPTURE_RESULT, CAPTURE_TITLE), setOf(GYM_LOG_KEY, Friends.KEY, HR_REST_KEY)).collect { meta ->
+            val rest = meta[HR_REST_KEY]?.toIntOrNull()?.takeIf { it in 30..120 }
             val log = gymLogFromJson(meta[GYM_LOG_KEY])
             val friends = Friends.parse(meta[Friends.KEY])
             val facts = HashMap<String, TitleFacts>()
+            val tp = System.nanoTime()
             items.value = withContext(Dispatchers.Default) {
                 meta.filterKeys { it.startsWith(CAPTURE_SESSION) }.values.mapNotNull { value ->
                     runCatching {
                         val session = captureSession(value ?: return@runCatching null)
-                        val result = meta[CAPTURE_RESULT + session.id]?.let { runCatching { captureFromJson(it) }.getOrNull() }
+                        val result = meta[CAPTURE_RESULT + session.id]?.let { runCatching { parsed(session.id, it) }.getOrNull() }?.withRest(rest)
                         val item = session.captureItem(result, System.currentTimeMillis() / 1000)
                             .copy(friend = friends.isFriend(FriendMark.Kind.CAPTURE, session.id))
                         if (result != null && genericLabel(item.label)) facts[item.id] = titleFacts(result, log)
@@ -36,12 +38,21 @@ internal class CaptureController(
                     }.getOrNull()
                 }.sortedByDescending { it.start }
             }
+            perfLog("captures list", tp)
             nameCaptures(facts, meta)
             // Names whose recording is gone (deleted while a name was on its way) are dropped.
             if (naming?.isActive != true) meta.keys.filter { it.startsWith(CAPTURE_TITLE) && (CAPTURE_SESSION + it.removePrefix(CAPTURE_TITLE)) !in meta }
                 .forEach { db.meta.delete(it) }
         } }
     }
+    /** Parsed analyses by capture, kept while their JSON is unchanged: the list is rebuilt on every capture change. */
+    private val parsedCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Int, CaptureAnalysisUi>>()
+    private fun parsed(id: String, json: String): CaptureAnalysisUi {
+        val key = json.length * 31 + json.hashCode()
+        parsedCache[id]?.takeIf { it.first == key }?.let { return it.second }
+        return captureFromJson(json).also { parsedCache[id] = key to it }
+    }
+
     fun start(label: String, minutes: Int, forFriend: Boolean = false) {
         if (running) return
         starting = true
@@ -60,7 +71,7 @@ internal class CaptureController(
     suspend fun detail(id: String): CaptureAnalysisUi? {
         val session = db.meta.get(CAPTURE_SESSION + id)?.let { runCatching { captureSession(it) }.getOrNull() }
         val a = db.meta.get(CAPTURE_RESULT + id)?.takeIf { session != null && db.meta.get(CAPTURE_ENGINE + id) == captureEngineKey(db, session).first }
-            ?.let { withContext(Dispatchers.Default) { captureFromJson(it) } } ?: ensureService().captureRunner.detail(id)
+            ?.let { withContext(Dispatchers.Default) { parsed(id, it) } }?.withRest(captureRest(db)) ?: ensureService().captureRunner.detail(id)
         return a?.let { r -> titleOf(db.meta.get(CAPTURE_TITLE + id))?.takeIf { genericLabel(r.label) }?.let { r.copy(label = it) } ?: r }
     }
 

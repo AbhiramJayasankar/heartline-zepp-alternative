@@ -29,6 +29,18 @@ class WorkoutCaptureTest {
         assertEquals(10.0, rec.start, 0.0); assertEquals(1, rec.acc.size); assertEquals(1, rec.gyro.size)
     }
 
+    /** The stored histogram rescored for a new resting heart rate equals a full re-analysis with it. */
+    @Test fun loadFromStoredHistogramMatchesReanalysis() {
+        val rec = recording(300, ::still); val beats = hr(300) { 95 + (it * 7) % 90 }
+        val first = analyzeCapture(rec, beats, Profile(maxHr = 195, sex = "female"), "a", hrRest = 60.0)
+        assertEquals(300, first.hrSeconds.values.sum())
+        for (rest in listOf(48.0, 60.0, 71.5)) {
+            val again = analyzeCapture(rec, beats, Profile(maxHr = 195, sex = "female"), "a", hrRest = rest)
+            assertEquals(again.load!!, captureLoad(first.hrSeconds, rest, first.loadMaxHr!!, first.loadSex)!!, 1e-9)
+        }
+        assertNull(captureLoad(first.hrSeconds, 20.0, 195, null)); assertNull(captureLoad(emptyMap(), 60.0, 195, null))
+    }
+
     @Test fun fiveKnownZonesProduceBanisterLoadAndFiveSecondHrBins() {
         val r = analyzeCapture(recording(300, ::still), hr(300) { 100 + it / 60 * 20 }, Profile(maxHr = 200), "zones", hrRest = 60.0)
         assertEquals(listOf(60, 60, 60, 60, 60), r.zones.map { it.seconds })

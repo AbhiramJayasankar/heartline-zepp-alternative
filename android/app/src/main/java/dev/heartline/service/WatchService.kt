@@ -24,6 +24,9 @@ class WatchService : Service() {
         private set
     lateinit var captureRunner: CaptureRunner
         private set
+    /** A-GPS data for the watch's GPS, from Zepp ([AgpsUpdater]). */
+    lateinit var agps: AgpsUpdater
+        private set
     private lateinit var calls: CallForwarder
     private lateinit var agenda: WatchAgendaSync
     inner class LocalBinder : Binder() { val service get() = this@WatchService }
@@ -33,6 +36,8 @@ class WatchService : Service() {
         super.onCreate()
         watch = WatchConnection(this, scope, app.watchStore)
         captureRunner = CaptureRunner(scope, app.db, watch, app.settings, java.io.File(filesDir, "raw"))
+        agps = AgpsUpdater(this, app.db, watch)
+        scope.launch { runCatching { agps.load() } }
         app.settings.watch.value.mac?.let { CompanionLink.observe(this, it) }
         phoneFeatures = PhoneFeatures(this, scope, app.db, watch, app.settings)
         watch.onSuccessfulSync = { dev.heartline.app.HealthConnectExporter.get(this).afterSync() }
@@ -124,6 +129,14 @@ class WatchService : Service() {
                     // The watch's clock, every 6 hours (Zepp sets it on connecting); a time zone change sends it at once.
                     launch { periodic(6 * 3600_000L, CLOCK_SET) { watch.syncTime(); app.db.meta.set(CLOCK_SET, (System.currentTimeMillis() / 1000).toString()) } }
                     launch { periodic(30 * 60_000L, "battery_last_read") { watch.readBattery(); app.db.meta.set("battery_last_read", (System.currentTimeMillis() / 1000).toString()) } }
+                    // A-GPS every 3 days when signed in to Zepp, a few minutes after connecting and never during a recording.
+                    launch {
+                        delay(3 * 60_000L)
+                        while (isActive) {
+                            if (!captureRunner.active && !watch.raw.value.streaming) agps.maybeAuto()
+                            delay(3600_000L)
+                        }
+                    }
                     // Short heart checks while asleep, when turned on (Sleep page).
                     launch { OvernightHrv(app, watch, { watch.raw.value.streaming || captureRunner.active }, java.io.File(filesDir, "raw")).run() }
                 }

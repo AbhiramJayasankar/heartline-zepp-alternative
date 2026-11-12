@@ -147,6 +147,14 @@ object Icons {
         moveTo(12f, 3f); lineTo(13.8f, 10.2f); lineTo(21f, 12f); lineTo(13.8f, 13.8f); lineTo(12f, 21f); lineTo(10.2f, 13.8f); lineTo(3f, 12f); lineTo(10.2f, 10.2f); close()
     }
 
+    /** GPS assist: a location fix, a ring with its four bearings and the point at the centre. */
+    val gps = icon("gps") {
+        moveTo(12f, 5f); arcTo(7f, 7f, 0f, true, true, 11.99f, 5f)
+        moveTo(12f, 2f); lineTo(12f, 5f); moveTo(12f, 19f); lineTo(12f, 22f)
+        moveTo(2f, 12f); lineTo(5f, 12f); moveTo(19f, 12f); lineTo(22f, 12f)
+        moveTo(12f, 10.5f); arcTo(1.5f, 1.5f, 0f, true, true, 11.99f, 10.5f)
+    }
+
     val back = icon("back") { moveTo(15f, 5f); lineTo(8f, 12f); lineTo(15f, 19f) }
     val chevron = icon("chevron") { moveTo(9f, 5f); lineTo(16f, 12f); lineTo(9f, 19f) }
     val sync = icon("sync") {

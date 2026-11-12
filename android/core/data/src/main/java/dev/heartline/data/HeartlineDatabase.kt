@@ -26,7 +26,15 @@ class HeartlineDatabase private constructor(context: Context, name: String?) {
     val meta = MetaRepository(this)
     val insights = InsightRepository(this)
 
-    internal suspend fun <T> read(block: (SQLiteDatabase) -> T): T = withContext(Dispatchers.IO) {
+    /**
+     * Reads run side by side and alongside a write: the database is in write-ahead-log mode, so each read gets its own
+     * connection and sees the last committed state. (One lock for everything made every screen's queries wait in line
+     * behind a sync's writes and each other.)
+     */
+    internal suspend fun <T> read(block: (SQLiteDatabase) -> T): T = withContext(Dispatchers.IO) { block(helper.writableDatabase) }
+
+    /** A read that must not interleave with writes: several queries that have to see one state (a value read in pieces). */
+    internal suspend fun <T> readLocked(block: (SQLiteDatabase) -> T): T = withContext(Dispatchers.IO) {
         mutex.withLock { block(helper.writableDatabase) }
     }
 
@@ -44,6 +52,9 @@ class HeartlineDatabase private constructor(context: Context, name: String?) {
                 result
             }
         }
+
+    /** Bumped after each write to [table] through [write]. */
+    internal fun version(table: String): kotlinx.coroutines.flow.StateFlow<Long> = versions.getValue(table)
 
     internal fun <T> observe(table: String, query: suspend () -> T): Flow<T> =
         versions.getValue(table).map { query() }.flowOn(Dispatchers.IO)

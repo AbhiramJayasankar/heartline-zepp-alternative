@@ -518,6 +518,51 @@ class WatchConnection(
         log("info", "Asked ${cmd.joinToString("") { "%02x".format(it) }}: ${answer?.joinToString("") { "%02x".format(it) } ?: "no answer"}")
         answer
     }
+    /**
+     * Sends an A-GPS bundle ([Agps.bundle]) over the firmware-transfer service, as Gadgetbridge's
+     * UpdateFirmwareOperation2020 does: ask the chunk size, describe the file (type FC, size, CRC-32), start, send each
+     * chunk and wait for the watch to ask for the next offset, then complete and finalize. The watch takes about 40 s
+     * to unpack it before it answers the last step. Nothing here reboots the watch or touches its firmware.
+     * [progress] gets 0 to 100 as the data goes.
+     */
+    suspend fun uploadAgps(bundle: ByteArray, progress: (Int) -> Unit = {}) = actions.withLock {
+        require(bundle.size > 32 && String(bundle, 0, 4, Charsets.US_ASCII) == "UIHH" && bundle[4] == 4.toByte()) { "Not an A-GPS bundle" }
+        check(recording == null) { "Stop the raw sensor recording first" }
+        val c = requireClient()
+        val ctl = FirmwareTransfer.CONTROL
+        fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it) }
+        route(setOf(ctl)) { channel ->
+            c.enableNotification(ctl)
+            try {
+                suspend fun command(cmd: ByteArray, what: String, timeoutMs: Long = 15_000): ByteArray {
+                    c.write(ctl, cmd, true)
+                    val answer = reply(c, channel, timeoutMs).value
+                    check(FirmwareTransfer.ok(answer, cmd[0].toInt() and 0xFF)) { "A-GPS $what failed: " + FirmwareTransfer.refusal(answer) }
+                    return answer
+                }
+                val chunk = FirmwareTransfer.chunkLength(command(byteArrayOf(FirmwareTransfer.REQUEST_PARAMETERS.toByte()), "start"))
+                    ?.takeIf { it > 0 } ?: error("The watch didn't say how much it takes at a time")
+                command(FirmwareTransfer.info(FirmwareTransfer.TYPE_AGPS_UIHH, bundle.size, Agps.crc32(bundle), chunk), "description")
+                command(byteArrayOf(FirmwareTransfer.START.toByte(), 1), "transfer")
+                val packet = (c.mtu - 3).coerceIn(20, 512)
+                var offset = 0
+                var rounds = 0
+                val maxRounds = bundle.size / chunk * 3 + 10
+                while (offset < bundle.size) {
+                    check(++rounds <= maxRounds) { "The watch kept asking for the same data" }
+                    val end = minOf(offset + chunk, bundle.size)
+                    var at = offset
+                    while (at < end) { val n = minOf(packet, end - at); c.write(FirmwareTransfer.DATA, bundle.copyOfRange(at, at + n)); at += n }
+                    progress(end * 100 / bundle.size)
+                    val ack = reply(c, channel, 30_000).value
+                    offset = FirmwareTransfer.progress(ack)?.toInt() ?: error("A-GPS transfer failed: " + FirmwareTransfer.refusal(ack))
+                }
+                command(byteArrayOf(FirmwareTransfer.COMPLETE.toByte()), "completion")
+                command(byteArrayOf(FirmwareTransfer.FINALIZE.toByte()), "unpacking", timeoutMs = 120_000)
+            } finally { runCatching { c.enableNotification(ctl, false) } }
+        }
+        log("info", "Sent A-GPS data to the watch (${bundle.size / 1024} KB)")
+    }
     /** Height, weight, age and sex for the watch's own calorie, distance and heart-rate zone estimates ([userInfoCommand]). */
     suspend fun writeUserInfo(command: ByteArray) = actions.withLock {
         require(command.isNotEmpty() && command[0] == 0x4F.toByte())

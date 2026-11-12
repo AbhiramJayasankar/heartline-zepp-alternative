@@ -18,7 +18,15 @@ internal fun CaptureResult.captureUi(id: String) = CaptureAnalysisUi(
     pulse?.let { p -> PulseUi(p.status, p.usableS, p.windows.map { PulseWindowUi(it.start, it.end, it.beats,
         it.hrPpg, it.hrWatch, it.rmssdMs, it.nrmssd, it.status) }, p.nrmssd, p.entropy, p.ectopic,
         p.pairs, p.excerpt, p.excerptFs, p.excerptStart, p.excerptBeats, p.notes) },
-    logMatched, logTotal, unlogged.map { it.ui() })
+    logMatched, logTotal, unlogged.map { it.ui() }, hrSeconds, loadMaxHr, loadSex)
+
+/**
+ * The capture with its load scored for today's resting heart rate [rest]: that moves a beat or two as days pass, and
+ * scoring it again from the stored seconds is instant, where analysing the recording again takes seconds.
+ */
+internal fun CaptureAnalysisUi.withRest(rest: Int?): CaptureAnalysisUi =
+    if (hrSeconds.isEmpty() || loadMaxHr == null) this
+    else copy(load = dev.heartline.analytics.captureLoad(hrSeconds, rest?.toDouble(), loadMaxHr, loadSex))
 
 private fun CaptureSet.ui() = SetUi(start, end, reps, avgHr, peakHr, tempoS,
     repDetail.map { RepUi(it.t, it.durationS, it.slowS, it.fastS, it.arcDeg) }, group, activity,

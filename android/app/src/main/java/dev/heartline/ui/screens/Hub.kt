@@ -139,6 +139,7 @@ fun WatchHubScreen(controller: HeartlineController, nav: Navigator) {
                     c.ink, it) { nav.push(Route.AiModels) } },
             )
 
+            val agps by controller.agps.collectAsStateWithLifecycle()
             // ---- On the watch ----
             Heading("On your wrist")
             TileRow(
@@ -152,6 +153,15 @@ fun WatchHubScreen(controller: HeartlineController, nav: Navigator) {
             TileRow(
                 { HubTile(Icons.calendar, "Calendar", if (!reminders.enabled) "Off" else "${reminders.upcoming.size} upcoming on the watch", c.sleepDeep, it) { nav.push(Route.Reminders) } },
                 { HubTile(Icons.vibrate, "Vibration", "How it buzzes for each alert", c.ink, it) { nav.push(Route.Vibration) } },
+            )
+            TileRow(
+                { HubTile(Icons.gps, "GPS assist", when {
+                    agps.running -> "Updating"
+                    agps.signedInAs == null -> "Off: needs a Zepp sign-in"
+                    agps.validUntil?.let { t -> t > System.currentTimeMillis() / 1000 } == true -> "Current, updated ${agoOf(agps.lastUpdate!!)}"
+                    else -> "Out of date"
+                }, c.oxygen, it) { nav.push(Route.Agps) } },
+                null,
             )
 
             // ---- Phone ----

@@ -148,7 +148,8 @@ class CaptureRunner(
         } finally { session = null; stopping = false; active = false }
     }
 
-    private suspend fun analyze(s: CaptureSession) {
+    private suspend fun analyze(s: CaptureSession) { val tp = System.nanoTime(); try { analyze0(s) } finally { dev.heartline.app.perfLog("capture analyze ${s.id}", tp) } }
+    private suspend fun analyze0(s: CaptureSession) {
         val hr = db.heartRate.range(s.start.toDouble(), (s.end ?: now()).toDouble()).map { it.ts to it.bpm }
         // Include workouts starting before capture. JSON holds end; filter/clip after loading.
         val activities = db.health.workoutSummariesOverlapping(s.start.toDouble(), (s.end ?: now()).toDouble()).mapNotNull {
@@ -173,8 +174,9 @@ class CaptureRunner(
 
     suspend fun detail(id: String): CaptureAnalysisUi? = lock.withLock {
         val s = db.meta.get(CAPTURE_SESSION + id)?.let(::captureSession)
-        db.meta.get(CAPTURE_RESULT + id)?.takeIf { s != null && db.meta.get(CAPTURE_ENGINE + id) == captureEngineKey(db, s).first }
-            ?.let(::captureFromJson) ?: s?.let { if (it.end == null) null else { analyze(it); db.meta.get(CAPTURE_RESULT + id)?.let(::captureFromJson) } }
+        (db.meta.get(CAPTURE_RESULT + id)?.takeIf { s != null && db.meta.get(CAPTURE_ENGINE + id) == captureEngineKey(db, s).first }
+            ?.let(::captureFromJson) ?: s?.let { if (it.end == null) null else { analyze(it); db.meta.get(CAPTURE_RESULT + id)?.let(::captureFromJson) } })
+            ?.withRest(captureRest(db))
     }
 
     fun delete(id: String) { scope.launch { try { lock.withLock {

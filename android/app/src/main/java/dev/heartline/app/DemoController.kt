@@ -118,6 +118,11 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
         }
     }
 
+    override val agps = MutableStateFlow(dev.heartline.service.AgpsStatus(signedInAs = "you@example.com", lastUpdate = now() - 2 * 86_400))
+    override suspend fun zeppSignIn(email: String, password: String) { agps.update { it.copy(signedInAs = email) } }
+    override fun zeppSignOut() { agps.update { it.copy(signedInAs = null) } }
+    override fun updateAgps() { agps.update { it.copy(lastUpdate = now(), message = null, failed = false) } }
+    override fun setAgpsAuto(on: Boolean) { agps.update { it.copy(auto = on) } }
     override val friends = MutableStateFlow(Friends())
     override fun setFriend(kind: FriendMark.Kind, ref: String, from: Long, to: Long, friend: Boolean) {
         friends.update { it.with(FriendMark(kind, ref, from, to), friend) }

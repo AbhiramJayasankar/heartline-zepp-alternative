@@ -38,7 +38,21 @@ data class CaptureResult(
     val cardio: List<CaptureCardio> = emptyList(), val pulse: CapturePulse? = null,
     /** With a gym log: how many logged sets the watch found by itself, of how many, and what it found that isn't logged. */
     val logMatched: Int? = null, val logTotal: Int? = null, val unlogged: List<CaptureSet> = emptyList(),
+    /**
+     * Seconds at each heart rate (bpm to seconds), the maximum and the sex the load was scored with: enough to score
+     * the load again for another resting heart rate ([captureLoad]) without reading the recording.
+     */
+    val hrSeconds: Map<Int, Int> = emptyMap(), val loadMaxHr: Int? = null, val loadSex: String? = null,
 )
+
+/** The session's load (Banister TRIMP per second, as in [analyzeCapture]) from its heart-rate seconds and [rest]. */
+fun captureLoad(hrSeconds: Map<Int, Int>, rest: Double?, maxHr: Int, sex: String?): Double? {
+    val r = rest?.takeIf { it in 30.0..120.0 } ?: return null
+    if (hrSeconds.isEmpty()) return null
+    var total = 0.0
+    for ((h, n) in hrSeconds) total += banisterTrimp(listOf(h), r, maxHr, sex) * n
+    return total / 60.0
+}
 
 /** HR_MEASURE is authoritative. No PPG substitution and no interpolation across a missing HR interval. */
 fun analyzeCapture(rec: Recording, hr: List<Pair<Double, Int>>, profile: Profile, label: String,
@@ -142,7 +156,8 @@ fun analyzeCapture(rec: Recording, hr: List<Pair<Double, Int>>, profile: Profile
         if (motion.points.isEmpty()) null else sets.zipWithNext().sumOf { (a, b) ->
             if (b.start - a.end <= 600 && cardio.none { it.start < b.start && it.end > a.end }) b.start - a.end else 0.0
         }.roundToInt(), cardio, pulse,
-        merge?.first?.count { it.detected != null }, merge?.first?.size, unlogged)
+        merge?.first?.count { it.detected != null }, merge?.first?.size, unlogged,
+        hrSeconds = valid.groupingBy { it }.eachCount(), loadMaxHr = maxHr, loadSex = profile.sex)
 }
 
 private fun captureZone(hr: Int, max: Int): Int = when {

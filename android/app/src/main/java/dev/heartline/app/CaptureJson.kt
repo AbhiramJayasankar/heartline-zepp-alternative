@@ -14,6 +14,8 @@ internal fun CaptureAnalysisUi.captureJson(): String = JSONObject().apply {
     put("sets", JSONArray(sets.map { it.json() }))
     put("unlogged", JSONArray(unlogged.map { it.json() }))
     put("logMatched", logMatched ?: JSONObject.NULL); put("logTotal", logTotal ?: JSONObject.NULL)
+    put("hrSeconds", JSONArray(hrSeconds.entries.sortedBy { it.key }.map { JSONArray(listOf(it.key, it.value)) }))
+    put("loadMaxHr", loadMaxHr ?: JSONObject.NULL); put("loadSex", loadSex ?: JSONObject.NULL)
     put("rests", JSONArray(rests.map { JSONArray(listOf(it.start, it.end, it.startHr ?: JSONObject.NULL, it.endHr ?: JSONObject.NULL, it.drop60 ?: JSONObject.NULL)) }))
     put("activities", JSONArray(activities.map { JSONArray(listOf(it.start, it.end, it.type, it.activeS ?: JSONObject.NULL,
         it.distanceM ?: JSONObject.NULL, it.steps ?: JSONObject.NULL, it.calories ?: JSONObject.NULL, it.avgHr ?: JSONObject.NULL, it.maxHr ?: JSONObject.NULL)) }))
@@ -58,7 +60,9 @@ internal fun captureFromJson(json: String): CaptureAnalysisUi = JSONObject(json)
             if (p.isNull("nrmssd")) null else p.getDouble("nrmssd"), if (p.isNull("entropy")) null else p.getDouble("entropy"), p.getInt("ectopic"),
             p.getJSONArray("pairs").rows { it.getDouble(0) to it.getDouble(1) }, p.getJSONArray("excerpt").doubles(),
             p.getDouble("excerptFs"), p.getDouble("excerptStart"), p.getJSONArray("excerptBeats").doubles(), p.getJSONArray("notes").strings()) },
-        int("logMatched"), int("logTotal"), rows("unlogged") { setFromJson(it) })
+        int("logMatched"), int("logTotal"), rows("unlogged") { setFromJson(it) },
+        rows("hrSeconds") { it.getInt(0) to it.getInt(1) }.toMap(), if (o.has("loadMaxHr")) int("loadMaxHr") else null,
+        if (o.has("loadSex") && !o.isNull("loadSex")) o.getString("loadSex") else null)
 }
 
 private fun SetUi.json() = JSONArray(listOf(start, end, reps, avgHr ?: JSONObject.NULL, peakHr ?: JSONObject.NULL, tempoS ?: JSONObject.NULL,

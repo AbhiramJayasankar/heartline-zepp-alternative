@@ -81,7 +81,8 @@ class RealController(
         } }
         scope.launch { runCatching { importDroppedGymLogs() } }
         scope.launch { db.events.observeRecent(200).collect { list -> events.value = list.map { EventUi(it.ts.toLong(), it.level == "warn", it.level == "error", it.msg) } } }
-        scope.launch { db.meta.observeAll().collect { meta -> sync.update { it.copy(lastActivity = meta["activity_last_sync"]?.toDoubleOrNull()?.toLong(), lastHealth = meta["health_last_sync"]?.toDoubleOrNull()?.toLong()) } } }
+        scope.launch { combine(db.meta.observe("activity_last_sync"), db.meta.observe("health_last_sync")) { a, h -> a to h }.collect { (a, h) ->
+            sync.update { it.copy(lastActivity = a?.toDoubleOrNull()?.toLong(), lastHealth = h?.toDoubleOrNull()?.toLong()) } } }
         scope.launch { db.checks.observeRange().combine(friends) { list, f -> list to f }.collect { (list, f) -> checks.value = list.map { c ->
             val duration = c.json?.let { runCatching { JSONObject(it).optDouble("duration_s").toInt() }.getOrNull() } ?: 0
             CheckUi(c.start.toString(), c.start.toLong(), duration, c.hr, c.rmssd, rhythmStatus(c.rhythm), friend = f.isFriend(FriendMark.Kind.CHECK, c.start.toString()))
@@ -121,12 +122,16 @@ class RealController(
     }
     private suspend fun observeDaily() {
         val from = LocalDate.now(zone).minusDays(40).atStartOfDay(zone).toEpochSecond().toDouble()
-        val tick = flow { while (currentCoroutineContext().isActive) { emit(ZonedDateTime.now(zone)); delay(60_000) } }
-        combine(db.activity.observeRange(from, Double.MAX_VALUE), db.health.observeByType(from), db.insights.observeAll(), settings.profile,
+        // The clock only moves "today" along; new data wakes it at once. A sync writes in many small batches, so the
+        // 40-day sums are worked out at most every 5 s while one runs, not once per batch.
+        val tick = flow { while (currentCoroutineContext().isActive) { emit(ZonedDateTime.now(zone)); delay(5 * 60_000L) } }
+        combine(db.activity.observeRange(from, Double.MAX_VALUE).throttleLatest(5_000), db.health.observeByType(from).throttleLatest(5_000),
+            db.insights.observeAll(), settings.profile,
             tick.combine(friends) { now, f -> now to f }) { rows, allHealth, allInsights, p, (now, f) ->
             val previousKind = db.activity.prevKind(from)
             val health = allHealth.mapValues { (_, list) -> list.filter { !f.covers(it.ts) } }
             val insights = allInsights.filter { i -> i.start?.let { !f.covers(it.toLong()) } ?: true }
+            val tp = System.nanoTime()
             withContext(Dispatchers.Default) {
                 val minutes = analyticsMinutes(friendFree(rows, f, previousKind), previousKind)
                 // Skin temperature only: readings off the wrist, settling or spiking are left out of the daily values.
@@ -154,6 +159,7 @@ class RealController(
                 val awakeRest = result.days.takeLast(7).mapNotNull { it.awakeRestingHr }.takeIf { it.isNotEmpty() }?.average()
                 val vo2 = vo2max(efforts.map { it.first }, now.toEpochSecond(), awakeRest, maxHeartRate(profile), profile.sex,
                     treadmill = treadmillEfforts(log, watchRefs(watchRows), zone))
+                perfLog("observeDaily", tp)
                 result.todayUi(now.toLocalDate()) to result.trendsUi(healthByDay(values, zone = zone)).copy(vo2max = vo2.value, fitnessAge = vo2.fitnessAge, hrRest = result.trends.hrRestUsed,
                     vo2FromWorkouts = vo2.fromWorkouts, vo2StandIn = vo2.fromHeartRates, vo2Used = vo2.used,
                     // Runs, walks and treadmill sessions that didn't qualify say why; other workouts (gym and so on) are just counted.
@@ -164,33 +170,55 @@ class RealController(
             }
         }.collect { (t, tr) -> today.value = t; trends.value = tr }
     }
-    override fun healthDay(date: LocalDate): Flow<HealthDayUi> {
+    private val healthDays = java.util.concurrent.ConcurrentHashMap<LocalDate, Flow<HealthDayUi>>()
+    private val activityDays = java.util.concurrent.ConcurrentHashMap<LocalDate, Flow<ActivityDayUi>>()
+    /** What a day's page needs that is slow to work out: kept until the day's own data or the profile changes. */
+    private class DayBase(val day: ActivityDayUi, val values: List<DayHealthValue>, val spo2Aside: List<DayHealthValue>, val restingHr: Int?,
+        val awakeRestingHr: Int?, val caloriesActive: Int?, val maxHr: Int, val stride: Double)
+
+    /**
+     * One flow per day, shared by every screen showing it (Today and the Heart page asked for today three times over),
+     * kept for 15 s after the last one closes so going back and forth doesn't start again.
+     */
+    override fun healthDay(date: LocalDate): Flow<HealthDayUi> = healthDays.getOrPut(date) {
         val from = date.atStartOfDay(zone).toEpochSecond(); val to = date.plusDays(1).atStartOfDay(zone).toEpochSecond()
-        return combine(activityDay(date), db.heartRate.observeRange(from.toDouble(), to - 1.0), db.health.observeByType(from.toDouble(), to - 1.0),
-            settings.profile.combine(friends) { p, f -> p to f }, steps) { day, allLive, health, (p, f), st ->
-            val live = allLive.filter { !f.covers(it.ts.toLong()) }
-            withContext(Dispatchers.Default) {
+        val base = combine(activityDay(date), db.health.observeByType(from.toDouble(), to - 1.0).throttleLatest(2_000),
+            settings.profile.combine(friends) { p, f -> p to f }) { day, health, (p, f) ->
+            val tp = System.nanoTime()
+            try {
                 val minutes = analyticsMinutes(friendFree(db.activity.range(from - 86_400.0, to - 1.0), f))
                 val (values, spo2Aside) = cleanSleepSpo2(health.values.flatten().filter { !f.covers(it.ts) }.mapNotNull { h -> h.value?.let { DayHealthValue(h.type, h.ts, it, h.extra) } }, minutes)
                 val daily = computeDaily(minutes,
                     values.map { HealthValue(it.type, it.ts, it.value) }, emptyList(),
                     Profile(p.age, p.sex?.name?.lowercase(), p.weightKg, p.heightCm, p.maxHr, p.restingHr), 2, date.atTime(23, 59).atZone(zone))
                 val d = daily.days.lastOrNull { it.date == date.toString() }
-                val maxHr = profileMaxHr(p.maxHr, p.age) ?: 190
-                val stride = p.heightCm?.takeIf { it > 0 }?.let { it / 100 * 0.415 } ?: 0.72
-                buildHealthDay(date, from, day, live.map { HrPoint(it.ts.toLong(), it.bpm) }, values, maxHr,
-                    (d?.restingHr ?: p.restingHr?.toDouble())?.let { kotlin.math.round(it).toInt() }, d?.caloriesActive, stride,
-                    if (date == LocalDate.now(zone)) st?.distanceM else null).copy(awakeRestingHr = d?.awakeRestingHr?.let { kotlin.math.round(it).toInt() }, naps = day.naps,
-                    spo2SetAside = spo2Aside.map { SeriesPoint(it.ts.toDouble(), it.value) })
-            }
-        }
+                DayBase(day, values, spo2Aside, (d?.restingHr ?: p.restingHr?.toDouble())?.let { kotlin.math.round(it).toInt() },
+                    d?.awakeRestingHr?.let { kotlin.math.round(it).toInt() }, d?.caloriesActive, profileMaxHr(p.maxHr, p.age) ?: 190,
+                    p.heightCm?.takeIf { it > 0 }?.let { it / 100 * 0.415 } ?: 0.72)
+            } finally { perfLog("healthDay $date base", tp) }
+        }.flowOn(Dispatchers.Default)
+        val isToday = date == LocalDate.now(zone)
+        combine(base, db.heartRate.observeRange(from.toDouble(), to - 1.0).throttleLatest(2_000), friends,
+            if (isToday) steps.map { it?.distanceM }.distinctUntilChanged() else flowOf(null)) { b, allLive, f, distance ->
+            val live = allLive.filter { !f.covers(it.ts.toLong()) }
+            buildHealthDay(date, from, b.day, live.map { HrPoint(it.ts.toLong(), it.bpm) }, b.values, b.maxHr, b.restingHr, b.caloriesActive, b.stride, distance)
+                .copy(awakeRestingHr = b.awakeRestingHr, naps = b.day.naps, spo2SetAside = b.spo2Aside.map { SeriesPoint(it.ts.toDouble(), it.value) })
+        }.flowOn(Dispatchers.Default).shareIn(scope, SharingStarted.WhileSubscribed(15_000), 1)
     }
-    override fun activityDay(date: LocalDate): Flow<ActivityDayUi> {
+    /** Every watch workout's stored details, parsed once for all days and again only when a new transfer arrives. */
+    private val workoutDetails by lazy {
+        db.health.observeRawFetches(-Double.MAX_VALUE, types = setOf("workouts", "workout_details")).throttleLatest(2_000)
+            .distinctUntilChangedBy { l -> Triple(l.size, l.lastOrNull()?.ts, l.firstOrNull()?.ts) }
+            .map { storedWorkoutDetails(it) }.flowOn(Dispatchers.Default).shareIn(scope, SharingStarted.WhileSubscribed(30_000), 1)
+    }
+    override fun activityDay(date: LocalDate): Flow<ActivityDayUi> = activityDays.getOrPut(date) {
         val from = date.atStartOfDay(zone).toEpochSecond().toDouble()
         val to = date.plusDays(1).atStartOfDay(zone).toEpochSecond().toDouble() - 1
-        return combine(db.activity.observeRange(from, to), db.health.observeWorkouts(from, to), today,
-            db.health.observeRawFetches(-Double.MAX_VALUE, types = setOf("workouts", "workout_details")).map { withContext(Dispatchers.Default) { storedWorkoutDetails(it) } },
-            settings.profile.combine(friends) { p, f -> p to f }) { rows, allWorkouts, _, details, (profile, f) ->
+        // The day's active minutes come from the trends once they're worked out; only that number is watched.
+        val activeFromTrends = trends.map { t -> t?.series?.firstOrNull { it.key == "active" }?.points?.firstOrNull { it.date == date }?.value?.toInt() }.distinctUntilChanged()
+        combine(db.activity.observeRange(from, to).throttleLatest(2_000), db.health.observeWorkouts(from, to), activeFromTrends,
+            workoutDetails, settings.profile.combine(friends) { p, f -> p to f }) { rows, allWorkouts, activeTrend, details, (profile, f) ->
+            val tp = System.nanoTime()
             val prevKind = db.activity.prevKind(from)
             val minutes = mappedMinutes(friendFree(rows, f, prevKind), prevKind)
             val hr = minutes.mapNotNull { it.hr }
@@ -198,10 +226,10 @@ class RealController(
             val allRows = friendFree(db.activity.range(sleepFrom, to), f)
             // Deleted workouts go; a friend's stays on the day's list, marked, and out of the totals.
             val workouts = allWorkouts.filter { it.start !in f.hiddenWorkouts }
-            val daily = withContext(Dispatchers.Default) { computeDaily(analyticsMinutes(allRows), emptyList(), emptyList(), Profile(), 2, date.atTime(23, 59).atZone(zone)) }
+            val daily = computeDaily(analyticsMinutes(allRows), emptyList(), emptyList(), Profile(), 2, date.atTime(23, 59).atZone(zone))
             // Workout load on the daily scale wants the same resting heart rate the daily figures use.
             val dailyRest = dev.heartline.service.captureRest(db)
-            val active = trends.value?.series?.firstOrNull { it.key == "active" }?.points?.firstOrNull { it.date == date }?.value?.toInt()
+            val active = activeTrend
                 ?: daily.days.lastOrNull { it.date == date.toString() }?.activeMinutes ?: 0
             ActivityDayUi(date, minutes, minutes.sumOf { it.steps }, active,
                 minutes.count { it.state in setOf(MinuteState.SLEEP_DEEP, MinuteState.SLEEP_LIGHT, MinuteState.SLEEP_REM) },
@@ -209,9 +237,20 @@ class RealController(
                 daily.days.lastOrNull { it.date == date.toString() }?.sleepUi(), workouts.map { workout ->
                     workout.ui().withWorkoutDetail(details[workout.start], ProfileUi(age = profile.age, maxHr = profile.maxHr,
                         sex = profile.sex?.name?.lowercase(), restingHr = profile.restingHr ?: dailyRest)).copy(friend = f.covers(workout.start))
-                }, naps = daily.days.lastOrNull { it.date == date.toString() }?.naps.orEmpty())
-        }
+                }, naps = daily.days.lastOrNull { it.date == date.toString() }?.naps.orEmpty()).also { perfLog("activityDay $date", tp) }
+        }.flowOn(Dispatchers.Default).shareIn(scope, SharingStarted.WhileSubscribed(15_000), 1)
     }
+    @OptIn(ExperimentalCoroutinesApi::class)
+    override val agps: StateFlow<dev.heartline.service.AgpsStatus> = service.flatMapLatest { it?.agps?.status ?: flowOf(dev.heartline.service.AgpsStatus()) }
+        .stateIn(scope, SharingStarted.Eagerly, dev.heartline.service.AgpsStatus())
+    override suspend fun zeppSignIn(email: String, password: String) {
+        require(email.isNotBlank() && password.isNotEmpty()) { "Enter the email and password of your Zepp account" }
+        ensureService().agps.signIn(email, password)
+    }
+    override fun zeppSignOut() = launchAction { ensureService().agps.signOut() }
+    override fun updateAgps() = launchAction { ensureService().agps.update() }
+    override fun setAgpsAuto(on: Boolean) = launchAction { ensureService().agps.setAuto(on) }
+
     override suspend fun checkDetail(id: String): SessionUi? = withContext(Dispatchers.IO) {
         val c = db.checks.list().firstOrNull { it.start.toString() == id } ?: return@withContext null
         c.json?.let { sessionFromJson(it, id) } ?: c.file?.let { file ->

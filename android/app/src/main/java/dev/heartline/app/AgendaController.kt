@@ -23,7 +23,7 @@ internal class AgendaController(context: Context, private val scope: CoroutineSc
 
     init {
         scope.launch {
-            val changes = db.meta.observeAll().map { Triple(it[ALARMS_KEY], it[REMINDERS_KEY], it[REMINDERS_SYNC_KEY]) }.distinctUntilChanged().map { Unit }
+            val changes = combine(db.meta.observe(ALARMS_KEY), db.meta.observe(REMINDERS_KEY), db.meta.observe(REMINDERS_SYNC_KEY)) { a, b, c -> Triple(a, b, c) }.distinctUntilChanged().map { Unit }
             val tick = flow { while (currentCoroutineContext().isActive) { emit(Unit); delay(5 * 60_000L) } }
             merge(changes, tick).conflate().collect { runAction { refresh() } }
         }

@@ -30,6 +30,7 @@ class HeartlineApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        dev.heartline.app.perfLogging = debuggable
         dev.heartline.ble.BleLog.init(filesDir)
         dev.heartline.ble.CrashGuard.report = { e ->
             logScope.launch { runCatching { db.events.add("error", "Background task failed: ${e.message ?: e.javaClass.simpleName}") } }

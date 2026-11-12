@@ -63,6 +63,14 @@ interface HeartlineController {
     /** [asPackage] makes it look like that app's notification (its watch icon and name), e.g. "com.whatsapp". */
     fun sendNotification(title: String, body: String, kind: NotifyKind, asPackage: String = "")
     fun syncNow()
+    /** A-GPS for the watch's GPS: the Zepp sign-in it needs, when it was last sent, and an update in progress. */
+    val agps: StateFlow<dev.heartline.service.AgpsStatus>
+    /** Signs in to Zepp (the password goes to Zepp once and isn't kept); throws with a readable message. */
+    suspend fun zeppSignIn(email: String, password: String)
+    fun zeppSignOut()
+    /** Downloads the week's A-GPS data and sends it to the watch now. */
+    fun updateAgps()
+    fun setAgpsAuto(on: Boolean)
     /** Fetches only temperature, stress and SpO2: quick enough to call every minute while a page shows them. */
     fun refreshTemperature()
     fun setWatchClock()
@@ -309,6 +317,8 @@ data class CaptureAnalysisUi(
     val cardio: List<CardioUi> = emptyList(), val pulse: PulseUi? = null,
     /** With a gym log over the capture: logged sets the watch found by itself, of how many, and finds not in the log. */
     val logMatched: Int? = null, val logTotal: Int? = null, val unlogged: List<SetUi> = emptyList(),
+    /** Seconds at each heart rate, and the maximum and sex the load was scored with (see [dev.heartline.analytics.captureLoad]). */
+    val hrSeconds: Map<Int, Int> = emptyMap(), val loadMaxHr: Int? = null, val loadSex: String? = null,
 )
 
 data class PlaceUi(val name: String, val region: String?, val lat: Double, val lon: Double)
