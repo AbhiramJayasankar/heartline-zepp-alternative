@@ -31,11 +31,11 @@ class HealthRepository(private val db: HeartlineDatabase) {
     fun observeByType(from: Double, to: Double = Double.MAX_VALUE): Flow<Map<String, List<HealthPoint>>> =
         db.observe("health") { byType(from, to) }
 
-    /** InsightsDB.health_by_day: resting_hr uses the day's minimum; other types use the mean. */
+    /** InsightsDB.health_by_day: resting_hr uses the day's minimum, PAI (a running count) its latest record, other types the mean. */
     suspend fun byDay(from: Double, zone: ZoneId = ZoneId.systemDefault()): Map<String, Map<LocalDate, Double>> =
         byType(from).mapValues { (type, points) ->
             points.filter { it.value != null }.groupBy { day(it.ts.toDouble(), zone) }.mapValues { (_, rows) ->
-                roundOne(if (type == "resting_hr") rows.minOf { it.value!! } else rows.map { it.value!! }.average())
+                roundOne(when (type) { "resting_hr" -> rows.minOf { it.value!! }; "pai" -> rows.maxBy { it.ts }.value!!; else -> rows.map { it.value!! }.average() })
             }
         }.filterValues { it.isNotEmpty() }
 

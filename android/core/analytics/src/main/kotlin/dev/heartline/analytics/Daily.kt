@@ -3,18 +3,23 @@ package dev.heartline.analytics
 import java.time.*
 import kotlin.math.*
 
-/** InsightsDB.health_by_day: minimum resting HR, arithmetic mean for every other series. */
+/**
+ * InsightsDB.health_by_day: minimum resting HR; PAI's latest record, since the watch's PAI is a running count through
+ * the day and its last value is the day's PAI; arithmetic mean for every other series.
+ */
 fun healthByDay(
     health: List<HealthValue>, since: Long = Long.MIN_VALUE, zone: ZoneId = ZoneId.systemDefault(),
 ): Map<String, Map<LocalDate, Double>> {
-    class Aggregate(var sum: Double = 0.0, var count: Int = 0, var min: Double = Double.POSITIVE_INFINITY)
+    class Aggregate(var sum: Double = 0.0, var count: Int = 0, var min: Double = Double.POSITIVE_INFINITY,
+                    var lastTs: Long = Long.MIN_VALUE, var last: Double = 0.0)
     val groups = linkedMapOf<String, MutableMap<LocalDate, Aggregate>>()
     for (v in health) if (v.ts >= since) {
         val g = groups.getOrPut(v.type) { linkedMapOf() }.getOrPut(dayOf(v.ts, zone)) { Aggregate() }
         g.sum += v.value; g.count++; g.min = min(g.min, v.value)
+        if (v.ts >= g.lastTs) { g.lastTs = v.ts; g.last = v.value }
     }
     return groups.mapValues { (type, days) -> days.mapValues { (_, g) ->
-        rounded(if (type == "resting_hr") g.min else g.sum / g.count, 1)
+        rounded(when (type) { "resting_hr" -> g.min; "pai" -> g.last; else -> g.sum / g.count }, 1)
     } }
 }
 

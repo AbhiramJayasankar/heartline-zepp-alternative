@@ -69,7 +69,7 @@ class InsightsDB:
         return {"status": row[0], "start": row[1]} if row else None
 
     def health_by_day(self, since: float) -> dict:
-        """Per-day means of the watch's own health series, if the health tables exist.
+        """Per day: the watch's own health series (lowest resting HR, last PAI, mean of the rest), if the health tables exist.
         Feature-detected: a table `health` with columns (type|kind|series, ts, value)."""
         with self.store._lock:
             tables = {r[0] for r in self.store._db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -83,10 +83,13 @@ class InsightsDB:
                 f"SELECT {kind}, ts, value FROM health WHERE ts >= ? AND value IS NOT NULL", (since,)).fetchall()
         acc: dict = {}
         for k, ts, v in rows:
-            acc.setdefault(k, {}).setdefault(datetime.fromtimestamp(ts).date(), []).append(float(v))
+            acc.setdefault(k, {}).setdefault(datetime.fromtimestamp(ts).date(), []).append((ts, float(v)))
         out = {}
         for k, by in acc.items():
-            agg = min if k == "resting_hr" else (lambda xs: sum(xs) / len(xs))
+            # PAI is a running count through the day: its latest record is the day's PAI.
+            if k == "resting_hr": agg = lambda xs: min(v for _, v in xs)
+            elif k == "pai": agg = lambda xs: max(xs)[1]
+            else: agg = lambda xs: sum(v for _, v in xs) / len(xs)
             out[k] = {d: round(agg(v), 1) for d, v in by.items()}
         return out
 
