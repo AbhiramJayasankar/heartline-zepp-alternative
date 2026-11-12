@@ -247,6 +247,7 @@ class RealController(
         require(email.isNotBlank() && password.isNotEmpty()) { "Enter the email and password of your Zepp account" }
         ensureService().agps.signIn(email, password)
     }
+    override suspend fun zeppBrowserSignIn(): String = ensureService().agps.browserSignIn()
     override fun zeppSignOut() = launchAction { ensureService().agps.signOut() }
     override fun updateAgps() = launchAction { ensureService().agps.update() }
     override fun setAgpsAuto(on: Boolean) = launchAction { ensureService().agps.setAuto(on) }

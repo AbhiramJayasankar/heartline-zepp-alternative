@@ -129,7 +129,7 @@ private fun WeekStrip(last: Long?, now: Long, zone: ZoneId) {
     val start = last?.let { Instant.ofEpochSecond(it).atZone(zone).toLocalDate() } ?: LocalDate.now(zone)
     val today = Instant.ofEpochSecond(now).atZone(zone).toLocalDate()
     Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
-        contentDescription = if (last == null) "No satellite data on the watch" else "Satellite data covers ${start.format(DateTimeFormatter.ofPattern("d MMMM", Locale.ENGLISH))} to ${start.plusDays(6).format(DateTimeFormatter.ofPattern("d MMMM", Locale.ENGLISH))}"
+        contentDescription = if (last == null) "Heartline hasn't sent satellite data yet" else "Satellite data covers ${start.format(DateTimeFormatter.ofPattern("d MMMM", Locale.ENGLISH))} to ${start.plusDays(6).format(DateTimeFormatter.ofPattern("d MMMM", Locale.ENGLISH))}"
     }, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         for (i in 0 until 7) {
             val d = start.plusDays(i.toLong())
@@ -157,8 +157,22 @@ private fun ZeppSignIn(controller: HeartlineController) {
     var password by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    MutedText("Zepp only hands the data to its own accounts. Your password goes to Zepp once and isn't saved. An account made with Google or Apple " +
-        "has no password: add one in the Zepp app (Profile, Account) first.")
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var opening by remember { mutableStateOf(false) }
+    MutedText("Zepp only hands the data to its own accounts. Sign in on Zepp's page in your browser, where Google is usually " +
+        "signed in already; the page hands the sign-in back to Heartline.")
+    Gap(12)
+    PillButton(if (opening) "Opening…" else "Sign in with your browser", {
+        opening = true; error = null
+        scope.launch {
+            runCatching { controller.zeppBrowserSignIn()?.let { openInBrowserTab(context, it) } }.onFailure { error = it.message ?: "Couldn't open the browser" }
+            opening = false
+        }
+    }, Modifier.fillMaxWidth(), style = ButtonStyle.PULSE, enabled = !opening)
+    Gap(20)
+    Text("Or with an email and password", style = HL.type.bodyStrong, color = c.ink)
+    Gap(2)
+    MutedText("Your password goes to Zepp once and isn't saved.")
     Gap(10)
     OutlinedTextField(email, { email = it; error = null }, label = { Text("Zepp email") }, singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email), modifier = Modifier.fillMaxWidth())
@@ -168,7 +182,7 @@ private fun ZeppSignIn(controller: HeartlineController) {
         modifier = Modifier.fillMaxWidth())
     error?.let { Gap(6); Text(it, style = HL.type.small, color = c.pulse) }
     Gap(10)
-    PillButton(if (busy) "Signing in…" else "Sign in to Zepp", {
+    PillButton(if (busy) "Signing in…" else "Sign in", {
         busy = true; error = null
         scope.launch {
             runCatching { controller.zeppSignIn(email, password) }
@@ -176,4 +190,13 @@ private fun ZeppSignIn(controller: HeartlineController) {
             busy = false
         }
     }, enabled = !busy && email.contains('@') && password.isNotEmpty())
+}
+
+/** A Chrome Custom Tab when the browser has them (the browser's own sign-ins, Google included), else the browser. */
+private fun openInBrowserTab(context: android.content.Context, url: String) {
+    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+        .putExtras(android.os.Bundle().apply { putBinder("android.support.customtabs.extra.SESSION", null) })
+        .putExtra("android.support.customtabs.extra.TITLE_VISIBILITY", 1)
+    if (context !is android.app.Activity) intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    context.startActivity(intent)
 }

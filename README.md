@@ -19,7 +19,7 @@
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
-> **Status: 0.5.0.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
+> **Status: 0.6.0.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
 > Other Huami/Zepp watches of the same generation (GTR 2, GTS 2, GTS 2e) speak a similar protocol but are untested.
 
 ## Highlights
@@ -124,7 +124,8 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
 **Workouts**
 - Imports the watch's own workouts with per-second heart rate and GPS routes.
 - **GPS assist (A-GPS)**: sends the week's satellite almanacs and orbit predictions to the watch, so its GPS gets a
-  fix in seconds. Needs a Zepp account sign-in (the data is only served to Zepp accounts); updates every 3 days.
+  fix in seconds. Needs a Zepp sign-in (the data is only served to Zepp accounts), done in your phone's browser, so Google
+  and Apple accounts work in a tap; updates every 3 days.
 - **Gym workout capture**: streams raw accelerometer, gyroscope and pulse during a session and finds your
   **sets, reps, rest times, heart-rate recovery, zones, load and calories**, tuned on real logged gym sessions.
 - **Gym log import** (CSV or JSON, [format](docs/GYM_LOG_FORMAT.md)): sets, loads, reps in reserve and treadmill
@@ -240,8 +241,8 @@ analysis methods in [`android/core/analytics/`](android/core/analytics) and
 - **Alexa alarms and reminders** made by voice can't be deleted from the phone (the watch ignores it); long-press
   them in the watch's Alarm app.
 - **Deleting a watch workout** removes it from Heartline only; the watch keeps its own copy in its workout history.
-- **GPS assist needs a Zepp account** with a password (accounts made with Google or Apple sign-in have none until
-  you add one in the Zepp app). The password goes to Zepp once; only the sign-in token is kept, encrypted.
+- **GPS assist needs a Zepp account.** You sign in on Zepp's page in your browser (Google, Apple, Xiaomi or email),
+  which hands the sign-in back to Heartline; only that token is kept, encrypted. Email and password also work in the app.
 - **Housekeeping:** raw sync data is kept for 14 days (workouts and resting heart rate for good), the Bluetooth log
   for 7 days and the event log for 60. Your daily figures, checks and captures are kept.
 - Heart rhythm screening and all health scores are estimates for personal use, not medical advice.

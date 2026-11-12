@@ -67,6 +67,8 @@ interface HeartlineController {
     val agps: StateFlow<dev.heartline.service.AgpsStatus>
     /** Signs in to Zepp (the password goes to Zepp once and isn't kept); throws with a readable message. */
     suspend fun zeppSignIn(email: String, password: String)
+    /** Starts a sign-in in the phone's browser; the Zepp page to open, or null when there's nothing to open (demo). */
+    suspend fun zeppBrowserSignIn(): String?
     fun zeppSignOut()
     /** Downloads the week's A-GPS data and sends it to the watch now. */
     fun updateAgps()

@@ -36,7 +36,7 @@ class WatchService : Service() {
         super.onCreate()
         watch = WatchConnection(this, scope, app.watchStore)
         captureRunner = CaptureRunner(scope, app.db, watch, app.settings, java.io.File(filesDir, "raw"))
-        agps = AgpsUpdater(this, app.db, watch)
+        agps = AgpsUpdater(this, app.db, watch, scope)
         scope.launch { runCatching { agps.load() } }
         app.settings.watch.value.mac?.let { CompanionLink.observe(this, it) }
         phoneFeatures = PhoneFeatures(this, scope, app.db, watch, app.settings)
