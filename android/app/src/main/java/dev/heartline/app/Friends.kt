@@ -2,6 +2,7 @@ package dev.heartline.app
 
 import dev.heartline.data.HeartlineDatabase
 import dev.heartline.data.model.ActivityRow
+import dev.heartline.data.model.HealthPoint
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
@@ -78,6 +79,64 @@ fun friendFree(rows: List<ActivityRow>, friends: Friends, prevKind: Int? = null)
         }
     }
 }
+
+/**
+ * [points] as if the friend had never worn the watch: readings inside a friend's span go; the watch's own daily
+ * resting heart rate for a day a friend wore it goes, since the watch worked it out from both of you; PAI loses what
+ * it rose by during a friend's time, that day and in the 7-day totals after; a night's HRV becomes the median of the
+ * samples that were yours.
+ * [earlierPai]: PAI records from before [points] starts, for the 7-day totals.
+ */
+fun ownHealth(points: List<HealthPoint>, friends: Friends, zone: java.time.ZoneId, earlierPai: List<HealthPoint> = emptyList()): List<HealthPoint> {
+    if (friends.marks.isEmpty()) return points
+    fun day(ts: Long) = java.time.Instant.ofEpochSecond(ts).atZone(zone).toLocalDate()
+    val friendDays = friends.marks.flatMap { m ->
+        generateSequence(day(m.from)) { it.plusDays(1) }.takeWhile { !it.isAfter(day(m.to)) }.toList()
+    }.toHashSet()
+    // The watch's PAI records are a running count through each day. What a friend's span added is the rise from the last
+    // record before it to the first one after it (or to the moment asked about, when that is sooner).
+    val paiByDay = (earlierPai + points.filter { it.type == "pai" }).distinctBy { it.ts }.sortedBy { it.ts }.groupBy { day(it.ts) }
+    // Spans between the same two records (two workouts in one gap) count that rise once.
+    fun friendPai(d: java.time.LocalDate, ts: Long): Double {
+        val list = paiByDay[d].orEmpty()
+        return friends.marks.filter { (day(it.from) == d || day(it.to) == d) && it.from < ts }.map { m ->
+            val before = list.lastOrNull { it.ts <= m.from }
+            val after = list.firstOrNull { it.ts >= m.to && it.ts <= ts } ?: list.lastOrNull { it.ts <= ts }
+            Triple(before?.ts, after?.ts, maxOf(0.0, (after?.value ?: before?.value ?: 0.0) - (before?.value ?: 0.0)))
+        }.distinctBy { it.first to it.second }.sumOf { it.third }
+    }
+    fun nightOf(p: HealthPoint) = runCatching { JSONObject(p.extra ?: "{}").optString("night") }.getOrDefault("")
+    val samples = points.filter { it.type == HRV_SAMPLE }
+    val touched = samples.filter { friends.covers(it.ts) }.map { nightOf(it) }.toHashSet()
+    return points.mapNotNull { p ->
+        when (p.type) {
+            HRV_NIGHT -> if (nightOf(p) !in touched) p.takeUnless { friends.covers(it.ts) } else {
+                val own = samples.filter { nightOf(it) == nightOf(p) && it.value != null && !friends.covers(it.ts) }
+                own.takeIf { it.isNotEmpty() }?.let { l ->
+                    val v = l.map { it.value!! }.sorted()
+                    p.copy(ts = l.maxOf { it.ts }, value = if (v.size % 2 == 1) v[v.size / 2] else (v[v.size / 2 - 1] + v[v.size / 2]) / 2)
+                }
+            }
+            "resting_hr" -> p.takeUnless { day(it.ts) in friendDays || friends.covers(it.ts) }
+            "pai" -> {
+                // The day's count loses what friends added so far today; the 7-day total also loses the 6 days before.
+                val d = day(p.ts)
+                val today = friendPai(d, p.ts)
+                val lost = today + (1..6).sumOf { friendPai(d.minusDays(it.toLong()), Long.MAX_VALUE) }
+                if (lost == 0.0) p else runCatching {
+                    val j = JSONObject(p.extra ?: "{}")
+                    if (j.has("total")) j.put("total", maxOf(0.0, j.optDouble("total") - lost))
+                    p.copy(value = p.value?.let { maxOf(0.0, it - today) }, extra = j.toString())
+                }.getOrDefault(p)
+            }
+            else -> p.takeUnless { friends.covers(it.ts) }
+        }
+    }
+}
+
+/** The automatic overnight HRV types (see dev.heartline.service.OvernightHrv). */
+private const val HRV_SAMPLE = "hrv_sleep_sample"
+private const val HRV_NIGHT = "hrv_sleep"
 
 /** The watch's activity code for "not worn". */
 private const val NOT_WORN = 3

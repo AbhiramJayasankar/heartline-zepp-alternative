@@ -85,7 +85,9 @@ class RealController(
             sync.update { it.copy(lastActivity = a?.toDoubleOrNull()?.toLong(), lastHealth = h?.toDoubleOrNull()?.toLong()) } } }
         scope.launch { db.checks.observeRange().combine(friends) { list, f -> list to f }.collect { (list, f) -> checks.value = list.map { c ->
             val duration = c.json?.let { runCatching { JSONObject(it).optDouble("duration_s").toInt() }.getOrNull() } ?: 0
-            CheckUi(c.start.toString(), c.start.toLong(), duration, c.hr, c.rmssd, rhythmStatus(c.rhythm), friend = f.isFriend(FriendMark.Kind.CHECK, c.start.toString()))
+            CheckUi(c.start.toString(), c.start.toLong(), duration, c.hr, c.rmssd, rhythmStatus(c.rhythm),
+                // A check taken while a friend wore the watch for a workout or capture is theirs too.
+                friend = f.isFriend(FriendMark.Kind.CHECK, c.start.toString()) || f.covers(c.start.toLong() + duration / 2))
         } } }
         scope.launch { db.recordings.observeAll().collect { list -> recordings.value = list.map { r ->
             val names = r.sensors?.let { runCatching { JSONArray(it).let { a -> (0 until a.length()).map { a.getString(it) } } }.getOrNull() }.orEmpty()
@@ -106,7 +108,7 @@ class RealController(
         launch { w.heartRate.collect { h -> liveHr.update { it.copy(streaming = h.streaming, bpm = h.bpm, ts = h.ts) } } }
         launch { db.heartRate.observeSince(System.currentTimeMillis() / 1000.0 - 86400).combine(friends) { list, f -> list.filter { !f.covers(it.ts.toLong()) } }
             .collect { list -> liveHr.update { it.copy(recent = list.takeLast(600).map { HrPoint(it.ts.toLong(), it.bpm) }) } } }
-        launch { w.steps.collect { s -> steps.value = s?.let { StepsUi(it.steps, it.distanceM, it.calories) } } }
+        launch { combine(w.steps, friends, db.meta.observe("activity_last_sync")) { s, f, _ -> s to f }.collect { (s, f) -> steps.value = s?.let { ownLiveSteps(it, f) } } }
         launch { w.sync.collect { state -> sync.update { it.copy(running = state.running, message = state.message) } } }
         launch { w.raw.collect { r ->
             if (r.file?.name != sensors.value.file) buffers = SensorBuffers()
@@ -129,7 +131,7 @@ class RealController(
             db.insights.observeAll(), settings.profile,
             tick.combine(friends) { now, f -> now to f }) { rows, allHealth, allInsights, p, (now, f) ->
             val previousKind = db.activity.prevKind(from)
-            val health = allHealth.mapValues { (_, list) -> list.filter { !f.covers(it.ts) } }
+            val health = if (f.marks.isEmpty()) allHealth else ownHealth(allHealth.values.flatten(), f, zone).groupBy { it.type }
             val insights = allInsights.filter { i -> i.start?.let { !f.covers(it.toLong()) } ?: true }
             val tp = System.nanoTime()
             withContext(Dispatchers.Default) {
@@ -170,6 +172,22 @@ class RealController(
             }
         }.collect { (t, tr) -> today.value = t; trends.value = tr }
     }
+    /**
+     * Today's count from the watch's own step counter, which counts whoever wears it: a friend's synced steps come off
+     * it. While a friend's time is still going, or not yet synced, the count can't be split, so there is none and the
+     * pages use the synced minutes, which leave the friend out. Distance and calories then come from the minutes too.
+     */
+    private suspend fun ownLiveSteps(s: dev.heartline.protocol.StepsNow, f: Friends): StepsUi? {
+        val now = System.currentTimeMillis() / 1000
+        val dayStart = LocalDate.now(zone).atStartOfDay(zone).toEpochSecond()
+        val marks = f.marks.filter { it.to >= dayStart && it.from <= now }
+        if (marks.isEmpty()) return StepsUi(s.steps, s.distanceM, s.calories)
+        val synced = db.activity.lastTs() ?: 0L
+        if (marks.any { it.to >= now - 120 || it.to > synced }) return null
+        val theirs = db.activity.range(dayStart.toDouble(), now.toDouble())
+            .filter { r -> marks.any { r.ts + 59 >= it.from && r.ts <= it.to } }.sumOf { it.steps ?: 0 }
+        return StepsUi(maxOf(0, s.steps - theirs), null, null)
+    }
     private val healthDays = java.util.concurrent.ConcurrentHashMap<LocalDate, Flow<HealthDayUi>>()
     private val activityDays = java.util.concurrent.ConcurrentHashMap<LocalDate, Flow<ActivityDayUi>>()
     /** What a day's page needs that is slow to work out: kept until the day's own data or the profile changes. */
@@ -187,7 +205,8 @@ class RealController(
             val tp = System.nanoTime()
             try {
                 val minutes = analyticsMinutes(friendFree(db.activity.range(from - 86_400.0, to - 1.0), f))
-                val (values, spo2Aside) = cleanSleepSpo2(health.values.flatten().filter { !f.covers(it.ts) }.mapNotNull { h -> h.value?.let { DayHealthValue(h.type, h.ts, it, h.extra) } }, minutes)
+                val earlierPai = if (f.marks.isEmpty()) emptyList() else db.health.series("pai", from - 7 * 86_400.0, from - 1.0)
+                val (values, spo2Aside) = cleanSleepSpo2(ownHealth(health.values.flatten(), f, zone, earlierPai).mapNotNull { h -> h.value?.let { DayHealthValue(h.type, h.ts, it, h.extra) } }, minutes)
                 val daily = computeDaily(minutes,
                     values.map { HealthValue(it.type, it.ts, it.value) }, emptyList(),
                     Profile(p.age, p.sex?.name?.lowercase(), p.weightKg, p.heightCm, p.maxHr, p.restingHr), 2, date.atTime(23, 59).atZone(zone))

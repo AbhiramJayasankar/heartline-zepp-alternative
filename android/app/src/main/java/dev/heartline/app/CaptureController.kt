@@ -29,7 +29,9 @@ internal class CaptureController(
                         val session = captureSession(value ?: return@runCatching null)
                         val result = meta[CAPTURE_RESULT + session.id]?.let { runCatching { parsed(session.id, it) }.getOrNull() }?.withRest(rest)
                         val item = session.captureItem(result, System.currentTimeMillis() / 1000)
-                            .copy(friend = friends.isFriend(FriendMark.Kind.CAPTURE, session.id))
+                            .copy(friend = friends.isFriend(FriendMark.Kind.CAPTURE, session.id) ||
+                                // Started for a workout a friend did on the watch: theirs too.
+                                friends.covers(session.start + ((session.end ?: (session.start + session.plannedS)) - session.start) / 2))
                         if (result != null && genericLabel(item.label)) facts[item.id] = titleFacts(result, log)
                         // The AI's name once it has one; until then the local name, worked out fresh so rule fixes show at once.
                         val stored = meta[CAPTURE_TITLE + item.id]?.let { runCatching { JSONObject(it) }.getOrNull() }

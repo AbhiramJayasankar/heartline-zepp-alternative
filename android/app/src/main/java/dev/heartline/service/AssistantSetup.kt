@@ -50,12 +50,18 @@ fun watchAssistant(context: android.content.Context, db: HeartlineDatabase, sett
         val clock = DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH)
         val since = t.toEpochSecond() - 6 * 3600.0
         // Live readings (heart checks, workouts) and the per-minute heart rate synced with the activity data, whichever is newer.
-        val live = db.heartRate.since(since).maxByOrNull { it.ts }?.let { it.ts.toLong() to it.bpm.toInt() }
-        val minutes = db.activity.minutes(since, t.toEpochSecond().toDouble())
+        // Nothing from a friend's time on the watch (dev.heartline.app.Friends).
+        val friends = dev.heartline.app.FriendStore.read(db)
+        val live = db.heartRate.since(since).filter { !friends.covers(it.ts.toLong()) }.maxByOrNull { it.ts }?.let { it.ts.toLong() to it.bpm.toInt() }
+        val minutes = db.activity.minutes(since, t.toEpochSecond().toDouble()).filter { !friends.covers(it.ts) }
         val synced = minutes.lastOrNull { (it.hr ?: 0) in 30..220 }?.let { it.ts to it.hr!! }
         val hr = listOfNotNull(live, synced).maxByOrNull { it.first }
             ?.let { (ts, bpm) -> "$bpm bpm at ${Instant.ofEpochSecond(ts).atZone(t.zone).format(clock)}" }
-        val steps = runCatching { db.activity.summary(t.toLocalDate().atStartOfDay(t.zone).toEpochSecond().toDouble(), t.toEpochSecond().toDouble()).steps.toInt() }.getOrNull()
+        val steps = runCatching {
+            val from = t.toLocalDate().atStartOfDay(t.zone).toEpochSecond().toDouble()
+            if (friends.marks.isEmpty()) db.activity.summary(from, t.toEpochSecond().toDouble()).steps.toInt()
+            else dev.heartline.app.friendFree(db.activity.range(from, t.toEpochSecond().toDouble()), friends).sumOf { it.steps ?: 0 }
+        }.getOrNull()
         val asOf = db.activity.lastTs()?.let { Instant.ofEpochSecond(it).atZone(t.zone).format(clock) }
         val health = runCatching { healthSummary(controller, t) }.getOrNull()
         WatchAssistant.Facts(hr, steps, asOf, health, workout())
@@ -99,7 +105,7 @@ suspend fun healthSummary(controller: HeartlineController, t: ZonedDateTime): St
         lines += "Activity today: ${h.stepsTotal} steps" + listOfNotNull(h.distanceM?.let { "${r(it / 1000.0, 1)} km" }, h.caloriesKcal?.let { "$it kcal" },
             "${h.activeMinutes} active min", "watch worn ${hm(h.wornMinutes)}").joinToString(", ", ", ") +
             (h.paiToday?.let { "; PAI ${r(it)} today" } ?: "") + (h.paiTotal?.let { ", ${r(it)} this week" } ?: "")
-        if (h.workouts.isNotEmpty()) lines += "Workouts today: " + h.workouts.joinToString(", ") { "${it.type} at ${at(it.start)}" }
+        h.workouts.filter { !it.friend }.takeIf { it.isNotEmpty() }?.let { w -> lines += "Workouts today: " + w.joinToString(", ") { "${it.type} at ${at(it.start)}" } }
     }
     return lines.joinToString("\n")
 }

@@ -168,8 +168,10 @@ class HealthTools(
             h.caloriesKcal?.let { "$it kcal" }, "${h.activeMinutes} active minutes", "watch worn ${hm(h.wornMinutes)}").joinToString(", ", ", "))
         if (h.paiToday != null || h.paiTotal != null) lines += "PAI: ${r(h.paiToday)} that day, ${r(h.paiTotal)} over the last 7 days"
         h.stepsByHour.filter { (it.total ?: 0.0) > 0 }.takeIf { it.isNotEmpty() }?.let { s -> lines += "Steps by hour: " + s.joinToString(", ") { "%02d:00 ${r(it.total)}".format(it.hour) } }
-        if (h.workouts.isEmpty()) lines += "No workouts recorded by the watch."
-        h.workouts.forEach { w ->
+        // A friend's workouts on the watch aren't yours to talk about.
+        val own = h.workouts.filter { !it.friend }
+        if (own.isEmpty()) lines += "No workouts recorded by the watch."
+        own.forEach { w ->
             lines += "Workout: ${w.type} at ${at(w.start)}, ${hm(w.durationS / 60)}" + listOfNotNull(w.avgHr?.let { "average heart rate $it" }, w.maxHr?.let { "max $it" },
                 w.calories?.let { "$it kcal" }, w.distanceM?.let { "${r(it / 1000.0, 2)} km" }, w.steps?.let { "$it steps" }).joinToString(", ", ", ")
         }

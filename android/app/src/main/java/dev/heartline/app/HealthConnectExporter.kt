@@ -131,7 +131,7 @@ internal class HealthConnectExporter(private val context: Application, private v
                             .map { HealthPoint(it.type, it.ts, it.value) }
                     }
                 }
-                mapper.resting(points.distinctBy { it.ts }.filter { !friends.covers(it.ts) })
+                mapper.resting(ownHealth(points.distinctBy { it.ts }, friends, ZoneId.systemDefault()))
             }
             suspend fun checks(from: Long): List<ExportCheck> = db.checks.list(from.toDouble(), now.toDouble())
                 .filter { !friends.isFriend(FriendMark.Kind.CHECK, it.start.toString()) && !friends.covers(it.start.toLong()) }.map { c ->
