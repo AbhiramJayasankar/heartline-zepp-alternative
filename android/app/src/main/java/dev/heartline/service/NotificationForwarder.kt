@@ -6,6 +6,7 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import dev.heartline.HeartlineApp
 import dev.heartline.app.NotificationDeduplicator
+import dev.heartline.app.PhoneMessage
 import dev.heartline.app.quietNow
 import dev.heartline.protocol.NotificationKind
 import dev.heartline.protocol.isSmsApp
@@ -28,11 +29,29 @@ class NotificationForwarder : NotificationListenerService() {
         if (flags and (Notification.FLAG_ONGOING_EVENT or Notification.FLAG_GROUP_SUMMARY) != 0) return
         val minute = LocalTime.now().let { it.hour * 60 + it.minute }
         if (quietNow(minute, config.quietHoursStart, config.quietHoursEnd)) return
-        val (title, text) = senderAndText(sbn.notification)
-        if (title.isBlank() && text.isBlank() || !dedupe.accept(title, text, SystemClock.elapsedRealtime())) return
+        val style = runCatching { NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(sbn.notification) }.getOrNull()
+        val fresh = if (style != null && style.messages.isNotEmpty()) {
+            val messages = style.messages.map { m ->
+                val sender = m.person?.name?.toString()?.takeIf { it.isNotBlank() } ?: style.user.name?.toString().orEmpty()
+                val conversation = style.conversationTitle?.toString()?.takeIf { it.isNotBlank() && it != sender }
+                val heading = if (style.isGroupConversation && conversation != null) "$sender · $conversation" else sender.ifBlank { conversation.orEmpty() }
+                PhoneMessage(heading.ifBlank { sbn.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty() },
+                    m.text?.toString().orEmpty(), m.timestamp)
+            }
+            dedupe.newMessages(sbn.key, messages)
+        } else {
+            val (title, text) = senderAndText(sbn.notification)
+            val at = sbn.notification.`when`.takeIf { it > 0 } ?: sbn.postTime
+            if (dedupe.accept(sbn.key, at, title, text, SystemClock.elapsedRealtime())) listOf(PhoneMessage(title, text, at)) else emptyList()
+        }
+        // A repost of what the watch already has (apps repost on every read, mute and reorder): nothing to send, and
+        // nothing worth a line in the event log each time.
+        if (fresh.isEmpty()) return
         val label = runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(sbn.packageName, 0)).toString() }.getOrDefault(sbn.packageName)
         val kind = if (isSmsApp(sbn.packageName)) NotificationKind.GENERIC else NotificationKind.MESSAGE
-        app.realController.forwardNotification(title, text, kind, label, watchIconFor(sbn.packageName))
+        fresh.filter { it.title.isNotBlank() || it.text.isNotBlank() }.forEach {
+            app.realController.forwardNotification(it.title, it.text, kind, label, watchIconFor(sbn.packageName))
+        }
     }
 }
 

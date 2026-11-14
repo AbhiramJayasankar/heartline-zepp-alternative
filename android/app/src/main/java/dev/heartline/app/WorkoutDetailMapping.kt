@@ -171,6 +171,7 @@ internal fun WorkoutUi.withWorkoutDetail(raw: StoredWorkoutDetail?, profile: Pro
         add("Minimum heart rate" to "Estimated from HR track")
         add("Training load" to if (profile.restingHr != null) "Banister TRIMP, the same scale as the daily load and strain" else "Needs a resting heart rate (the daily figures supply one)")
     }
+    val gait = d?.cadence?.takeIf { it.size >= 60 && gaitWorkout(type) }?.let { cad -> workoutGait(cad, d.speedMs, d.strideCm, hr, durationS) }
     return copy(route = raw?.route ?: route, detail = WorkoutDetailUi(
         activeS = s?.activeS,
         avgPaceSPerKm = s?.avgPaceSPerKm?.toDouble() ?: s?.avgPaceSPerM?.times(1000),
@@ -180,6 +181,46 @@ internal fun WorkoutUi.withWorkoutDetail(raw: StoredWorkoutDetail?, profile: Pro
         minAltM = s?.minAltitudeM, maxAltM = s?.maxAltitudeM,
         minHr = hr.filter { it.hr in 1..254 }.minOfOrNull { it.hr }, load = hr.takeIf { it.isNotEmpty() }?.let { h -> profile.restingHr?.let { banisterLoad(h, durationS, workoutMaxHr(profile), it.toDouble(), profile.sex, d?.pauses.orEmpty(), d?.resumes.orEmpty()) } },
         zones = zones, speedKmh = d?.speedMs.orEmpty().series(3.6), cadence = d?.cadence.orEmpty().series(),
-        altitude = d?.altitudeM.orEmpty().series(), extras = extras,
+        altitude = d?.altitudeM.orEmpty().series(), extras = extras, gait = gait,
+        laps = kilometreLaps(d?.kmSplits.orEmpty(), hr, durationS, distanceM),
     ))
+}
+
+/** Workouts on foot, where the cadence tells running from walking. */
+internal fun gaitWorkout(type: String): Boolean = type.lowercase().let { t ->
+    listOf("run", "walk", "hik", "trail", "treadmill").any { it in t } }
+
+/** Bouts of running and walking from the watch's per-second cadence, speed and stride, with the HR track held between records. */
+internal fun workoutGait(cadence: List<WorkoutValuePoint>, speedMs: List<WorkoutValuePoint>, strideCm: List<WorkoutValuePoint>,
+                         hr: List<TrackPoint>, durationS: Int): dev.heartline.analytics.GaitSummary? {
+    val n = durationS.coerceAtLeast((cadence.maxOfOrNull { it.t } ?: 0) + 1)
+    fun held(points: List<WorkoutValuePoint>) = dev.heartline.analytics.perSecond(points.map { it.t to it.value }, n, 3)
+    val c = held(cadence)
+    val beats = dev.heartline.analytics.perSecond(hr.filter { it.hr in 1..254 }.map { it.t to it.hr.toDouble() }, n, 30)
+        .map { if (it.isFinite()) it.toInt() else 0 }.toIntArray()
+    return dev.heartline.analytics.gaitSummary(dev.heartline.analytics.gaitFromCadence(c), beats, c,
+        speedMs.takeIf { it.isNotEmpty() }?.let(::held), strideCm.takeIf { it.isNotEmpty() }?.let(::held))
+}
+
+/** One lap a kilometre, from the watch's own kilometre marks, and the part-kilometre after the last one. */
+internal fun kilometreLaps(splits: List<WorkoutSplit>, hr: List<TrackPoint>, durationS: Int, distanceM: Int?): List<LapUi> {
+    if (splits.isEmpty()) return emptyList()
+    fun avgHr(a: Int, b: Int): Int? {
+        // Each record holds until the next: weight by the seconds it covers inside [a, b).
+        val pts = hr.filter { it.hr in 1..254 }.sortedBy { it.t }
+        var sum = 0.0; var secs = 0
+        pts.forEachIndexed { i, p ->
+            val end = minOf(b, pts.getOrNull(i + 1)?.t ?: b); val from = maxOf(a, p.t)
+            if (end > from) { sum += p.hr.toDouble() * (end - from); secs += end - from }
+        }
+        return if (secs == 0) null else kotlin.math.round(sum / secs).toInt()
+    }
+    val laps = splits.mapIndexed { i, s ->
+        LapUi(i + 1, s.splitS, 1000, avgHr(splits.getOrNull(i - 1)?.t ?: 0, s.t), s.splitS.toDouble())
+    }.toMutableList()
+    val rest = distanceM?.minus(1000 * splits.size)
+    val restS = durationS - splits.last().t
+    if (rest != null && rest >= 100 && rest < 1000 && restS > 0)
+        laps += LapUi(splits.size + 1, restS, rest, avgHr(splits.last().t, durationS), restS * 1000.0 / rest)
+    return laps
 }

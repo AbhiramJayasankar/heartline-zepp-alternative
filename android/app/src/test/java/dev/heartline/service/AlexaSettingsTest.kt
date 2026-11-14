@@ -6,6 +6,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AlexaSettingsTest {
+    @get:org.junit.Rule val files = org.junit.rules.TemporaryFolder(java.io.File("build/tmp").apply { mkdirs() })
+
+    @Test fun completingPendingDeletesPreservesNewlyQueuedDeletes() {
+        val folder = files.newFolder("alexa")
+        AlexaDeletes.queue(folder, 1, "first"); val batch = AlexaDeletes.pending(folder)
+        AlexaDeletes.queue(folder, 1, "second"); AlexaDeletes.remove(folder, batch)
+        assertEquals(listOf(1 to "second"), AlexaDeletes.pending(folder))
+        AlexaDeletes.remove(folder, listOf(1 to "second")); assertTrue(AlexaDeletes.pending(folder).isEmpty())
+    }
     @Test fun settingsRoundTripAndClamp() {
         val s = AlexaSettings(prompt = "Hi {NOW}", disabledTools = setOf("web_search"), toolDescriptions = mapOf("get_sleep" to "Sleep."),
             fallbackModels = listOf("a/b", "c/d"), reasoning = "low", temperature = 1.1, maxTokens = 1234, memoryTurns = 3, replyBytes = 1500,

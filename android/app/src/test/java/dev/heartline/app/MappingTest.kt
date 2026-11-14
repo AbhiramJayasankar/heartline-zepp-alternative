@@ -65,8 +65,34 @@ class MappingTest {
     }
     @Test fun daytimeQuietHours() { assertTrue(quietNow(750, 720, 780)); assertFalse(quietNow(780, 720, 780)) }
     @Test fun dedupeExpiresAtTenSecondsAndAllowsChangedText() {
-        val d = NotificationDeduplicator(); assertTrue(d.accept("A", "B", 0)); assertFalse(d.accept("A", "B", 9999))
-        assertTrue(d.accept("A", "C", 9999)); assertTrue(d.accept("A", "B", 10000))
+        val d = NotificationDeduplicator(); assertTrue(d.accept("chat:1", 1, "A", "B", 0)); assertFalse(d.accept("chat:1", 1, "A", "B", 9999))
+        assertTrue(d.accept("chat:1", 1, "A", "C", 9999)); assertTrue(d.accept("chat:1", 1, "A", "B", 10000))
+    }
+    @Test fun identicalMessagesFromDifferentNotificationsOrNewMessageTimesAreNotDuplicates() {
+        val d = NotificationDeduplicator()
+        assertTrue(d.accept("app.one:chat1", 100, "Sam", "OK", 0))
+        assertTrue(d.accept("app.two:chat1", 100, "Sam", "OK", 1))
+        assertTrue(d.accept("app.one:chat2", 100, "Sam", "OK", 2))
+        assertTrue(d.accept("app.one:chat1", 101, "Sam", "OK", 3))
+        assertFalse(d.accept("app.one:chat1", 101, "Sam", "OK", 4))
+    }
+    @Test fun messagingHistoryIsSeededThenEveryNewMessageInOneUpdateIsForwarded() {
+        val d = NotificationDeduplicator(); val old = PhoneMessage("Sam", "Earlier", 1)
+        val a = PhoneMessage("Sam", "First", 2); val b = PhoneMessage("Sam", "Second", 3)
+        assertEquals(listOf(old), d.newMessages("chat", listOf(old)))
+        assertEquals(listOf(a, b), d.newMessages("chat", listOf(old, a, b)))
+        assertTrue(d.newMessages("chat", listOf(old, a, b)).isEmpty())
+    }
+    @Test fun repeatedWordsAndEvenEqualTimestampsArePreservedByOccurrence() {
+        val d = NotificationDeduplicator(); val m = PhoneMessage("Sam", "OK", 1)
+        d.newMessages("chat", listOf(m))
+        assertEquals(listOf(m), d.newMessages("chat", listOf(m, m)))
+        assertTrue(d.newMessages("chat", listOf(m, m)).isEmpty())
+    }
+    @Test fun firstMessagingSnapshotOnlyForwardsLatestUnreadMessage() {
+        val d = NotificationDeduplicator(); val a = PhoneMessage("Sam", "Old", 1); val b = PhoneMessage("Sam", "Latest", 2)
+        assertEquals(listOf(b), d.newMessages("chat", listOf(a, b)))
+        assertTrue(d.newMessages("chat", listOf(a, b)).isEmpty())
     }
     @Test fun ringBuffersKeepNewestValuesWithoutMutatingSnapshots() {
         val ring = RingBuffer<Int>(3); repeat(3) { ring.add(it) }; val old = ring.snapshot(); ring.add(3)

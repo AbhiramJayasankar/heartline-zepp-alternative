@@ -43,6 +43,8 @@ data class CaptureResult(
      * the load again for another resting heart rate ([captureLoad]) without reading the recording.
      */
     val hrSeconds: Map<Int, Int> = emptyMap(), val loadMaxHr: Int? = null, val loadSex: String? = null,
+    /** Where the watch's heart rate had locked onto the step rate and was replaced from the raw pulse. */
+    val hrFixes: List<CaptureHrFix> = emptyList(),
 )
 
 /** The session's load (Banister TRIMP per second, as in [analyzeCapture]) from its heart-rate seconds and [rest]. */
@@ -54,7 +56,10 @@ fun captureLoad(hrSeconds: Map<Int, Int>, rest: Double?, maxHr: Int, sex: String
     return total / 60.0
 }
 
-/** HR_MEASURE is authoritative. No PPG substitution and no interpolation across a missing HR interval. */
+/**
+ * HR_MEASURE is authoritative, with one exception: where it sat on the step rate while you moved and the raw pulse
+ * clearly says otherwise ([motionHrFixes]). No interpolation across a missing HR interval.
+ */
 fun analyzeCapture(rec: Recording, hr: List<Pair<Double, Int>>, profile: Profile, label: String,
     activities: List<CaptureActivity> = emptyList(), logged: List<LoggedCaptureSet> = emptyList(),
     /** Resting heart rate the daily figures use (profile, else median awake resting); load needs it to match strain. */
@@ -82,6 +87,9 @@ fun analyzeCapture(rec: Recording, hr: List<Pair<Double, Int>>, profile: Profile
         val index = if (found >= 0) found else -found - 2
         return samples.getOrNull(index)?.takeIf { epoch - it.first < 5 }?.second
     }
+    val motion = captureMotion(rec, duration)
+    val fixes = motionHrFixes(rec, seconds, motion.segments)
+    for ((fix, values) in fixes) for (k in values.indices) seconds[fix.start.toInt() + k] = values[k]
     val valid = seconds.filter { it > 0 }
     // The same maximum as the daily figures (profile, else 208 - 0.7 x age), so zones and load agree across the app.
     val maxHr = profile.maxHr?.takeIf { it in 80..240 } ?: profile.copy(maxHr = null).let(::hrMaxOf)?.takeIf { it in 80..240 } ?: 190
@@ -90,7 +98,6 @@ fun analyzeCapture(rec: Recording, hr: List<Pair<Double, Int>>, profile: Profile
         CaptureZone(z, ceil(maxHr * (z + 4) / 10.0).toInt(), if (z == 5) null else ceil(maxHr * (z + 5) / 10.0).toInt(),
             valid.count { captureZone(it, maxHr) == z })
     }
-    val motion = captureMotion(rec, duration)
     val segments = motion.segments.map { it.copy(avgHr = avg(it.start, it.end)) }
     val cardio = captureCardio(segments, activities, seconds)
     val longCardio = cardio.filter { it.end - it.start >= 300 }
@@ -130,7 +137,9 @@ fun analyzeCapture(rec: Recording, hr: List<Pair<Double, Int>>, profile: Profile
         CaptureRest(a.end, b.start, first, last, if (peak != null && at60 != null) peak - at60 else null)
     }
     val calories = captureCalories(valid, profile)
-    val notes = mutableListOf("Heart rate comes from the watch's live HR_MEASURE notifications; moving PPG is not used for heart rate.")
+    val fixedS = fixes.sumOf { it.first.end - it.first.start }.roundToInt()
+    val notes = mutableListOf(if (fixes.isEmpty()) "Heart rate comes from the watch's live HR_MEASURE notifications. Where the watch read your step rate as your heart rate, the raw pulse was checked and found no reason to change it."
+        else "Heart rate comes from the watch's live HR_MEASURE notifications, except $fixedS s where the watch had locked onto your step rate: there it comes from the raw pulse with the movement taken out (${fixes.joinToString { "${it.first.watchBpm} to ${it.first.fixedBpm} bpm" }}).")
     if (valid.size < duration * .9) notes += "Live heart rate covers ${if (n == 0) 0 else valid.size * 100 / n}% of the capture; missing intervals are excluded from load and calories."
     if (motion.missingS > 1) notes += "Motion data is missing for approximately ${motion.missingS.roundToInt()} seconds; missing motion is labelled other."
     if (rec.mag.isNotEmpty()) notes += "Compass samples were recorded; uncalibrated magnetic values are not used to identify exercises."
@@ -145,7 +154,7 @@ fun analyzeCapture(rec: Recording, hr: List<Pair<Double, Int>>, profile: Profile
         valid.takeIf { it.isNotEmpty() && rest != null }?.let { banisterTrimp(it, rest!!, maxHr, profile.sex) / 60.0 }, calories,
         if (motion.points.isEmpty()) null else segments.filter { it.cadenceSpm != null }.sumOf { (it.end - it.start) * it.cadenceSpm!! / 60 }.roundToInt(),
         (0 until n step 5).mapNotNull { a -> avg(a.toDouble(), min(duration, a + 5.0))?.let { CapturePoint(a.toDouble(), it.toDouble()) } },
-        motion.points, segments, sets, rests, "Watch live HR (HR_MEASURE)", notes, activities,
+        motion.points, segments, sets, rests, if (fixes.isEmpty()) "Watch live HR (HR_MEASURE)" else "Watch live HR (HR_MEASURE), $fixedS s corrected from the raw pulse", notes, activities,
         captureRecovery(sets, cardio, seconds), (0 until n step 300).mapNotNull { a ->
             // The floor between sets: five minutes or more of steady cardio (a treadmill block) isn't rest, nor are the
             // five minutes of coming down after it, so both are left out.
@@ -157,7 +166,7 @@ fun analyzeCapture(rec: Recording, hr: List<Pair<Double, Int>>, profile: Profile
             if (b.start - a.end <= 600 && cardio.none { it.start < b.start && it.end > a.end }) b.start - a.end else 0.0
         }.roundToInt(), cardio, pulse,
         merge?.first?.count { it.detected != null }, merge?.first?.size, unlogged,
-        hrSeconds = valid.groupingBy { it }.eachCount(), loadMaxHr = maxHr, loadSex = profile.sex)
+        hrSeconds = valid.groupingBy { it }.eachCount(), loadMaxHr = maxHr, loadSex = profile.sex, hrFixes = fixes.map { it.first })
 }
 
 private fun captureZone(hr: Int, max: Int): Int = when {

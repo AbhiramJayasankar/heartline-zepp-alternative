@@ -60,18 +60,7 @@ class WatchService : Service() {
             }
             override suspend fun sendToWatch(title: String, parts: List<String>): Int {
                 val max = AlexaSettings.parse(app.db.meta.get(AlexaSettings.KEY)).maxNotifications.coerceAtLeast(1)
-                val sent = parts.take(max)
-                // After the spoken reply has shown, then a moment apart so they arrive in order.
-                scope.launch {
-                    delay(2_500)
-                    sent.forEachIndexed { i, p ->
-                        try { watch.notify(if (sent.size > 1) "$title ${i + 1}/${sent.size}" else title, p) }
-                        catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); app.db.events.add("warn", "Send to watch: notification ${i + 1} failed: ${e.message}"); return@launch }
-                        delay(1_500)
-                    }
-                    app.db.events.add("info", "Sent \"$title\" to the watch as ${sent.size} notification(s)")
-                }
-                return sent.size
+                return app.realController.queueWatchAnswer(title, parts, max)
             }
             override suspend fun media(action: String, percent: Int?) = phone.media(action, percent)
             override suspend fun ringer(mode: String?, percent: Int?) = phone.ringer(mode, percent).also { runCatching { phoneFeatures.sendSilentState() } }
@@ -79,7 +68,7 @@ class WatchService : Service() {
         }
         val workoutNow = { captureRunner.run.value?.let { r -> "${r.label}, ${r.seconds / 60} of ${r.plannedS / 60} minutes" + (r.hr?.let { ", heart rate $it" } ?: "") } }
         AlexaBridge(scope, watch, app.db, java.io.File(filesDir, "alexa"), VoiceToText(app.ai),
-            watchAssistant(this, app.db, app.settings, app.realController, alexaActions, workoutNow)).start()
+            watchAssistant(this, app.db, app.settings, app.realController, alexaActions, workoutNow), app.realController::queueWatchAnswer).start()
         // The offline Vosk model unpacked by older versions (about 70 MB).
         scope.launch(Dispatchers.IO) { java.io.File(filesDir, "vosk-en").takeIf { it.exists() }?.deleteRecursively() }
         val manager = getSystemService(NotificationManager::class.java)
@@ -206,10 +195,11 @@ class WatchService : Service() {
             }
             // A full-screen heart says it's done; the numbers follow as a notification, which the watch keeps in its list.
             if (r != null && done.error == null) {
-                runCatching { watch.nudge("Heart check done", listOfNotNull(r.hr?.let { "${it.roundToInt()} bpm" }, r.rmssd?.let { "HRV ${it.roundToInt()} ms" }).joinToString(", ")) }
+                try { watch.nudge("Heart check done", listOfNotNull(r.hr?.let { "${it.roundToInt()} bpm" }, r.rmssd?.let { "HRV ${it.roundToInt()} ms" }).joinToString(", ")) }
+                catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); app.db.events.add("warn", "Heart check completion nudge failed: ${e.message}") }
                 delay(4_000)
             }
-            runCatching { watch.notify("Heart check", text) }
+            app.realController.queueWatchAnswer("Heart check", WatchAssistant.notificationChunks(text), 100)
         }
     }
 

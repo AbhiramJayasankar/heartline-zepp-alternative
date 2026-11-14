@@ -9,6 +9,9 @@ import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.async
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -73,6 +76,31 @@ class WatchAssistantTest {
         { key.isNotEmpty() }, { WatchAssistant.Facts("72 bpm at 3:39 PM", 4200, health = "Readiness: 62 out of 100") }, weather, store, actions, data, { now }, { alexa })
 
     private var alexa = AlexaSettings()
+
+    @Test fun overlappingQuestionsKeepHistoryAndModelWorkInTurnOrder() = runBlocking {
+        val entered = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>(); var calls = 0
+        brain(say("First answer."), say("Second answer."))
+        val a = WatchAssistant(AssistantAi(fakeAi { body ->
+            bodies += JSONObject(body); dev.heartline.service.ai.HttpReply(200, replies.removeFirst())
+        }.store), { true }, {
+            if (++calls == 1) { entered.complete(Unit); release.await() }; WatchAssistant.Facts()
+        }, weather, store, now = { now })
+        val first = async { a.answer("First question") }; entered.await()
+        val second = async(start = CoroutineStart.UNDISPATCHED) { a.answer("Second question") }
+        assertEquals(1, calls); release.complete(Unit)
+        assertEquals("First answer.", first.await().text); assertEquals("Second answer.", second.await().text)
+        val messages = bodies[1].getJSONArray("messages")
+        assertEquals("First question", messages.getJSONObject(1).getString("content"))
+        assertEquals("First answer.", messages.getJSONObject(2).getString("content"))
+    }
+
+    @Test fun notificationByteBoundaryDoesNotSplitAnEmojiSurrogatePair() {
+        val text = "x".repeat(959) + "😀 tail"
+        val parts = WatchAssistant.notificationChunks(text)
+        assertTrue(parts.all { it.toByteArray().size <= WatchAssistant.NOTIFICATION_TEXT })
+        assertEquals(text, parts.joinToString(""))
+        assertTrue(parts.last().startsWith("😀"))
+    }
 
     @Test fun theOwnersSettingsShapeTheRequest() = runBlocking {
         alexa = AlexaSettings(prompt = "Be brief. Now {NOW}. Steps {STEPS}.", disabledTools = setOf("timers_and_reminders"),

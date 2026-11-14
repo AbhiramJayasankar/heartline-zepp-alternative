@@ -52,10 +52,18 @@ class WorkoutExtFixturesTest(private val index: Int, private val capture: Map<St
         assertEquals(expected["pauses"].arr().map { it.num().toInt() }, d.pauses)
         assertEquals(expected["resumes"].arr().map { it.num().toInt() }, d.resumes)
         val counts = expected["recordCounts"].obj().mapKeys { it.key.toInt() }.mapValues { it.value.num().toInt() }
-        assertEquals(counts.filterKeys { it != 0 && it != 1 }, d.undecoded.groupingBy { it.type }.eachCount())
+        assertEquals(counts.filterKeys { it != 0 && it != 1 && it != 4 && it != 6 }, d.undecoded.groupingBy { it.type }.eachCount())
+        assertEquals(counts[6] ?: 0, d.cadence.size)
+        assertEquals(counts[4] ?: 0, d.kmSplits.size)
         assertEquals(0, d.trailingBytes)
         assertTrue(d.altitudeM.isEmpty()) // No GPS records, altitude is -20000 sentinel in all 14 captures.
-        assertTrue(d.speedMs.isEmpty() && d.cadence.isEmpty() && d.steps.isEmpty() && d.distanceM.isEmpty())
+        assertTrue(d.steps.isEmpty() && d.distanceM.isEmpty())
+        // Per-second cadence (type 6) summed over the workout comes to the summary's step count.
+        val s = parseWorkoutSummaryExt(summary)
+        if (d.cadence.size > 60 && s != null && s.steps > 0) {
+            val steps = d.cadence.zipWithNext { a, b -> a.value * (b.t - a.t) / 60 }.sum()
+            assertTrue(kotlin.math.abs(steps - s.steps) <= 0.08 * s.steps, "steps from cadence $steps vs summary ${s.steps}")
+        }
         assertEquals(255, d.undecoded.first().type) // ff 00 08 20 01 00 00 00: unknown header, not speed.
         assertEquals(listOf(8, 32, 1, 0, 0, 0), d.undecoded.first().payload)
     }

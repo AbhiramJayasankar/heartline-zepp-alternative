@@ -19,7 +19,7 @@
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
-> **Status: 0.6.2.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
+> **Status: 0.7.0.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
 > Other Huami/Zepp watches of the same generation (GTR 2, GTS 2, GTS 2e) speak a similar protocol but are untested.
 
 ## Highlights
@@ -108,7 +108,9 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
 **Health and sleep**
 - **Readiness, strain, sleep score and body battery** each day, with a short plain-language suggestion, and a
   Readiness page that shows exactly how the number was worked out.
-- **Naps** are kept apart from nights, shown on the Sleep page and Today, and recharge body battery.
+- **Naps** are kept apart from nights, shown on the Sleep page and Today, and recharge body battery. The night is
+  the sleep that falls in your usual sleeping hours (learnt from your own last weeks), so a long evening nap before a
+  short, broken night is still a nap.
 - **Automatic HRV**: samples overnight while you sleep and during still moments in the day.
 - **Heart rate** all day (per-minute history plus live readings), sleeping and awake resting heart rate, and zones.
 - **Sleep page**: a hypnogram of the night, each stage against its typical range, heart rate and SpO2 while asleep,
@@ -122,7 +124,15 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
   breathing rate**. Rhythm screening is a hint, not a diagnosis.
 
 **Workouts**
-- Imports the watch's own workouts with per-second heart rate and GPS routes.
+- Imports the watch's own workouts with per-second heart rate, pace, cadence, stride, kilometre splits and GPS routes,
+  drawn on an **OpenStreetMap map** (or on plain paper, if you'd rather no map tiles were fetched).
+- **Runs and walks read as runs and walks**: every stretch of running and walking is found from your cadence, with
+  each interval's time, pace, cadence and heart rate, how far heart rate fell in the first minute of each walk, and
+  cardiac drift across the run. The route is coloured by running and walking, on the watch's workout and on a
+  capture labelled Run.
+- **Heart rate checked against the raw pulse while you run**: wrist sensors can lock onto your step rhythm and report
+  it as heart rate. In a capture, Heartline takes the movement out of the raw optical pulse and, where the watch sat
+  on your step rate and the pulse clearly says otherwise, uses the pulse instead (and says so).
 - **GPS assist (A-GPS)**: sends the week's satellite almanacs and orbit predictions to the watch, so its GPS gets a
   fix in seconds. Needs a Zepp sign-in (the data is only served to Zepp accounts), done in your phone's browser, so Google
   and Apple accounts work in a tap; updates every 3 days.
@@ -166,6 +176,8 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
 - Everything is stored in a local database on the phone. Export it (your API keys stay out of the export), back it
   up, or share it with other apps through **Health Connect** (heart rate, steps, sleep, SpO2, HRV, resting HR, skin
   temperature, workouts).
+- A workout's map loads OpenStreetMap tiles, which tells the tile server the area being looked at (never the track
+  itself). Switch the map to Paper and no tiles are fetched.
 - **Sensors lab**: live raw pulse, motion, compass, GPS and microphone, saved to CSV.
 
 ## Download

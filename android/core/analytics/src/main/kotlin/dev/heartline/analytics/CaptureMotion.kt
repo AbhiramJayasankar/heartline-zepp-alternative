@@ -6,6 +6,8 @@ internal data class CaptureMotionResult(val points: List<CapturePoint>, val segm
 private data class Period(val hz: Double, val score: Double, val fraction: Double)
 private data class MotionBin(val start: Double, val end: Double, var kind: String, val cadence: Int?)
 private const val FS = 25.0
+/** Wrist motion (g RMS, 0.1 to 8 Hz) a stride needs to count as running rather than walking. */
+internal const val RUN_MIN_RMS = .5
 
 internal fun captureMotion(rec: Recording, duration: Double): CaptureMotionResult {
     val n = ceil(duration * FS).toInt()
@@ -62,8 +64,22 @@ internal fun captureMotion(rec: Recording, duration: Double): CaptureMotionResul
     // Overlay one-second rhythm boundaries on the existing five-second gait/stillness timeline.
     val edges = (base.flatMap { listOf(it.start, it.end) } + sets.flatMap { listOf(it.start, it.end) }).distinct().sorted()
     val segments = ArrayList<CaptureSegment>()
+    // What the feet were doing, for the timeline: running moves the wrist hard (about 0.9 to 1.1 g on the user's own
+    // runs, against 0.25 to 0.4 g walking). A fast rhythm with little movement (166 steps/min at 0.04 g: a tapping hand,
+    // a vehicle) is neither, and a jog at 121 to 140 steps/min with a real arm swing is running. The set detector above
+    // still sees the motion bins as they were, so sets don't move.
+    fun meanRms(a: Double, b: Double) = points.filter { it.t >= a && it.t < b }.map { it.v }.takeIf { it.isNotEmpty() }?.average() ?: 0.0
+    fun feet(s: CaptureSegment): CaptureSegment {
+        val cadence = s.cadenceSpm ?: return s
+        val rms = meanRms(s.start, s.end)
+        return when {
+            s.kind == "running" && rms < RUN_MIN_RMS && rms <= .65 && cadence > 140 -> s.copy(kind = "other", cadenceSpm = null)
+            s.kind == "walking" && cadence > 120 && rms >= RUN_MIN_RMS -> s.copy(kind = "running")
+            else -> s
+        }
+    }
     for ((a, b) in edges.zipWithNext()) {
-        val original = base.firstOrNull { a >= it.start && a < it.end } ?: continue
+        val original = base.firstOrNull { a >= it.start && a < it.end }?.let(::feet) ?: continue
         val segment = if (sets.any { a >= it.start && a < it.end }) CaptureSegment(a, b, "lifting", null, null)
             else original.copy(start = a, end = b)
         val last = segments.lastOrNull()

@@ -93,14 +93,31 @@ class WorkoutExtTest {
         assertEquals(listOf(TrackPoint(1, 70), TrackPoint(2, 80), TrackPoint(3, 90), TrackPoint(20, 100)), parseWorkoutDetailsExt(raw).hr)
     }
 
-    @Test fun unimplementedSpeedSwimmingUnknownRecordsAndPartialTailRemainOpaque() {
-        // consumeSpeed4/5/6, consumeSwimming upstream return 6 without decoding ANY payload fields.
+    @Test fun mileSwimmingUnknownRecordsAndPartialTailRemainOpaque() {
+        // consumeSpeed5 (mile splits), consumeSwimming upstream return 6 without decoding ANY payload fields.
         val raw = listOf(4, 5, 6, 8, 255).flatMap { listOf(it, 1, 10, 20, 30, 40, 50, 60) }.map { it.toByte() }.toByteArray()
         val d = parseWorkoutDetailsExt(raw + bytes(1, 2, 3))
-        assertEquals(listOf(4, 5, 6, 8, 255), d.undecoded.map { it.type })
+        assertEquals(listOf(5, 8, 255), d.undecoded.map { it.type })
         assertTrue(d.undecoded.all { it.payload == listOf(10, 20, 30, 40, 50, 60) })
-        assertTrue(d.speedMs.isEmpty() && d.cadence.isEmpty() && d.steps.isEmpty() && d.distanceM.isEmpty())
+        // Out-of-range pace and cadence read as nothing measured, not as numbers.
+        assertEquals(listOf(WorkoutValuePoint(1, 0.0)), d.speedMs)
+        assertEquals(listOf(WorkoutValuePoint(1, 0.0)), d.cadence)
+        assertEquals(listOf(WorkoutSplit(1, 10 + 20 * 256, 30 + 40 * 256)), d.kmSplits)
+        assertTrue(d.steps.isEmpty() && d.distanceM.isEmpty())
         assertEquals(3, d.trailingBytes)
         for (length in 0..7) assertEquals(length, parseWorkoutDetailsExt(ByteArray(length)).trailingBytes)
+    }
+
+    @Test fun perSecondPaceCadenceAndStrideAndKilometreSplits() {
+        // A run's records: pace 330 s/km, 150 steps/min, stride 110 cm; then stopped (pace 0); a kilometre in 489 s.
+        val raw = bytes(6, 0, 0x4a, 0x01, 150, 0, 110, 0,  6, 1, 0, 0, 90, 0, 70, 0,  4, 2, 0xe9, 0x01, 0xe9, 0x01, 0, 0)
+        val d = parseWorkoutDetailsExt(raw)
+        assertEquals(1000.0 / 330, d.speedMs[0].value, 1e-9)
+        assertEquals(0.0, d.speedMs[1].value)
+        assertEquals(listOf(150.0, 90.0), d.cadence.map { it.value })
+        assertEquals(listOf(110.0, 70.0), d.strideCm.map { it.value })
+        assertEquals(listOf(0, 1), d.cadence.map { it.t })
+        assertEquals(listOf(WorkoutSplit(2, 489, 489)), d.kmSplits)
+        assertTrue(d.undecoded.isEmpty())
     }
 }

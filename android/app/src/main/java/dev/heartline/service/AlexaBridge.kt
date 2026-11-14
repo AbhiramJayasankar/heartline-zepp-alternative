@@ -7,11 +7,7 @@ import dev.heartline.data.HeartlineDatabase
 import dev.heartline.protocol.Alexa
 import dev.heartline.protocol.Endpoint2021
 import dev.heartline.protocol.SpeechEndpointer
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -43,7 +39,8 @@ import java.io.File
  * ends the bridge works through [STOPS], moving on whenever voice is still arriving 3 s later.
  */
 class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchConnection, private val db: HeartlineDatabase, private val folder: File,
-                  private val speech: VoiceToText, private val assistant: WatchAssistant) {
+                  private val speech: VoiceToText, private val assistant: WatchAssistant,
+                  private val enqueueAnswer: suspend (String, List<String>, Int) -> Int) {
     private var voice = ByteArrayOutputStream()
     private var packets = 0
     private var decoder: MicDecoder? = null
@@ -60,6 +57,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
     private var probed = false
     private var session = 0
     private var turn = 0
+    private var generation = 0L
     private var stop = 0
     private var name = ""
 
@@ -122,7 +120,7 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
 
     /** Per-turn state. The follow-up Alexa button after a reply reopens the mic in the same session (voice again, no start). */
     private suspend fun newTurn() {
-        answerJob?.cancel(); answerJob = null
+        generation++
         closeDecoder()
         synchronized(pcm16) { pcm16.reset() }; down = 0; downN = 0
         active = true; replied = false; answered = false; stopSent = 0; voice = ByteArrayOutputStream(); packets = 0; pending.clear()
@@ -154,13 +152,21 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         if (stop >= STOPS.size) return
         // Still streaming: escalate to the next way of telling the watch to stop.
         stopSent = now
+        val monotonicStop = android.os.SystemClock.elapsedRealtime()
         db.events.add("info", "Alexa: ${endpointer.state.name.lowercase().replace('_', ' ')}, %.1f s of audio; sending ${STOPS[stop]}".format(packets * 0.02))
         when (stop++) {
             0 -> {
                 // 06 moves the watch from "Listening" to "Thinking" and stops the voice; it then waits for the reply.
-                watch.send2021(Endpoint2021.ALEXA, byteArrayOf(Alexa.TRIGGERED.toByte()))
                 replied = true
-                answerJob = scope.launch { respond() }
+                val audio = synchronized(pcm16) { pcm16.snapshot() }
+                val request = ReplyRequest(generation, stopSent, monotonicStop, name, audio,
+                    endpointer.state == SpeechEndpointer.State.NOTHING_SAID, watchReplyLimit)
+                try { watch.send2021(Endpoint2021.ALEXA, byteArrayOf(Alexa.TRIGGERED.toByte())) }
+                catch (e: Exception) {
+                    dev.heartline.ble.rethrowIfCancelled(e)
+                    db.events.add("warn", "Alexa: stop-listening write failed; answer will still be processed: ${e.message}")
+                }
+                scope.launch { respond(request) }
             }
             1 -> watch.send2021(Endpoint2021.ALEXA, Alexa.error(3, "Heartline could not stop listening"))
         }
@@ -225,7 +231,6 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
     }
 
     private var repliedAt = 0L
-    private var answerJob: Job? = null
     private val pcm16 = ShortBuffer()
     private var down = 0
     private var downN = 0
@@ -248,66 +253,77 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
 
     /**
      * Gemini on the turn's audio, then the OpenRouter brain; the watch is on "Thinking". A thinking model can take
-     * longer than the ~40 s the watch waits, so after the wait set in the Alexa settings the watch is told the answer will come as a
+     * longer than the ~30 s the watch waits, so after the wait set in the Alexa settings the watch is told the answer will come as a
      * notification, and it does once the model finishes.
      */
-    private suspend fun respond() {
+    private class ReplyRequest(val generation: Long, val stoppedAt: Long, val monotonicStop: Long, val recording: String,
+                               val audio: ShortArray, val silent: Boolean, val replyLimit: Int) { var framesSent = 0 }
+
+    private suspend fun respond(request: ReplyRequest) {
         // A send that fails (the link dropped mid-answer) is logged here; before, it ended the app (audit, 2026-11-12).
-        try { respondOrThrow() } catch (e: Exception) {
+        try { respondOrThrow(request) } catch (e: Exception) {
             dev.heartline.ble.rethrowIfCancelled(e)
             db.events.add("warn", "Alexa: couldn't send the answer to the watch: ${e.message}")
         }
     }
 
-    private suspend fun respondOrThrow() {
-        val stoppedAt = stopSent
+    private suspend fun respondOrThrow(request: ReplyRequest) {
+        val stoppedAt = request.stoppedAt
         val s = settings()
-        val recording = name
-        val audio = synchronized(pcm16) { pcm16.snapshot() }
-        runCatching { File(folder, "$name-16k.wav").writeBytes(wav16k(audio)) }
-        // Nothing was said (the endpointer heard no speech): Gemini would wait for words that never come.
-        val silent = endpointer.state == SpeechEndpointer.State.NOTHING_SAID
-        val work = scope.async {
-            if (silent) Understood(WatchAssistant.Answer("I didn't hear anything.", error = "no speech in the recording"), null, audio.size / 16_000.0, null)
-            else understand(audio, s)
+        val recording = request.recording
+        val audio = request.audio
+        runCatching { File(folder, "$recording-16k.wav").writeBytes(wav16k(audio)) }
+        val delivery = AssistantDelivery(request.monotonicStop, s.watchWaitS, android.os.SystemClock::elapsedRealtime) {
+            generation == request.generation && active && watch.ready.value
         }
-        var handedOff = false
-        try {
-            val u = withTimeoutOrNull((s.watchWaitS * 1000L - (System.currentTimeMillis() - stoppedAt)).coerceAtLeast(1)) { work.await() }
-            if (u == null) {
-                handedOff = true
-                watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple("Still thinking. I'll send the answer as a notification."))
-                repliedAt = System.currentTimeMillis(); answered = true
-                db.events.add("info", "Alexa: no answer ${secs(repliedAt - stoppedAt)} s after the stop; it will come as a notification")
-                scope.launch {
-                    try { deliverLate(work.await(), stoppedAt, s, recording) } catch (e: Exception) {
-                        dev.heartline.ble.rethrowIfCancelled(e)
-                        db.events.add("warn", "Alexa: couldn't send the late answer: ${e.message}")
-                    }
+        delivery.run(compute = {
+            if (request.silent) Understood(WatchAssistant.Answer("I didn't hear anything.", error = "no speech in the recording"), null, audio.size / 16_000.0, null)
+            else understand(audio, s)
+        }, waiting = {
+            kotlinx.coroutines.withTimeout(2_000) {
+                watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple("Still thinking. I'll send the answer as a notification.")) {
+                    generation == request.generation && active && android.os.SystemClock.elapsedRealtime() < request.monotonicStop + 28_000
                 }
-                return
             }
+            if (generation == request.generation) { repliedAt = System.currentTimeMillis(); answered = true }
+            db.events.add("info", "Alexa: no answer ${secs(System.currentTimeMillis() - stoppedAt)} s after the stop; it will come as a notification")
+        }, screen = { u ->
             val answer = u.answer
-            sendPendingDeletes()
-            answer.frames.forEach { watch.send2021(Endpoint2021.ALEXA, it) }
-            val limit = if (watchReplyLimit > 0) minOf(watchReplyLimit, s.replyBytes) else s.replyBytes
+            try { sendPendingDeletes(delivery::canReply) } catch (e: Exception) {
+                dev.heartline.ble.rethrowIfCancelled(e); db.events.add("warn", "Alexa: pending alert delete failed: ${e.message}")
+            }
+            answer.frames.forEach {
+                check(delivery.canReply()) { "Alexa reply window closed" }
+                watch.send2021(Endpoint2021.ALEXA, it, delivery::canReply)
+                request.framesSent++
+            }
+            val limit = if (request.replyLimit > 0) minOf(request.replyLimit, s.replyBytes) else s.replyBytes
             val listen = answer.listenAgain && s.listenAgain
             // While listening again the watch shows the latest reply's last question, so a reply that asks ends with one.
             val text = answer.text?.let { WatchAssistant.watchText(it) }?.let { if (listen) WatchAssistant.endAsQuestion(it) else it }
             val (shown, rest) = WatchAssistant.replyAndNotifications(text, limit, keepLast = answer.listenAgain)
-            shown?.let { watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple(it)) }
-            if (rest.isNotEmpty()) scope.launch { notifyAll(rest, s.maxNotifications) }
-            repliedAt = System.currentTimeMillis(); answered = true
+            shown?.let {
+                check(delivery.canReply()) { "Alexa reply window closed" }
+                watch.send2021(Endpoint2021.ALEXA, Alexa.replySimple(it), delivery::canReply)
+            }
+            val queued = if (rest.isNotEmpty()) notifyAll(rest, s.maxNotifications) else 0
+            if (generation == request.generation) { repliedAt = System.currentTimeMillis(); answered = true }
             db.events.add("info", "Alexa replied ${secs(repliedAt - stoppedAt)} s after the stop: ${answer.text ?: "(card)"}" + if (listen) "; listening again" else "")
-            val delivery = listOfNotNull(
+            val description = listOfNotNull(
                 when { answer.text != null -> "Reply on the watch"; answer.frames.isNotEmpty() -> "Card on the watch"; else -> "Nothing shown" },
-                rest.size.takeIf { it > 0 }?.let { "then ${minOf(it, s.maxNotifications)} notification" + if (it > 1) "s" else "" },
+                rest.size.takeIf { it > 0 }?.let { "then $queued notification(s) queued" },
                 "listening again".takeIf { listen },
             ).joinToString(", ")
-            log(u, stoppedAt, delivery, recording, s)
+            log(u, stoppedAt, description, recording, s)
             // Zepp waits 600 ms before its continue command (NewBleVoiceCaptureNotifyImpl).
-            if (listen) { delay(LISTEN_AGAIN_DELAY_MS); watch.send2021(Endpoint2021.ALEXA, Alexa.listenAgain) }
-        } catch (e: CancellationException) { if (!handedOff) work.cancel(); throw e }
+            if (listen) {
+                delay(LISTEN_AGAIN_DELAY_MS)
+                if (delivery.canReply()) try { watch.send2021(Endpoint2021.ALEXA, Alexa.listenAgain, delivery::canReply) }
+                catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); db.events.add("warn", "Alexa: couldn't reopen listening: ${e.message}") }
+            }
+        }, notification = { u -> deliverLate(u, request, s) }, failure = { e ->
+            db.events.add("warn", "Alexa: screen delivery failed; answer will be queued as notifications: ${e.message}")
+        })
     }
 
     /** One question's result: the answer, what Gemini heard and how long that took. */
@@ -339,13 +355,25 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
     }
 
     /** An answer that came after the watch stopped waiting: alerts are still sent, and the words come as a notification. */
-    private suspend fun deliverLate(u: Understood, stoppedAt: Long, s: AlexaSettings, recording: String) {
+    private suspend fun deliverLate(u: Understood, request: ReplyRequest, s: AlexaSettings) {
+        val stoppedAt = request.stoppedAt
         val answer = u.answer
-        answer.frames.forEach { runCatching { watch.send2021(Endpoint2021.ALEXA, it) } }
-        val parts = WatchAssistant.notificationChunks(WatchAssistant.watchText(answer.text ?: answer.summary))
-        db.events.add("info", "Alexa answered by notification ${secs(System.currentTimeMillis() - stoppedAt)} s after the stop: ${answer.summary}")
-        log(u, stoppedAt, "\"Still thinking\" on the watch, then ${minOf(parts.size, s.maxNotifications)} notification" + if (parts.size > 1) "s" else "", recording, s)
-        notifyAll(parts, s.maxNotifications)
+        // Cards and alert commands belong to the original Alexa session; never replay them into a newer one.
+        for (frame in answer.frames.drop(request.framesSent)) {
+            try {
+                check(generation == request.generation && active && watch.ready.value) { "Original Alexa session closed" }
+                watch.send2021(Endpoint2021.ALEXA, frame) { generation == request.generation && active && watch.ready.value }
+                request.framesSent++
+            } catch (e: Exception) {
+                dev.heartline.ble.rethrowIfCancelled(e)
+                db.events.add("warn", "Alexa: dropped ${answer.frames.size - request.framesSent} session frame(s): ${e.message}"); break
+            }
+        }
+        val warning = if (request.framesSent < answer.frames.size) "\nSome watch commands could not be delivered. Check the watch before trying again." else ""
+        val parts = WatchAssistant.notificationChunks(WatchAssistant.watchText(answer.text ?: answer.summary) + warning)
+        val queued = notifyAll(parts, s.maxNotifications)
+        db.events.add("info", "Alexa answer queued by notification ${secs(System.currentTimeMillis() - stoppedAt)} s after the stop")
+        log(u, stoppedAt, "Queued $queued notification(s)", request.recording, s)
     }
 
     /** Adds the turn to the conversation log the app shows. */
@@ -356,16 +384,11 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
         db.meta.set(AlexaLog.KEY, AlexaLog.added(db.meta.get(AlexaLog.KEY), record, s.keepTurns))
     }.onFailure { db.events.add("warn", "Alexa: couldn't save the turn to the log: ${it.message}") }
 
-    /** Sends [parts] as numbered watch notifications, a moment apart so they arrive in order. */
-    private suspend fun notifyAll(parts: List<String>, max: Int) {
-        val sent = parts.take(max)
-        sent.forEachIndexed { i, p ->
-            val more = if (i == sent.lastIndex && parts.size > sent.size) " (cut short)" else ""
-            runCatching { watch.notify(if (sent.size > 1) "Alexa ${i + 1}/${sent.size}" else "Alexa", p + more) }
-                .onFailure { db.events.add("warn", "Alexa: couldn't send notification ${i + 1}: ${it.message}"); return }
-            delay(1_500)
-        }
-        db.events.add("info", "Alexa: sent the rest of the answer as ${sent.size} notification(s)")
+    /** Uses the same application-owned FIFO as phone notifications and tool results. */
+    private suspend fun notifyAll(parts: List<String>, max: Int): Int {
+        val n = enqueueAnswer("Alexa", parts, max)
+        db.events.add("info", "Alexa: queued the answer as $n notification(s)")
+        return n
     }
 
     private suspend fun closeDecoder() {
@@ -375,10 +398,10 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
     }
 
     /** Sends the queued alert deletes with this answer: the watch only acts on Alexa deletes sent inside a conversation. */
-    private suspend fun sendPendingDeletes() {
+    private suspend fun sendPendingDeletes(stillValid: () -> Boolean) {
         val pending = AlexaDeletes.pending(folder).takeIf { it.isNotEmpty() } ?: return
-        AlexaDeletes.clear(folder)
-        pending.forEach { (kind, token) -> watch.send2021(Endpoint2021.ALEXA, Alexa.deleteAlert(kind, token, voiceVersion)) }
+        pending.forEach { (kind, token) -> watch.send2021(Endpoint2021.ALEXA, Alexa.deleteAlert(kind, token, voiceVersion), stillValid) }
+        AlexaDeletes.remove(folder, pending)
         scope.launch {
             delay(6000)
             val slots = runCatching { watch.readAlarmSwitches() }.getOrNull()?.joinToString { "${it.slot} ${if (it.on) "on" else "off"}" } ?: "not read"
@@ -405,15 +428,21 @@ class AlexaBridge(private val scope: CoroutineScope, private val watch: WatchCon
  */
 object AlexaDeletes {
     const val FILE = "pending-deletes"
-    fun queue(folder: File, kind: Int, token: String) {
+    @Synchronized fun queue(folder: File, kind: Int, token: String) {
         if (pending(folder).any { it.second == token }) return
         folder.mkdirs(); File(folder, FILE).appendText("$kind $token\n")
     }
-    fun pending(folder: File): List<Pair<Int, String>> = runCatching {
+    @Synchronized fun pending(folder: File): List<Pair<Int, String>> = runCatching {
         File(folder, FILE).takeIf { it.isFile }?.readLines().orEmpty().mapNotNull { l ->
             val parts = l.trim().split(" ", limit = 2)
             if (parts.size == 2) parts[0].toIntOrNull()?.let { it to parts[1].trim() } else null
         }
     }.getOrDefault(emptyList())
-    fun clear(folder: File) { File(folder, FILE).delete() }
+    @Synchronized fun clear(folder: File) { File(folder, FILE).delete() }
+    /** A delete queued while the BLE writes were suspended must survive completion of the earlier batch. */
+    @Synchronized fun remove(folder: File, sent: List<Pair<Int, String>>) {
+        val remaining = pending(folder) - sent.toSet()
+        if (remaining.isEmpty()) clear(folder)
+        else File(folder, FILE).writeText(remaining.joinToString("\n", postfix = "\n") { "${it.first} ${it.second}" })
+    }
 }

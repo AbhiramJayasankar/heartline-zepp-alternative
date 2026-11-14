@@ -50,8 +50,64 @@ internal fun sleepBlocks(minutes: List<MinuteSample>): List<SleepBlock> {
     return blocks
 }
 
-/** The night ending on [d]: its main block, minutes asleep across all blocks, and whether it may still be going on. */
-internal data class Night(val main: SleepBlock?, val asleep: Int, val ongoing: Boolean = false)
+/**
+ * The night ending on [d]: its main block, minutes asleep across all blocks, whether it may still be going on, and the
+ * watch's sleep blocks it is made of ([parts]).
+ */
+internal data class Night(val main: SleepBlock?, val asleep: Int, val ongoing: Boolean = false, val parts: List<SleepBlock> = emptyList())
+
+/**
+ * When this person usually sleeps: [lengthMin] minutes from [startMin] (minute of the local day), wrapping past midnight.
+ * A night is chosen with it: of two sleeps in one day, the one in the usual hours is the night even when the other is
+ * somewhat longer (a short night after a long evening nap is still the night, and the nap is still a nap).
+ */
+data class SleepHabit(val startMin: Int, val lengthMin: Int = HABIT_LENGTH_MIN) {
+    fun covers(minuteOfDay: Int): Boolean = Math.floorMod(minuteOfDay - startMin, 1440) < lengthMin
+    companion object {
+        /** With too little history: 22:00 to 08:00. */
+        val DEFAULT = SleepHabit(22 * 60)
+    }
+}
+/** Ten hours: wide enough to hold a usual night with its early and late days, narrow enough to leave the evening out. */
+const val HABIT_LENGTH_MIN = 600
+/** Sleep outside the usual hours counts this much towards being the night. */
+private const val OFF_HOURS_WEIGHT = 0.5
+/** Days with sleep needed before the usual hours are trusted over [SleepHabit.DEFAULT]. */
+private const val HABIT_MIN_DAYS = 7
+
+/**
+ * The usual sleep hours from the watch's own sleep minutes: the [HABIT_LENGTH_MIN] stretch of the day that held the
+ * most sleep. It reads the minutes, not the chosen nights, so a night picked wrongly once can't teach it the wrong hours.
+ */
+fun sleepHabitOf(minutes: List<MinuteSample>, zone: ZoneId): SleepHabit {
+    // Sleep minutes per 10-minute slot of the local day.
+    val slots = IntArray(144)
+    val days = HashSet<LocalDate>()
+    for (m in minutes) if (m.state in sleepStates) {
+        val t = Instant.ofEpochSecond(m.ts).atZone(zone)
+        slots[(t.hour * 60 + t.minute) / 10]++
+        days.add(t.toLocalDate())
+    }
+    if (days.size < HABIT_MIN_DAYS) return SleepHabit.DEFAULT
+    val width = HABIT_LENGTH_MIN / 10
+    var sum = (0 until width).sumOf { slots[it] }
+    var best = sum; var bestStart = 0
+    for (start in 1 until 144) {
+        sum += slots[(start + width - 1) % 144] - slots[start - 1]
+        if (sum > best) { best = sum; bestStart = start }
+    }
+    return SleepHabit(bestStart * 10)
+}
+
+/** How much a set of blocks counts as the night: minutes asleep in the usual hours, plus part of those outside them. */
+private fun nightScore(part: List<SleepBlock>, habit: SleepHabit, zone: ZoneId): Double {
+    var usual = 0; var other = 0
+    for (b in part) for (m in b.rows) if (m.state in sleepStates) {
+        val t = Instant.ofEpochSecond(m.ts).atZone(zone)
+        if (habit.covers(t.hour * 60 + t.minute)) usual++ else other++
+    }
+    return usual + OFF_HOURS_WEIGHT * other
+}
 
 /**
  * Sleep that can be a night: three hours or more, or any part of it between midnight and 8:00. An evening or afternoon
@@ -76,20 +132,33 @@ private const val NIGHT_JOIN_S = 2 * 3600L
  */
 private const val JOIN_MIN_ASLEEP = 30
 private const val JOIN_NEAR_S = 1800L
+/** A short block after the night gets an hour: waking, then dozing off again, is how most nights end. */
+private const val JOIN_AFTER_S = 3600L
 
-internal fun nightFor(blocks: List<SleepBlock>, d: LocalDate, lastTs: Long?, zone: ZoneId): Night {
+internal fun nightFor(blocks: List<SleepBlock>, d: LocalDate, lastTs: Long?, zone: ZoneId, habit: SleepHabit = SleepHabit.DEFAULT): Night {
     // daily.night_for uses midnight + 18 hours and a fixed 86400-second window, even across DST.
     val lo = d.minusDays(1).atStartOfDay(zone).toEpochSecond() + 18 * 3600
     val hi = lo + 86400
     val inside = blocks.filter { it.end >= lo && it.end < hi }
-    val main = inside.filter { nightLike(it, zone) }.maxByOrNull { it.asleep } ?: return Night(null, 0)
-    if (main.asleep < 60) return Night(null, 0)
-    val part = arrayListOf(main)
-    var grew = true
-    while (grew) {
-        grew = false
-        for (b in inside) if (b !in part && part.any { p -> gapS(p, b) <= (if (b.asleep >= JOIN_MIN_ASLEEP) NIGHT_JOIN_S else JOIN_NEAR_S) }) { part.add(b); grew = true }
+    // Every night-like block, with the blocks that chain onto it, is a candidate night. The longest single block used
+    // to win outright, so a night the watch split in two (taken off for a while) lost to an unbroken evening nap, and
+    // then showed as neither night nor nap (2026-11-14). Whole candidates are compared now, by [nightScore].
+    fun chain(seed: SleepBlock): List<SleepBlock> {
+        val part = arrayListOf(seed)
+        var grew = true
+        while (grew) {
+            grew = false
+            for (b in inside) if (b !in part && part.any { p ->
+                    gapS(p, b) <= (if (b.asleep >= JOIN_MIN_ASLEEP) NIGHT_JOIN_S else if (b.start > p.end) JOIN_AFTER_S else JOIN_NEAR_S) }) { part.add(b); grew = true }
+        }
+        return part
     }
+    // A candidate is built around its longest block: started from a few still minutes before bed, the chain would pull
+    // the real night in from two hours away, which is the join those minutes are refused.
+    val part = inside.filter { nightLike(it, zone) }.map { chain(it) }.filter { p -> p[0].asleep == p.maxOf { it.asleep } }
+        .maxWithOrNull(compareBy<List<SleepBlock>> { nightScore(it, habit, zone) }.thenBy { p -> p.sumOf { it.asleep } }) ?: return Night(null, 0)
+    val main = part.maxBy { it.asleep }
+    if (main.asleep < 60) return Night(null, 0)
     // A night of several blocks is one stretch, first sleep to last: its window, stages and total agree, and the time
     // awake between blocks counts as awake in bed.
     val night = if (part.size == 1) main else SleepBlock(part.minOf { it.start }).also { n ->
@@ -102,19 +171,25 @@ internal fun nightFor(blocks: List<SleepBlock>, d: LocalDate, lastTs: Long?, zon
     // shows it straight away instead, flagged as still going on, and the next sync updates it.
     val ongoing = lastTs != null && lastTs >= lo && lastTs < hi && Instant.ofEpochSecond(lastTs).atZone(zone).hour < 12 &&
         (main.asleep < 180 || lastTs - main.end < 1800)
-    return Night(night, night.asleep, ongoing)
+    return Night(night, night.asleep, ongoing, part)
 }
 
 /**
  * Naps: sleep of 10 minutes or more that isn't night-like and isn't within two hours of night-like sleep, by the day
- * it started. The watch marks these minutes as sleep on its own; this only keeps them apart from the nights.
+ * it started; and any sleep of three hours or more that wasn't the night of its day (a long evening sleep before a
+ * short night). The watch marks these minutes as sleep on its own; this only keeps them apart from the nights.
  */
-internal fun napsOf(blocks: List<SleepBlock>, zone: ZoneId): Map<LocalDate, List<Nap>> =
-    blocks.filter { b -> b.asleep >= 10 && !nightLike(b, zone) && blocks.none { o -> o !== b && nightLike(o, zone) && gapS(o, b) <= NIGHT_JOIN_S } }
+internal fun napsOf(blocks: List<SleepBlock>, zone: ZoneId, habit: SleepHabit = SleepHabit.DEFAULT): Map<LocalDate, List<Nap>> {
+    // The night whose day window holds this block's end (see nightFor): 18:00 to 18:00.
+    fun nightDay(b: SleepBlock): LocalDate = Instant.ofEpochSecond(b.end).atZone(zone).let { t -> if (t.hour >= 18) t.toLocalDate().plusDays(1) else t.toLocalDate() }
+    fun lostTheNight(b: SleepBlock) = b.asleep >= 180 && nightFor(blocks, nightDay(b), null, zone, habit).parts.none { it === b }
+    return blocks.filter { b -> b.asleep >= 10 && (lostTheNight(b) ||
+            (!nightLike(b, zone) && blocks.none { o -> o !== b && nightLike(o, zone) && gapS(o, b) <= NIGHT_JOIN_S })) }
         .map { b ->
             val hr = b.rows.filter { it.state in sleepStates }.mapNotNull { it.hr?.takeIf { h -> h in 30..220 } }
             Nap(b.start, b.end, b.asleep, b.deep, b.light, b.rem, hr.minOrNull(), hr.takeIf { it.isNotEmpty() }?.average()?.roundToInt())
         }.groupBy { dayOf(it.start, zone) }
+}
 
 internal fun sleepScore(asleep: Int, efficiency: Double, deep: Int, rem: Int): Int = rounded(sleepScoreExact(asleep, efficiency, deep, rem)).toInt()
 internal fun sleepScoreExact(asleep: Int, efficiency: Double, deep: Int, rem: Int): Double {

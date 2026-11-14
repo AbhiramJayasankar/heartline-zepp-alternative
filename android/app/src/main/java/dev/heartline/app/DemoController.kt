@@ -281,10 +281,11 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override fun refreshBackground() {}
 
     override val captureRun = MutableStateFlow<CaptureRunUi?>(null)
-    override val captures = MutableStateFlow(listOf(CaptureItemUi("demo-gym", "Gym", now() - 7200, 3600, 128, 14, 96.0)))
+    override val captures = MutableStateFlow(listOf(CaptureItemUi("demo-gym", "Gym", now() - 7200, 3600, 128, 14, 96.0),
+        CaptureItemUi("demo-run", "Run", now() - 86_400 - 3 * 3600, 3600, 148, null, 142.0)))
     override fun startCapture(label: String, minutes: Int, forFriend: Boolean) { captureRun.value = CaptureRunUi(label, now(), minutes * 60, 92, 0, 0) }
     override fun stopCapture() { captureRun.value = null }
-    override suspend fun captureDetail(id: String): CaptureAnalysisUi? = demoCapture()
+    override suspend fun captureDetail(id: String): CaptureAnalysisUi? = if (id == "demo-run") demoRunCapture(now() - 86_400 - 3 * 3600) else demoCapture()
     override fun deleteCapture(id: String) = captures.update { l -> l.filter { it.id != id } }
     override suspend fun savedCaptureCoach(id: String): CoachUi? = null
     override suspend fun captureCoach(id: String, facts: String, refresh: Boolean) = CoachUi(
@@ -387,12 +388,14 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
                 else -> MinuteUi(start + m * 60, MinuteState.IDLE, if (rnd.nextDouble() < 0.08) rnd.nextInt(30) else 0, 62 + rnd.nextInt(12))
             }
         }
-        val track = (0 until 45 * 60 step 10).map { HrPoint(start + 18 * 3600 + it, (110 + 30 * sin(it / 400.0) + rnd.nextInt(8)).toInt()) }
+        val run = demoRunWalk(2700)
+        val track = (0 until 45 * 60 step 10).map { HrPoint(start + 18 * 3600 + it, run.hr[it] + rnd.nextInt(4)) }
         return ActivityDayUi(
             date, mins, mins.sumOf { it.steps }, mins.count { it.state == MinuteState.ACTIVE }, 420, 1395, 51, 71, 162,
             SleepNightUi(start, start + 7 * 3600, 84, 248, 92, 18),
             listOf(WorkoutUi(start + 18 * 3600, 2700, "Outdoor run", 148, 172, 412, 5980, 5210, track,
-                (0..180).map { i -> val a = i / 180.0 * 2 * Math.PI; RoutePoint(i * 15, 12.9716 + 0.006 * Math.sin(a) + 0.0015 * Math.sin(3 * a), 77.5946 + 0.009 * Math.cos(a), 900.0 + 6 * Math.sin(2 * a)) })),
+                (0..180).map { i -> val a = i / 180.0 * 2 * Math.PI; RoutePoint(i * 15, 12.9716 + 0.006 * Math.sin(a) + 0.0015 * Math.sin(3 * a), 77.5946 + 0.009 * Math.cos(a), 900.0 + 6 * Math.sin(2 * a)) },
+                detail = run.detail(track.map { dev.heartline.protocol.TrackPoint((it.ts - start - 18 * 3600).toInt(), it.bpm) }))),
         )
     }
 
@@ -493,4 +496,56 @@ private fun demoPulse(): PulseUi {
         PulseWindowUi(810.0, 845.0, 64, 112, 114, 37.0, 0.07, "regular"), PulseWindowUi(1310.0, 1345.0, 73, 120, 121, 16.5, 0.033, "regular"),
         PulseWindowUi(1700.0, 1725.0, 40, 96, 117, 60.0, 0.21, "unreliable"), PulseWindowUi(2410.0, 2440.0, 55, 115, 116, 18.0, 0.034, "regular"),
     ), 0.05, 0.82, 0, pairs, wave, fs, 1318.0, beats, listOf("Wellness estimate from the watch's optical sensor, not a medical diagnosis."))
+}
+
+/** A demo run-walk: a 5-minute walk, then 2 minutes running and 90 s walking ten times, then walking again. */
+private class DemoRunWalk(val cadence: DoubleArray, val speed: DoubleArray, val hr: IntArray) {
+    fun detail(track: List<dev.heartline.protocol.TrackPoint>): WorkoutDetailUi {
+        fun pts(x: DoubleArray) = x.indices.map { dev.heartline.protocol.WorkoutValuePoint(it, x[it]) }
+        val stride = DoubleArray(cadence.size) { if (cadence[it] > 125) 105.0 else 78.0 }
+        val dist = speed.sum()
+        val splits = ArrayList<dev.heartline.protocol.WorkoutSplit>(); var acc = 0.0; var last = 0
+        speed.forEachIndexed { t, v -> acc += v; if (acc >= 1000 * (splits.size + 1)) { splits += dev.heartline.protocol.WorkoutSplit(t, t - last, t); last = t } }
+        return WorkoutDetailUi(activeS = cadence.size, avgPaceSPerKm = cadence.size * 1000.0 / dist, avgSpeedKmh = dist / cadence.size * 3.6, avgCadence = cadence.average().toInt(),
+            speedKmh = downsampleWorkoutSeries(speed.indices.map { SeriesPoint(it.toDouble(), speed[it] * 3.6) }),
+            cadence = downsampleWorkoutSeries(cadence.indices.map { SeriesPoint(it.toDouble(), cadence[it]) }),
+            gait = workoutGait(pts(cadence), pts(speed), pts(stride), track, cadence.size),
+            laps = kilometreLaps(splits, track, cadence.size, dist.toInt()))
+    }
+}
+
+private fun demoRunWalk(seconds: Int): DemoRunWalk {
+    val cadence = DoubleArray(seconds); val speed = DoubleArray(seconds); val hr = IntArray(seconds)
+    var h = 105.0
+    for (t in 0 until seconds) {
+        val k = t - 300
+        val running = t >= 300 && k < 2100 && k % 210 < 120
+        cadence[t] = (if (running) 150.0 + 3 * kotlin.math.sin(t / 37.0) else 99.0 + 3 * kotlin.math.sin(t / 23.0)).let { kotlin.math.round(it) }
+        speed[t] = if (running) 2.85 + 0.15 * kotlin.math.sin(t / 51.0) else 1.45
+        h += ((if (running) 168.0 + k / 210 * 1.2 else 128.0) - h) / (if (running) 32.0 else 48.0)
+        hr[t] = h.toInt()
+    }
+    return DemoRunWalk(cadence, speed, hr)
+}
+
+/** The same shape as a capture, as the wrist sees it: 5-second motion and heart rate, gait segments with cadence. */
+private fun demoRunCapture(start: Long): CaptureAnalysisUi {
+    val run = demoRunWalk(3600 - 600)
+    val n = 3600
+    val segments = ArrayList<SegmentUi>()
+    fun kindAt(t: Int) = if (t < 300) "rest" else if (t >= 3300) "walking" else if (run.cadence[t - 300] > 125) "running" else "walking"
+    var a = 0
+    for (t in 1..n) if (t == n || kindAt(t) != kindAt(a)) {
+        val cad = if (kindAt(a) == "rest") null else ((a until t).map { u -> if (u - 300 in run.cadence.indices) run.cadence[u - 300] else 100.0 }.average()).toInt()
+        val hrs = (a until t).map { u -> if (u - 300 in run.hr.indices) run.hr[u - 300] else 96 }
+        segments += SegmentUi(a.toDouble(), t.toDouble(), kindAt(a), hrs.average().toInt(), cad); a = t
+    }
+    val hr = (0 until n step 5).map { t -> SeriesPoint(t.toDouble(), (if (t - 300 in run.hr.indices) run.hr[t - 300] else 96).toDouble()) }
+    val motion = (0 until n step 5).map { t -> SeriesPoint(t.toDouble(), when (kindAt(t)) { "running" -> 0.95; "walking" -> 0.32; else -> 0.03 }) }
+    val beats = hr.map { it.v }
+    return CaptureAnalysisUi("demo-run", "Run", start, n, beats.average().toInt(), beats.max().toInt(), beats.min().toInt(),
+        listOf(ZoneTimeUi(1, "Warm-up", 95, 114, 480), ZoneTimeUi(2, "Fat burn", 114, 133, 900), ZoneTimeUi(3, "Aerobic", 133, 152, 840), ZoneTimeUi(4, "Threshold", 152, 171, 1200), ZoneTimeUi(5, "Max", 171, null, 180)),
+        142.0, 455, 6120, hr, motion, segments, emptyList(), emptyList(), "Watch live HR (HR_MEASURE), 17 s corrected from the raw pulse",
+        listOf("Heart rate comes from the watch's live HR_MEASURE notifications, except 17 s where the watch had locked onto your step rate: there it comes from the raw pulse with the movement taken out (148 to 163 bpm)."),
+        activities = listOf(CaptureActivityUi(300.0, 3300.0, "Outdoor running", 3000, 5210, 5980, 412, 148, 172)))
 }

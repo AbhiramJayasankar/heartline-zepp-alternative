@@ -255,6 +255,8 @@ data class WorkoutDetailUi(
     val minHr: Int? = null, val trainingEffect: Double? = null, val load: Double? = null, val recoveryHours: Int? = null,
     val zones: List<ZoneTimeUi> = emptyList(), val speedKmh: List<SeriesPoint> = emptyList(), val cadence: List<SeriesPoint> = emptyList(),
     val altitude: List<SeriesPoint> = emptyList(), val laps: List<LapUi> = emptyList(), val extras: List<Pair<String, String>> = emptyList(),
+    /** Running and walking bouts from the watch's per-second cadence, for runs and walks. */
+    val gait: dev.heartline.analytics.GaitSummary? = null,
 )
 
 data class CaptureRunUi(val label: String, val startedAt: Long, val plannedS: Int, val hr: Int?, val seconds: Int, val samples: Long, val error: String? = null)

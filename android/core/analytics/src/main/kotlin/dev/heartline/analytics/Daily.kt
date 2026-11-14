@@ -71,6 +71,8 @@ fun computeDaily(
     holdOngoingNights: Boolean = false,
     /** Recorded workouts as (start, end) seconds; their minutes count as active while heart rate or steps show work. */
     workouts: List<Pair<Long, Long>> = emptyList(),
+    /** The usual sleep hours, when the caller knows them from more history than [minutes] holds; else worked out from [minutes]. */
+    sleepHabit: SleepHabit? = null,
 ): DailyResult {
     require(days > 0)
     val today = now.toLocalDate()
@@ -82,14 +84,15 @@ fun computeDaily(
     fun nightBase(d: LocalDate) = (1..28).mapNotNull { ownHealth["hrv_sleep"]?.get(d.minusDays(it.toLong()))?.takeIf { v -> v > 0 } }
     val byDay = minutes.groupBy { dayOf(it.ts, zone) }
     val blocks = sleepBlocks(minutes)
-    val naps = napsOf(blocks, zone)
+    val habit = sleepHabit ?: sleepHabitOf(minutes, zone)
+    val naps = napsOf(blocks, zone, habit)
     val first = byDay.keys.minOrNull() ?: today
     val rows = sortedMapOf<LocalDate, DayWork>()
     for (i in max(days, 35) - 1 downTo 0) {
         val d = today.minusDays(i.toLong())
         if (d < first.minusDays(1)) continue
         val ms = byDay[d].orEmpty()
-        val (main, asleep, ongoing) = nightFor(blocks, d, minutes.lastOrNull()?.ts, zone).let { if (holdOngoingNights && it.ongoing) Night(null, 0) else it }
+        val (main, asleep, ongoing) = nightFor(blocks, d, minutes.lastOrNull()?.ts, zone, habit).let { if (holdOngoingNights && it.ongoing) Night(null, 0) else it }
         val eff = main?.let { rounded(100 * it.asleep / ((it.end - it.start) / 60.0 + 1), 1) }
         val resting = ownHealth["resting_hr"]?.get(d) ?: main?.let { restingHrFrom(it.rows) }
         val awakeHr = ms.filter { it.hr != null && it.hr != 0 && it.state !in sleepStates }.map { it.hr!! }

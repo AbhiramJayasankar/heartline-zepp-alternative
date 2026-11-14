@@ -57,7 +57,10 @@ class WatchConnection(
     val workoutStatus: SharedFlow<ByteArray> = workoutEvents
     val deviceEvents = watchEvents.asSharedFlow()
     private val actions = Mutex()
+    private val sends2021 = Mutex()
     private val syncLock = Mutex()
+    /** Raw data can keep streaming; defer alerts during command batches and history/firmware transfers. */
+    val canNotify: Boolean get() = ready.value && !actions.isLocked && !syncLock.isLocked
     private val replies = mutableMapOf<UUID, Channel<GattNotification>>()
     private var client: GattClient? = null
     private var runner: Job? = null
@@ -411,9 +414,12 @@ class WatchConnection(
      * forwarder does when the phone stops ringing), with 2 minutes as a backstop.
      */
     suspend fun notify(title: String, body: String, kind: NotificationKind = NotificationKind.MESSAGE, app: String = "Heartline", icon: Int = WatchIcon.GENERIC,
-                       autoEndCall: Boolean = true) {
-        val c = requireClient()
-        actions.withLock { chunks(c, notificationPayload(title, body, kind, app, icon)) }
+                       autoEndCall: Boolean = true, stillValid: () -> Boolean = { true }) {
+        val c = actions.withLock {
+            check(stillValid()) { "Notification delivery age limit expired" }
+            val current = requireClient()
+            chunks(current, notificationPayload(title, body, kind, app, icon)); current
+        }
         if (kind == NotificationKind.CALL) {
             val after = if (autoEndCall) 15_000L else 120_000L
             callEnd?.cancel(); callEnd = scope.launch { delay(after); callEnd = null; if (client === c) optional("End call alert") { endCall() } }
@@ -441,11 +447,16 @@ class WatchConnection(
         val answer = reply.await()?.payload
         check(userInfo2021Accepted(answer)) { "The watch didn't accept $what (${answer?.joinToString("") { "%02x".format(it) } ?: "no answer"})" }
     }
-    /** Sends one message on the 2021 chunked channel. Not under the action lock, so replies are not stuck behind a sync. */
-    suspend fun send2021(endpoint: Int, payload: ByteArray) {
+    /** Locks the whole 2021 message: the watch's decoder keeps only one handle, so interleaved frames lose a reply.
+     * Separate from the action lock so Alexa acknowledgements do not wait behind history or A-GPS transfers. */
+    suspend fun send2021(endpoint: Int, payload: ByteArray, stillValid: () -> Boolean = { true }) = sends2021.withLock {
+        check(stillValid()) { "Alexa reply window closed" }
         val c = requireClient()
         handle2021 = (handle2021 + 1) and 255
-        for (frame in chunked2021Frames(endpoint, payload, handle2021)) c.write(Uuids.CHUNKED_2021_WRITE, frame)
+        for (frame in chunked2021Frames(endpoint, payload, handle2021)) {
+            check(stillValid()) { "Alexa reply window closed" }
+            c.write(Uuids.CHUNKED_2021_WRITE, frame)
+        }
     }
     suspend fun acknowledgeFindPhone() = actions.withLock { requireClient().write(Uuids.CONFIG, FIND_PHONE_ACK) }
     private suspend fun chunks(c: GattClient, payload: ByteArray, type: Int = 0) {

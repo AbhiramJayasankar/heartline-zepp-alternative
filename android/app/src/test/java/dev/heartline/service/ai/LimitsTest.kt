@@ -37,6 +37,20 @@ class LimitsTest {
         assertEquals(30, AiSetup.parse(parsed.json())!!.section(AiSection.VOICE).policy.timeoutS)
     }
 
+    /** The assistant's 180 s request limit (the default until 2026-11-14) moves to 90 s; a limit set by hand stays. */
+    @Test fun aHungAssistantRequestGivesWayAfter90Seconds() {
+        assertEquals(90, RetryPolicy.default(AiSection.ASSISTANT).timeoutS)
+        fun saved(timeout: Int, limits: Int): Int {
+            val setup = FakeAi.setup().withSection(AiSection.ASSISTANT, SectionSetup(policy = RetryPolicy.default(AiSection.ASSISTANT).copy(timeoutS = timeout)))
+            val o = JSONObject(setup.json())
+            o.getJSONObject("sections").getJSONObject(AiSection.ASSISTANT.key).getJSONObject("policy").put("limits", limits)
+            return AiSetup.parse(o.toString())!!.section(AiSection.ASSISTANT).policy.timeoutS
+        }
+        assertEquals(90, saved(180, 2))
+        assertEquals(120, saved(120, 2))
+        assertEquals(180, saved(180, 3)) // chosen after this version: the owner's
+    }
+
     @Test fun aModelThatRefusesTheTokenBudgetIsAskedWithLessAndRemembered() = runBlocking {
         val budgets = ArrayList<Int>()
         val ai = FakeAi(FakeAi.setup()) { _, _, _, b ->

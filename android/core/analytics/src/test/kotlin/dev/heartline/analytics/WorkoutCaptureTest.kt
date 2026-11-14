@@ -85,9 +85,21 @@ class WorkoutCaptureTest {
     }
 
     @Test fun runningAt168SpmIsDistinctFromWalking() {
-        val r = analyzeCapture(recording(60, { t -> floatArrayOf(0f, 0f, (1 + .5 * sin(2 * PI * 2.8 * t)).toFloat()) }), hr(60) { 160 }, Profile(), "run")
+        // About 0.7 g RMS at the wrist, as on real runs (0.9 to 1.1 g); walking is 0.25 to 0.4 g.
+        val r = analyzeCapture(recording(60, { t -> floatArrayOf(0f, 0f, (1 + 1.0 * sin(2 * PI * 2.8 * t)).toFloat()) }), hr(60) { 160 }, Profile(), "run")
         assertTrue(r.segments.toString(), r.segments.all { it.kind == "running" })
         assertEquals(168.0, r.steps!!.toDouble(), 10.0)
+    }
+
+    @Test fun aFastRhythmWithLittleMovementIsNotRunning() {
+        // 168 a minute at 0.07 g: a tapping hand or a vehicle's shake, not feet.
+        val r = analyzeCapture(recording(60, { t -> floatArrayOf(0f, 0f, (1 + .1 * sin(2 * PI * 2.8 * t)).toFloat()) }), hr(60) { 90 }, Profile(), "desk")
+        assertTrue(r.segments.toString(), r.segments.none { it.kind == "running" })
+    }
+
+    @Test fun aJogAt130SpmWithARealArmSwingIsRunning() {
+        val r = analyzeCapture(recording(60, { t -> floatArrayOf(0f, 0f, (1 + 1.0 * sin(2 * PI * 130 / 60.0 * t)).toFloat()) }), hr(60) { 150 }, Profile(), "jog")
+        assertTrue(r.segments.toString(), r.segments.all { it.kind == "running" })
     }
 
     @Test fun twoTenRepSetsAtThreeSecondTempoHaveSixtySecondRecovery() {

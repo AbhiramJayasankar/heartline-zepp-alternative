@@ -18,7 +18,10 @@ class GymCaptureTest {
         println("Kotlin sets (${result.sets.size}): ${result.sets}")
         val oracle = fixture("recordings/gym_20261102_python.json").obj()
         assertEquals(oracle["rows"].number().toInt(), rec.acc.size)
-        val expectedGait = oracle["gait"].array().map { it.array().map { bound -> bound.number() } }
+        // Since 0.7.0 running needs 0.5 g of wrist motion. The 20 s the Python reference called running at 1965-1985, at
+        // over 140 steps/min with under 0.5 g (a hand tapping between machines), is no longer gait. The set detector
+        // still sees it as before, so the sets are unchanged.
+        val expectedGait = oracle["gait"].array().map { it.array().map { bound -> bound.number() } }.filter { it != listOf(1965.0, 1985.0) }
         assertEquals(expectedGait, gait.map { listOf(it.start, it.end) })
         val expected = oracle["sets"].array()
         assertEquals("set count versus Python", expected.size, result.sets.size)

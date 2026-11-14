@@ -16,6 +16,8 @@ import java.time.temporal.ChronoUnit
 import java.util.Locale
 import kotlin.math.roundToInt
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -174,9 +176,12 @@ class WatchAssistant(
     /** This conversation's (question, reply) turns for the brain; a pause of over two minutes starts a new one. */
     private val history = ArrayList<Pair<String, String>>()
     private var lastTurn = 0L
+    private val answers = Mutex()
 
     /** [dryRun] works out the answer without acting, remembering the turn or changing the saved alerts (the app's test buttons). */
-    suspend fun answer(transcript: String, dryRun: Boolean = false): Answer {
+    suspend fun answer(transcript: String, dryRun: Boolean = false): Answer = answers.withLock { answerTurn(transcript, dryRun) }
+
+    private suspend fun answerTurn(transcript: String, dryRun: Boolean): Answer {
         val t = now()
         if (transcript.isBlank()) return Answer("I didn't hear any words. Try again.", error = "no words heard")
         if (!aiReady()) return Answer("Choose a model with a key for the watch assistant in Heartline (AI models) so I can answer. I heard: \"$transcript\"",
@@ -736,6 +741,7 @@ class WatchAssistant(
         private fun cutAt(text: String, max: Int, bytes: Boolean = false): Int {
             var end = minOf(text.length, max)
             if (bytes) while (end > 1 && text.substring(0, end).toByteArray().size > max) end--
+            if (end < text.length && end > 0 && Character.isHighSurrogate(text[end - 1]) && Character.isLowSurrogate(text[end])) end--
             val head = text.substring(0, end)
             val sentence = maxOf(head.lastIndexOf(". "), head.lastIndexOf("! "), head.lastIndexOf("? "), head.lastIndexOf("\n"))
             val space = head.lastIndexOf(' ')

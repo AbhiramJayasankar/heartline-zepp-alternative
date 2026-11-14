@@ -75,12 +75,29 @@ fun quietNow(minute: Int, start: Int?, end: Int?): Boolean {
     return if (start < end) minute in start until end else minute >= start || minute < end
 }
 
-/** Monotonic-clock window for identical notification title/text pairs across posting packages. */
+/** Reposts of one Android notification/message, not identical words from unrelated chats or apps. */
+data class PhoneMessage(val title: String, val text: String, val at: Long)
+
 class NotificationDeduplicator {
-    private val seen = mutableMapOf<Pair<String, String>, Long>()
-    fun accept(title: String, text: String, elapsedMs: Long): Boolean {
+    private data class Key(val source: String, val messageAt: Long, val title: String, val text: String)
+    private val seen = mutableMapOf<Key, Long>()
+    private val snapshots = LinkedHashMap<String, List<PhoneMessage>>(200, 0.75f, true)
+
+    /** MessagingStyle contains unread history. Seed it on first sight; on updates forward every new message, even
+     * several added in one post, preserving repeated words (and even equal timestamps) by occurrence count. */
+    fun newMessages(source: String, messages: List<PhoneMessage>): List<PhoneMessage> {
+        val old = snapshots.put(source, messages.toList())
+        if (snapshots.size > 200) snapshots.remove(snapshots.keys.first())
+        if (old == null) return messages.takeLast(1)
+        val remaining = old.groupingBy { it }.eachCount().toMutableMap()
+        return messages.filter { m ->
+            val count = remaining[m] ?: 0
+            if (count > 0) { remaining[m] = count - 1; false } else true
+        }
+    }
+    fun accept(source: String, messageAt: Long, title: String, text: String, elapsedMs: Long): Boolean {
         seen.entries.removeAll { elapsedMs - it.value >= 10_000 }
-        val key = title to text
+        val key = Key(source, messageAt, title, text)
         if (key in seen) return false
         seen[key] = elapsedMs
         return true

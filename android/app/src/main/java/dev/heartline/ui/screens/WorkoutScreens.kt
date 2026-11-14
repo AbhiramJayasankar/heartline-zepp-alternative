@@ -81,7 +81,7 @@ import kotlin.math.roundToInt
 
 /** Three stats per row, so dense workout numbers stay aligned. */
 @Composable
-private fun StatGrid(items: List<Triple<String, String, String?>>) {
+internal fun StatGrid(items: List<Triple<String, String, String?>>) {
     items.filter { it.second != "–" }.chunked(3).forEachIndexed { i, row ->
         if (i > 0) Gap(14)
         Row(Modifier.fillMaxWidth()) {
@@ -91,7 +91,7 @@ private fun StatGrid(items: List<Triple<String, String, String?>>) {
     }
 }
 
-private fun pace(sPerKm: Double?): String = sPerKm?.takeIf { it in 60.0..3600.0 }?.let { "%d:%02d".format(it.toInt() / 60, it.toInt() % 60) } ?: "–"
+internal fun pace(sPerKm: Double?): String = sPerKm?.takeIf { it in 60.0..3600.0 }?.let { "%d:%02d".format(it.toInt() / 60, it.toInt() % 60) } ?: "–"
 private fun one(v: Double?): String = v?.let { "%.1f".format(it) } ?: "–"
 
 // ---- Capture: start and live ----
@@ -277,7 +277,10 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
         { x -> dev.heartline.app.captureEnergy(x, log, prefs.profile, trends?.hrRest, trends?.vo2max) }
     }
     val energy = remember(a, energyOf, friend) { if (friend) null else a?.let(energyOf) }
-    val ins = remember(base, prev, skin) { if (base == null || a == null) null else dev.heartline.app.sessionInsights(a, log, prev?.recovery ?: emptyList(), skin) }
+    // A run or walk reads as one: its intervals instead of sets, reps and rests.
+    val gait = remember(a) { a?.let { dev.heartline.app.captureGait(it) } }
+    val onFoot = a != null && dev.heartline.app.captureOnFoot(a, gait)
+    val ins = remember(base, prev, skin, onFoot) { if (base == null || a == null || onFoot) null else dev.heartline.app.sessionInsights(a, log, prev?.recovery ?: emptyList(), skin) }
     Screen(a?.label ?: "Session", onBack = { nav.pop() }, subtitle = a?.let { "${dateTimeOf(it.start)}, ${fmtHm(it.durationS / 60)}" }, scroll = scroll,
         trailing = { TextButton({ confirm = true }) { Text("Delete", color = c.inkSoft) } }) {
         if (a == null) {
@@ -288,7 +291,12 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
         val restLengths = a.rests.filter { r -> r.end - r.start <= 600 && a.cardio.none { it.start < r.end && it.end > r.start } }.map { it.end - it.start }.sorted()
         val medianRest = restLengths.getOrNull(restLengths.size / 2)
         if (friend) { dev.heartline.ui.components.Note("A friend's session: read on its own, not matched to your gym log, your days or your other sessions."); Gap(14) }
-        StatGrid(listOf(
+        val watchDistance = a.activities.mapNotNull { it.distanceM }.filter { it > 0 }.takeIf { it.isNotEmpty() }?.sum()
+        if (onFoot) StatGrid(listOf(
+            Triple("Average", fmtInt(a.avgHr), "bpm"), Triple("Max", fmtInt(a.maxHr), "bpm"), Triple("Lowest", fmtInt(a.minHr), "bpm"),
+            Triple("Load", a.load?.roundToInt()?.toString() ?: "–", null), Triple("Calories", fmtInt(energy?.total?.roundToInt() ?: a.calories), "kcal"), Triple("Steps", fmtInt(a.steps), null),
+            Triple("Distance", watchDistance?.let { "%.2f".format(it / 1000.0) } ?: "–", "km"),
+        )) else StatGrid(listOf(
             Triple("Average", fmtInt(a.avgHr), "bpm"), Triple("Max", fmtInt(a.maxHr), "bpm"), Triple("Lowest", fmtInt(a.minHr), "bpm"),
             Triple("Load", a.load?.roundToInt()?.toString() ?: "–", null), Triple("Calories", fmtInt(energy?.total?.roundToInt() ?: a.calories), "kcal"), Triple("Steps", fmtInt(a.steps), null),
             Triple("Sets", if (a.sets.isEmpty()) "–" else a.sets.size.toString(), null),
@@ -302,15 +310,15 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
         ) + listOfNotNull(ins?.takeIf { it.volumeKg > 0 }?.let { Triple("Volume", "%,d".format(it.volumeKg.roundToInt()), "kg") }))
         Gap(20)
         Panel(padding = PaddingValues(12.dp)) {
-            Text(if (a.floor.size > 1) "Heart rate, sets shaded by exercise, dashed line is your lowest per 5 min" else "Heart rate, sets shaded", style = HL.type.label, color = c.inkSoft)
+            Text(if (onFoot) "Heart rate, with what your feet were doing underneath" else if (a.floor.size > 1) "Heart rate, sets shaded by exercise, dashed line is your lowest per 5 min" else "Heart rate, sets shaded", style = HL.type.label, color = c.inkSoft)
             Gap(6)
-            val setLabels = a.sets.mapIndexed { i, s -> ChartSpan(s.start, s.end, dev.heartline.ui.components.groupColor(s.group, c).copy(alpha = 0.25f),
+            val setLabels = if (onFoot) emptyList() else a.sets.mapIndexed { i, s -> ChartSpan(s.start, s.end, dev.heartline.ui.components.groupColor(s.group, c).copy(alpha = 0.25f),
                 if (s.exercise != null) "${s.exercise}, ${s.setLabel?.lowercase()}" + (loadReps(s)?.let { ", $it" } ?: "") else "Set ${i + 1}, ${s.reps} reps") }
             val cardioSpans = a.cardio.map { k -> ChartSpan(k.start, k.end, c.warn.copy(alpha = 0.15f), k.name ?: k.kind.replaceFirstChar { it.uppercase() }) }
             // Under the plot, on its time axis: each exercise's run of sets by name, how hard the arm moved, what the
             // motion looked like, and the watch's own workouts.
             val runs = ArrayList<MutableList<dev.heartline.app.SetUi>>()
-            a.sets.forEach { s -> if (runs.lastOrNull()?.last()?.group == s.group) runs.last().add(s) else runs.add(mutableListOf(s)) }
+            if (!onFoot) a.sets.forEach { s -> if (runs.lastOrNull()?.last()?.group == s.group) runs.last().add(s) else runs.add(mutableListOf(s)) }
             val motionStep = a.motion.zipWithNext { p, q -> q.t - p.t }.filter { it > 0 }.sorted().let { if (it.isEmpty()) 5.0 else it[it.size / 2] }
             val lanes = listOfNotNull(
                 runs.takeIf { it.isNotEmpty() }?.let { rs -> ChartLane("Lift", 16.dp, spans = rs.mapIndexed { i, r ->
@@ -323,24 +331,24 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
             )
             InteractiveChart(
                 listOf(ChartLine(a.hr, c.pulse, "Heart rate", "bpm", gap = 30.0)) +
-                    if (a.floor.size > 1) listOf(ChartLine(a.floor, c.pulse.copy(alpha = 0.7f), "5-min low", "bpm", width = 1.5.dp, dashed = true, step = true, gap = 400.0)) else emptyList(),
+                    if (a.floor.size > 1 && !onFoot) listOf(ChartLine(a.floor, c.pulse.copy(alpha = 0.7f), "5-min low", "bpm", width = 1.5.dp, dashed = true, step = true, gap = 400.0)) else emptyList(),
                 0.0, a.durationS.toDouble().coerceAtLeast(60.0), height = 210.dp, spans = setLabels + cardioSpans,
                 bands = a.zones.filter { it.zone >= 3 }.map { z -> ChartBand(z.lowBpm.toDouble(), (z.highBpm ?: 240).toDouble(), dev.heartline.ui.components.zoneColor(z.zone, c).copy(alpha = 0.06f)) },
                 xLabel = { clock(it) }, readoutX = { t -> "${clock(t)} in, at " + dev.heartline.ui.components.epochClock(a.start + t, seconds = true) +
                     (energy?.let { e -> ", ${e.at(t).roundToInt()} kcal so far" } ?: "") }, minSpan = 60.0,
-                idleHint = "Touch for heart rate and the set at that moment. Pinch to zoom into a set.", lanes = lanes, axisInside = true)
+                idleHint = if (onFoot) "Touch for heart rate at that moment. Pinch to zoom into an interval." else "Touch for heart rate and the set at that moment. Pinch to zoom into a set.", lanes = lanes, axisInside = true)
             Gap(8)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 a.segments.map { it.kind }.distinct().forEach { k -> LegendDot(segmentColor(k, c), k.replaceFirstChar { it.uppercase() }) }
                 if (a.activities.isNotEmpty()) LegendDot(c.ink.copy(alpha = 0.3f), "Watch workout")
             }
         }
-        BaselineNote(a)
+        if (onFoot) gait?.let { GaitSection(it, watchDistance) } else BaselineNote(a)
         ins?.let { Findings(it) }
         ins?.let { i -> CoachNote(controller, a, i) }
         if (!friend) AroundSession(controller, a, nav)
-        if (a.activities.isNotEmpty()) WatchWorkouts(controller, a, nav, energy)
-        if (a.sets.isNotEmpty()) Exercises(a, ins, energy, anchor = { key -> androidx.compose.ui.Modifier.onGloballyPositioned { tops[key] = it.positionInRoot().y } },
+        if (a.activities.isNotEmpty()) WatchWorkouts(controller, a, nav, energy, onFoot)
+        if (a.sets.isNotEmpty() && !onFoot) Exercises(a, ins, energy, anchor = { key -> androidx.compose.ui.Modifier.onGloballyPositioned { tops[key] = it.positionInRoot().y } },
             openPrev = { e ->
                 // The same exercise in the session before: open its recording there. This page is kept in the back
                 // stack focused on the exercise, so Back returns to the same spot.
@@ -353,9 +361,9 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
                 } }
             })
         ins?.let { RestRepsSection(it); HeartCost(it) }
-        if (a.recovery.size >= 2) Recovery(a, medianRest, prev?.recovery ?: emptyList(), ins?.previous?.date)
+        if (a.recovery.size >= 2 && !onFoot) Recovery(a, medianRest, prev?.recovery ?: emptyList(), ins?.previous?.date)
         ins?.let { FloorSection(a, it) }
-        if (a.logTotal != null) LogAndWatch(a, ins?.score)
+        if (a.logTotal != null && !onFoot) LogAndWatch(a, ins?.score)
         // A short walk between machines isn't cardio worth a section; the watch's cardio workouts and 5 minutes or more are.
         a.cardio.filter { it.name != null || it.end - it.start >= 300 }.forEach { k ->
             // The same kind of block (the watch's name for it, a treadmill say) in the latest earlier recording that has one.
@@ -380,7 +388,7 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
         val gait = a.segments.filter { it.kind == "walking" || it.kind == "running" }
         val parts = gait.filter { it.end - it.start >= 120 }
         val shortWalks = gait.filter { it.end - it.start < 120 }
-        if (parts.isNotEmpty()) {
+        if (parts.isNotEmpty() && !onFoot) {
             Gap(24); SectionTitle("Parts of the session"); Gap(4)
             parts.forEach { s ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -395,7 +403,7 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
                 HorizontalDivider(color = c.line)
             }
         }
-        if (shortWalks.isNotEmpty()) {
+        if (shortWalks.isNotEmpty() && !onFoot) {
             Gap(if (parts.isEmpty()) 24 else 10)
             MutedText("Plus ${shortWalks.size} short walk${if (shortWalks.size == 1) "" else "s"} between sets, ${clock(shortWalks.sumOf { it.end - it.start })} in all" +
                 (shortWalks.mapNotNull { it.cadenceSpm }.takeIf { it.isNotEmpty() }?.let { ", about ${it.average().roundToInt()} steps/min" } ?: "") + ".")
@@ -556,7 +564,7 @@ private fun AroundSession(controller: HeartlineController, a: CaptureAnalysisUi,
 }
 
 @Composable
-private fun WatchWorkouts(controller: HeartlineController, a: CaptureAnalysisUi, nav: Navigator, energy: dev.heartline.app.CaptureEnergyUi?) {
+private fun WatchWorkouts(controller: HeartlineController, a: CaptureAnalysisUi, nav: Navigator, energy: dev.heartline.app.CaptureEnergyUi?, onFoot: Boolean = false) {
     val c = HL.colors
     // The watch's own workout pages (laps, zones, its HR track): matched by overlap, since the capture clips their times.
     val day = java.time.Instant.ofEpochSecond(a.start).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
@@ -564,7 +572,9 @@ private fun WatchWorkouts(controller: HeartlineController, a: CaptureAnalysisUi,
         value = withTimeoutOrNull(5000) { (controller.activityDay(day).first().workouts + controller.activityDay(day.plusDays(1)).first().workouts) } ?: emptyList()
     }
     Gap(24); SectionTitle("The watch's own workouts"); Gap(4)
-    MutedText("What the watch logged for the workouts you started on it, beside what the raw sensors measured over the same minutes. The sensors see individual sets and reps; the watch adds names, distance and its calorie estimate.")
+    MutedText("What the watch logged for the workouts you started on it, beside what the raw sensors measured over the same minutes. " +
+        if (onFoot) "The sensors see each stride and each change of pace; the watch adds GPS distance, its route and its calorie estimate."
+        else "The sensors see individual sets and reps; the watch adds names, distance and its calorie estimate.")
     a.activities.forEach { w ->
         val hr = a.hr.filter { it.t in w.start..w.end }.map { it.v }
         val sets = a.sets.filter { it.activity == w.type && (it.start + it.end) / 2 in w.start..w.end }
@@ -1066,7 +1076,8 @@ fun WorkoutScreen(controller: HeartlineController, route: Route.Workout, nav: Na
         if (w.route.size >= 2) {
             Gap(20)
             Panel(padding = PaddingValues(12.dp)) {
-                Text("Route", style = HL.type.label, color = c.inkSoft); Gap(6); dev.heartline.ui.components.RouteMap(w.route)
+                Text(if (d.gait?.runs?.isNotEmpty() == true) "Route, running and walking coloured" else "Route", style = HL.type.label, color = c.inkSoft); Gap(6)
+                dev.heartline.ui.components.RouteMap(w.route, bouts = d.gait?.routeBouts().orEmpty())
             }
         }
         Gap(20)
@@ -1075,7 +1086,9 @@ fun WorkoutScreen(controller: HeartlineController, route: Route.Workout, nav: Na
         val setSpans = remember(gymLog, w.start) {
             dev.heartline.app.setsForWorkout(gymLog, w.start, w.start + w.durationS, w.type, java.time.ZoneId.systemDefault())
                 .filter { it.completed && it.start != null && it.end != null }
-                .map { ChartSpan((it.start!! - w.start).toDouble(), (it.end!! - w.start).toDouble(), c.warn.copy(alpha = 0.16f)) }
+                .map { ChartSpan((it.start!! - w.start).toDouble(), (it.end!! - w.start).toDouble(), c.warn.copy(alpha = 0.16f)) } +
+                // Runs inside a run-walk, shaded like the route.
+                (d.gait?.runs?.takeIf { it.size >= 2 }?.map { ChartSpan(it.start.toDouble(), it.end.toDouble(), c.warn.copy(alpha = 0.12f)) } ?: emptyList())
         }
         Panel(padding = PaddingValues(12.dp)) {
             Text("Heart rate", style = HL.type.label, color = c.inkSoft)
@@ -1087,6 +1100,7 @@ fun WorkoutScreen(controller: HeartlineController, route: Route.Workout, nav: Na
                 xLabel = { clock(it) }, readoutX = { "${clock(it)} in, at " + dev.heartline.ui.components.epochClock(w.start + it, seconds = true) }, minSpan = 60.0)
             else HrTraceChart(w.track, w.durationS.toLong().coerceAtLeast(60), w.start + w.durationS)
         }
+        d.gait?.takeIf { it.runS >= 60 || it.walkS >= 300 }?.let { GaitSection(it, w.distanceM?.takeIf { d -> d > 0 }) }
         WorkoutLogSection(controller, w)
         if (d.zones.isNotEmpty()) { Gap(24); SectionTitle("Heart-rate zones"); Gap(12); ZoneBars(d.zones) }
         listOf(Triple("Speed", d.speedKmh, "km/h"), Triple("Cadence", d.cadence, "spm"), Triple("Altitude", d.altitude, "m")).forEach { (title, s, unit) ->
@@ -1101,12 +1115,13 @@ fun WorkoutScreen(controller: HeartlineController, route: Route.Workout, nav: Na
             }
         }
         if (d.laps.isNotEmpty()) {
-            Gap(24); SectionTitle("Laps"); Gap(4)
+            Gap(24); SectionTitle(if (d.laps.all { (it.distanceM ?: 1000) <= 1000 }) "Kilometres" else "Laps"); Gap(4)
             d.laps.forEach { l ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
-                    Text("${l.index}", style = HL.type.label, color = c.inkSoft, modifier = Modifier.width(32.dp))
+                    Text(if (l.distanceM != null && l.distanceM < 1000) "%.2f".format(l.distanceM / 1000.0) else "${l.index}", style = HL.type.label, color = c.inkSoft, modifier = Modifier.width(44.dp))
                     Text(clock(l.durationS.toDouble()), style = HL.type.body, color = c.ink, modifier = Modifier.weight(1f))
-                    Text(pace(l.paceSPerKm) + " /km", style = HL.type.body, color = c.ink, modifier = Modifier.weight(1f))
+                    // A whole kilometre's time is its pace, so the pace is only written for laps of another length.
+                    Text(if (l.distanceM == 1000) "" else pace(l.paceSPerKm) + " /km", style = HL.type.body, color = c.inkSoft, modifier = Modifier.weight(1f))
                     Text("${fmtInt(l.avgHr)} bpm", style = HL.type.body, color = c.ink)
                 }
                 HorizontalDivider(color = c.line)

@@ -49,6 +49,12 @@ class RealController(
     override val events = MutableStateFlow<List<EventUi>>(emptyList())
     override val prefs = MutableStateFlow(PrefsUi())
     private val service = MutableStateFlow<WatchService?>(null)
+    private val notifications = dev.heartline.service.NotificationOutbox(
+        android.os.SystemClock::elapsedRealtime, { service.value?.watch?.canNotify == true },
+        { n, valid ->
+            val s = service.value ?: error("Watch service unavailable")
+            withTimeout(15_000) { s.command { it.notify(n.title, n.body, n.kind, n.app, n.icon, stillValid = valid) } }
+        }, { level, message -> db.events.add(level, message) })
     /** Heart checks, captures and watch workouts that were a friend's, and the watch workouts deleted here. */
     override val friends: StateFlow<Friends> = db.meta.observe(Friends.KEY).map { Friends.parse(it) }.stateIn(scope, SharingStarted.Eagerly, Friends())
     private var bound = false
@@ -64,6 +70,12 @@ class RealController(
         override fun onBindingDied(name: ComponentName?) { service.value = null; if (bound) context.unbindService(this); bound = false }
     }
     init {
+        scope.launch {
+            while (isActive) {
+                try { notifications.awaitWork(); delay(if (notifications.deliverNext()) 1_500L else 500L) }
+                catch (e: Exception) { rethrowIfCancelled(e); db.events.add("warn", "Notification delivery worker: ${e.message}"); delay(1_500) }
+            }
+        }
         // Saved heart checks from an older analysis are worked out again from their recordings, once.
         scope.launch(Dispatchers.IO) { runCatching { reanalyseChecks() }.onFailure { db.events.add("warn", "Re-analysing heart checks failed: ${it.message}") } }
         scope.launch { settings.rawSensorDefaultSelection.collect { selected ->
@@ -136,6 +148,8 @@ class RealController(
             val tp = System.nanoTime()
             withContext(Dispatchers.Default) {
                 val minutes = analyticsMinutes(friendFree(rows, f, previousKind), previousKind)
+                // The usual sleep hours, from all 40 days: the day pages work from two days and are handed these.
+                sleepHabit.value = dev.heartline.analytics.sleepHabitOf(minutes, zone)
                 // Skin temperature only: readings off the wrist, settling or spiking are left out of the daily values.
                 val hrMinutes = minutes.filter { it.hr != null && it.hr in 30..220 }.map { it.ts / 60 }.toHashSet()
                 val skin = skinTemperatures(health["temperature"].orEmpty().mapNotNull { h -> h.value?.let { TempReading(h.ts.toLong(), it, sensor2(h.extra)) } }, hrMinutes)
@@ -188,6 +202,8 @@ class RealController(
             .filter { r -> marks.any { r.ts + 59 >= it.from && r.ts <= it.to } }.sumOf { it.steps ?: 0 }
         return StepsUi(maxOf(0, s.steps - theirs), null, null)
     }
+    /** When you usually sleep (dev.heartline.analytics.SleepHabit), so every page picks the same night; null until the daily figures are in. */
+    private val sleepHabit = MutableStateFlow<dev.heartline.analytics.SleepHabit?>(null)
     private val healthDays = java.util.concurrent.ConcurrentHashMap<LocalDate, Flow<HealthDayUi>>()
     private val activityDays = java.util.concurrent.ConcurrentHashMap<LocalDate, Flow<ActivityDayUi>>()
     /** What a day's page needs that is slow to work out: kept until the day's own data or the profile changes. */
@@ -201,7 +217,7 @@ class RealController(
     override fun healthDay(date: LocalDate): Flow<HealthDayUi> = healthDays.getOrPut(date) {
         val from = date.atStartOfDay(zone).toEpochSecond(); val to = date.plusDays(1).atStartOfDay(zone).toEpochSecond()
         val base = combine(activityDay(date), db.health.observeByType(from.toDouble(), to - 1.0).throttleLatest(2_000),
-            settings.profile.combine(friends) { p, f -> p to f }) { day, health, (p, f) ->
+            combine(settings.profile, friends, sleepHabit) { p, f, h -> Triple(p, f, h) }) { day, health, (p, f, habit) ->
             val tp = System.nanoTime()
             try {
                 val minutes = analyticsMinutes(friendFree(db.activity.range(from - 86_400.0, to - 1.0), f))
@@ -209,7 +225,7 @@ class RealController(
                 val (values, spo2Aside) = cleanSleepSpo2(ownHealth(health.values.flatten(), f, zone, earlierPai).mapNotNull { h -> h.value?.let { DayHealthValue(h.type, h.ts, it, h.extra) } }, minutes)
                 val daily = computeDaily(minutes,
                     values.map { HealthValue(it.type, it.ts, it.value) }, emptyList(),
-                    Profile(p.age, p.sex?.name?.lowercase(), p.weightKg, p.heightCm, p.maxHr, p.restingHr), 2, date.atTime(23, 59).atZone(zone))
+                    Profile(p.age, p.sex?.name?.lowercase(), p.weightKg, p.heightCm, p.maxHr, p.restingHr), 2, date.atTime(23, 59).atZone(zone), sleepHabit = habit)
                 val d = daily.days.lastOrNull { it.date == date.toString() }
                 DayBase(day, values, spo2Aside, (d?.restingHr ?: p.restingHr?.toDouble())?.let { kotlin.math.round(it).toInt() },
                     d?.awakeRestingHr?.let { kotlin.math.round(it).toInt() }, d?.caloriesActive, profileMaxHr(p.maxHr, p.age) ?: 190,
@@ -236,7 +252,7 @@ class RealController(
         // The day's active minutes come from the trends once they're worked out; only that number is watched.
         val activeFromTrends = trends.map { t -> t?.series?.firstOrNull { it.key == "active" }?.points?.firstOrNull { it.date == date }?.value?.toInt() }.distinctUntilChanged()
         combine(db.activity.observeRange(from, to).throttleLatest(2_000), db.health.observeWorkouts(from, to), activeFromTrends,
-            workoutDetails, settings.profile.combine(friends) { p, f -> p to f }) { rows, allWorkouts, activeTrend, details, (profile, f) ->
+            workoutDetails, combine(settings.profile, friends, sleepHabit) { p, f, h -> Triple(p, f, h) }) { rows, allWorkouts, activeTrend, details, (profile, f, habit) ->
             val tp = System.nanoTime()
             val prevKind = db.activity.prevKind(from)
             val minutes = mappedMinutes(friendFree(rows, f, prevKind), prevKind)
@@ -245,7 +261,7 @@ class RealController(
             val allRows = friendFree(db.activity.range(sleepFrom, to), f)
             // Deleted workouts go; a friend's stays on the day's list, marked, and out of the totals.
             val workouts = allWorkouts.filter { it.start !in f.hiddenWorkouts }
-            val daily = computeDaily(analyticsMinutes(allRows), emptyList(), emptyList(), Profile(), 2, date.atTime(23, 59).atZone(zone))
+            val daily = computeDaily(analyticsMinutes(allRows), emptyList(), emptyList(), Profile(), 2, date.atTime(23, 59).atZone(zone), sleepHabit = habit)
             // Workout load on the daily scale wants the same resting heart rate the daily figures use.
             val dailyRest = dev.heartline.service.captureRest(db)
             val active = activeTrend
@@ -302,7 +318,7 @@ class RealController(
         suppressAutomaticConnection = false; startupHandled = true
         launchAction { check(keys.load() != null && settings.watch.value.mac != null) { "Save the watch key and address first" }; ensureService(connect = true) }
     }
-    override fun disconnect() { cancelCheck(); action { it.disconnect() } }
+    override fun disconnect() { suppressAutomaticConnection = true; cancelCheck(); action { it.disconnect() } }
     override fun setLiveHr(on: Boolean) { if (!captureTask.running || on) action { if (!captureTask.running || on) it.setLiveHr(on) } }
     override fun setRawSensors(sensors: Set<Sensor>, streaming: Boolean) {
         if (checkJob?.isActive == true || captureTask.running) return
@@ -849,9 +865,23 @@ class RealController(
     }
 
     fun forwardNotification(title: String, body: String, kind: NotificationKind, app: String, icon: Int = dev.heartline.protocol.WatchIcon.APP) {
-        val s = service.value ?: return
-        if (s.watch.connection.value.state != ConnectionState.CONNECTED) return
-        launchAction { s.command { it.notify(title, body, kind, app, icon) } }
+        scope.launch {
+            notifications.enqueue(listOf(dev.heartline.service.WatchNotification(title, body, kind, app, icon)))
+            if (service.value == null && !suppressAutomaticConnection && settings.watch.value.mac != null && keys.load() != null) {
+                try { ensureService(connect = true) }
+                catch (e: Exception) { rethrowIfCancelled(e); db.events.add("warn", "Phone notification queued; couldn't start watch service: ${e.message}") }
+            }
+        }
+    }
+
+    /** One answer is enqueued atomically, so concurrent answers cannot interleave their numbered parts. */
+    suspend fun queueWatchAnswer(title: String, parts: List<String>, max: Int): Int {
+        val sent = parts.take(max)
+        if (parts.size > sent.size) db.events.add("warn", "Dropped ${parts.size - sent.size} answer notification part(s): configured notification limit ($max)")
+        return notifications.enqueue(sent.mapIndexed { i, p ->
+            dev.heartline.service.WatchNotification(if (sent.size > 1) "$title ${i + 1}/${sent.size}" else title,
+                p + if (i == sent.lastIndex && parts.size > sent.size) " (cut short)" else "")
+        }, 30 * 60_000L)
     }
 }
 

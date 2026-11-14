@@ -96,9 +96,16 @@ data class RetryPolicy(
         /** Heartline's defaults per section: the assistant and voice are waited on at the watch, so they move on sooner. */
         /** Time limits Heartline used before (each request is whole, not streamed, so a thinking model needs room). */
         val OLD_TIMEOUTS = mapOf(AiSection.ASSISTANT to 40, AiSection.VOICE to 12)
+        /**
+         * The assistant's 180 s, replaced by 90 s: of 32 assistant requests over three days, 30 answered within 22 s
+         * and two hung for the full 180 s, which is what made answers arrive five minutes late (2026-11-12). A hung
+         * request now gives way to the next key or the fallback model after 90 s; 40 s had been too little for a
+         * thinking model's whole answer (2026-11-09), so it stays well above that.
+         */
+        val OLD_TIMEOUTS_3 = mapOf(AiSection.ASSISTANT to 180)
 
         fun default(s: AiSection) = when (s) {
-            AiSection.ASSISTANT -> RetryPolicy(busyRetries = 1, retryWaitsS = listOf(2), waitForLimitS = 5, badAnswerRetries = 0, timeoutS = 180)
+            AiSection.ASSISTANT -> RetryPolicy(busyRetries = 1, retryWaitsS = listOf(2), waitForLimitS = 5, badAnswerRetries = 0, timeoutS = 90)
             AiSection.VOICE -> RetryPolicy(busyRetries = 1, retryWaitsS = listOf(1), waitForLimitS = 3, badAnswerRetries = 0, timeoutS = (GeminiSpeech.TIMEOUT_MS / 1000).toInt())
             AiSection.INSIGHTS -> RetryPolicy(busyRetries = 2, retryWaitsS = listOf(6, 20), waitForLimitS = 45, badAnswerRetries = 1, timeoutS = 180)
             AiSection.COACH -> RetryPolicy(busyRetries = 2, retryWaitsS = listOf(5, 15), waitForLimitS = 30, badAnswerRetries = 1, timeoutS = 120)
@@ -118,11 +125,13 @@ data class SectionSetup(val main: ModelRef? = null, val fallback1: ModelRef? = n
         .put("policy", policy.json().put("limits", LIMITS))
 
     companion object {
-        const val LIMITS = 2
+        const val LIMITS = 3
         fun parse(o: JSONObject?, s: AiSection): SectionSetup {
             val saved = o?.optJSONObject("policy")
             var policy = RetryPolicy.parse(saved, RetryPolicy.default(s))
-            if (saved != null && saved.optInt("limits", 1) < LIMITS && policy.timeoutS == RetryPolicy.OLD_TIMEOUTS[s])
+            // A limit still at an earlier default moves to today's; one the owner set stays.
+            val limits = saved?.optInt("limits", 1) ?: LIMITS
+            if (limits < 2 && policy.timeoutS == RetryPolicy.OLD_TIMEOUTS[s] || limits < 3 && policy.timeoutS == RetryPolicy.OLD_TIMEOUTS_3[s])
                 policy = policy.copy(timeoutS = RetryPolicy.default(s).timeoutS)
             return SectionSetup(ModelRef.parse(o?.optString("main")), ModelRef.parse(o?.optString("fallback1")), ModelRef.parse(o?.optString("fallback2")), policy)
         }
