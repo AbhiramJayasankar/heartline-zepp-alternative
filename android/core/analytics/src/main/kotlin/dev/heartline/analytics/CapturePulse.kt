@@ -89,7 +89,9 @@ internal fun capturePulse(rec: Recording, hr: IntArray): CapturePulse? {
         if (clean.size < 10) continue
         val nn = clean.map { iv.rr[it] }.toDoubleArray()
         val ppgHr = 60 / mean(nn)
-        val rmssd = sqrt((1 until nn.size).sumOf { (nn[it] - nn[it - 1]).pow(2) } / (nn.size - 1))
+        val diffs = iv.successiveDiffs()
+        if (diffs.size < 5) continue
+        val rmssd = sqrt(diffs.sumOf { it * it } / diffs.size)
         val rhythm = assessRhythm(iv, ppgHr)
         val reliable = watch != null && abs(ppgHr - watch) <= 10 && clean.size >= 30
         output += CapturePulseWindow(a.toDouble(), b.toDouble(), bt.size, ppgHr.roundToInt(), watch?.roundToInt(),
@@ -112,8 +114,15 @@ internal fun capturePulse(rec: Recording, hr: IntArray): CapturePulse? {
     }
     // Pool clean timing only. Candidate counts come from flagEctopic inside the original
     // windows; never search for a compensatory pause across unrelated window joins.
-    val rr = pooled.flatMap { iv -> iv.cleanIndices.map { iv.rr[it] } }.toDoubleArray()
-    val combined = Intervals(DoubleArray(rr.size) { it.toDouble() }, rr, BooleanArray(rr.size), BooleanArray(rr.size))
+    // Each window keeps its own beat times, shifted so windows never touch: back-to-back intervals stay back to back,
+    // and no difference is taken across a removed interval or a join between windows.
+    val tt = ArrayList<Double>(); val rl = ArrayList<Double>(); var offset = 0.0
+    for (iv in pooled) {
+        for (k in iv.cleanIndices) { tt += iv.t[k] + offset; rl += iv.rr[k] }
+        offset += (iv.t.maxOrNull() ?: 0.0) + 100.0
+    }
+    val rr = rl.toDoubleArray()
+    val combined = Intervals(tt.toDoubleArray(), rr, BooleanArray(rr.size), BooleanArray(rr.size))
     val ectopic = pooled.sumOf { it.ectopic.count { e -> e } / 2 }
     val overall = assessRhythm(combined, null, ectopicBeats = ectopic)
     return CapturePulse(overall.status, usable, output.sortedBy { it.start }, overall.irregularity, overall.features?.shannonEntropy,

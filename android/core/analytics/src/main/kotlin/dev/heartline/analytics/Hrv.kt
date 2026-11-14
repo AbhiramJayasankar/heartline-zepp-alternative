@@ -4,6 +4,17 @@ import kotlin.math.*
 
 internal data class Intervals(val t: DoubleArray, val rr: DoubleArray, val ectopic: BooleanArray, val artifact: BooleanArray) {
     val cleanIndices: List<Int> get() = rr.indices.filter { !ectopic[it] && !artifact[it] }
+
+    /**
+     * Differences (s) between kept intervals that are back to back. Where a beat was rejected or an interval set aside,
+     * the intervals either side of it are not neighbours, and their difference spans the gap: on a 5-minute check with
+     * a fifth of its beats dropped that roughly doubled RMSSD (69 against 34 ms).
+     */
+    fun successiveDiffs(keep: (Int) -> Boolean = { !ectopic[it] && !artifact[it] }, tolerance: Double = 1e-3): DoubleArray {
+        val out = ArrayList<Double>()
+        for (i in 0 until rr.lastIndex) if (keep(i) && keep(i + 1) && abs(t[i + 1] - t[i] - rr[i + 1]) < tolerance) out += rr[i + 1] - rr[i]
+        return out.toDoubleArray()
+    }
 }
 
 internal fun flagEctopic(rr: DoubleArray, window: Int = 5): Pair<BooleanArray, BooleanArray> {
@@ -94,15 +105,26 @@ internal fun stressIndex(nn: DoubleArray): Double? {
     return rounded((mode.value.toDouble() / nn.size * 100) / (2 * mo * range), 1)
 }
 
-internal fun hrvMetrics(iv: Intervals): HrvResult {
+/**
+ * HRV again from beat-to-beat intervals as a saved sample keeps them ([SessionResult.rr]: times to 10 ms, intervals to
+ * 0.1 ms), for samples whose recording is gone. Back-to-back is judged with room for that rounding.
+ */
+fun hrvFromIntervals(rr: List<RrSample>): HrvResult {
+    val r = DoubleArray(rr.size) { rr[it].rrMs / 1000 }
+    val (ectopic, artifact) = flagEctopic(r)
+    return hrvMetrics(Intervals(DoubleArray(rr.size) { rr[it].t }, r, ectopic, artifact), tolerance = 0.015)
+}
+
+internal fun hrvMetrics(iv: Intervals, tolerance: Double = 1e-3): HrvResult {
     val keep = iv.cleanIndices
     val nn = DoubleArray(keep.size) { iv.rr[keep[it]] }
     val t = DoubleArray(keep.size) { iv.t[keep[it]] }
     val (lf, hf, ratio) = frequencyDomain(t, nn)
     if (nn.size < 10) return HrvResult(null, null, null, null, null, null, lf, hf, ratio, stressIndex(nn))
     val ms = DoubleArray(nn.size) { nn[it] * 1000 }
-    val diff = DoubleArray(ms.size - 1) { ms[it + 1] - ms[it] }
+    val diff = iv.successiveDiffs(tolerance = tolerance).let { d -> DoubleArray(d.size) { d[it] * 1000 } }
     val sdnn = sqrt(variance(ms, 1))
+    if (diff.size < 5) return HrvResult(rounded(mean(ms), 1), rounded(sdnn, 1), null, null, null, null, lf, hf, ratio, stressIndex(nn))
     val sd1 = sqrt(0.5) * sqrt(variance(diff, 1))
     val sd2 = 2 * sdnn * sdnn - sd1 * sd1
     return HrvResult(rounded(mean(ms), 1), rounded(sdnn, 1),

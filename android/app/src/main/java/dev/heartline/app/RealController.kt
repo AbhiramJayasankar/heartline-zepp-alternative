@@ -78,6 +78,14 @@ class RealController(
         }
         // Saved heart checks from an older analysis are worked out again from their recordings, once.
         scope.launch(Dispatchers.IO) { runCatching { reanalyseChecks() }.onFailure { db.events.add("warn", "Re-analysing heart checks failed: ${it.message}") } }
+        // Automatic HRV samples saved before the beat-to-beat fix are worked out again from their intervals, once.
+        scope.launch(Dispatchers.IO) { runCatching {
+            if (db.meta.get(HRV_DIFFS_FIXED) == null) {
+                val n = dev.heartline.service.OvernightHrv.recomputeSavedSamples(db, java.time.ZoneId.systemDefault())
+                db.meta.set(HRV_DIFFS_FIXED, "1")
+                if (n > 0) db.events.add("info", "Worked out the HRV of $n saved automatic sample${if (n > 1) "s" else ""} again, counting only back-to-back beats")
+            }
+        }.onFailure { db.events.add("warn", "Recomputing saved HRV samples failed: ${it.message}") } }
         scope.launch { settings.rawSensorDefaultSelection.collect { selected ->
             if (!sensors.value.streaming) sensors.update { it.copy(selected = selected.mapNotNull { sensorFromName(it.name) }.toSet()) }
         } }
@@ -163,9 +171,24 @@ class RealController(
                 val profile = Profile(p.age, p.sex?.name?.lowercase(), p.weightKg, p.heightCm, p.maxHr, p.restingHr)
                 val watchRows = db.health.workouts(from).filter { !f.dropsWorkout(it.start) }
                 val log = gymLogFromJson(db.meta.get(GYM_LOG_KEY))
+                // Runs and walks: how much of the distance was run, from the watch's per-second cadence, so a run-walk's
+                // VO2max costs its walks as walking.
+                val onFoot = watchRows.filter { gaitWorkout(runCatching { org.json.JSONObject(it.data).optString("type") }.getOrDefault("")) }
+                val details = if (onFoot.isEmpty()) emptyMap() else runCatching {
+                    storedWorkoutDetails(db.health.rawFetches(from - 86_400, types = setOf("workouts", "workout_details")))
+                }.getOrDefault(emptyMap())
+                fun runShare(start: Long, durationS: Int): Double? {
+                    val d = details[start]?.details ?: return null
+                    if (d.cadence.size < 60) return null
+                    val g = workoutGait(d.cadence, d.speedMs, d.strideCm, d.hr, durationS) ?: return null
+                    val run = g.runDistanceM ?: return null; val walk = g.walkDistanceM ?: return null
+                    return if (run + walk >= 500) run / (run + walk) else null
+                }
                 val efforts = watchRows.mapNotNull { w -> runCatching { org.json.JSONObject(w.data) }.getOrNull()?.let { j ->
-                    WorkoutEffort(j.optLong("start", w.start), j.optString("type"), j.optInt("active_s", j.optInt("duration_s")),
-                        j.optInt("distance_m").takeIf { it > 0 }, j.optInt("avg_hr").takeIf { it > 0 }) to (j.optLong("start", w.start) to j.optLong("end", w.start))
+                    val start = j.optLong("start", w.start)
+                    WorkoutEffort(start, j.optString("type"), j.optInt("active_s", j.optInt("duration_s")),
+                        j.optInt("distance_m").takeIf { it > 0 }, j.optInt("avg_hr").takeIf { it > 0 },
+                        if (onFoot.any { it.start == w.start }) runShare(start, j.optInt("duration_s", j.optInt("active_s"))) else null) to (start to j.optLong("end", w.start))
                 } }
                 val result = computeDaily(minutes, values, summaries, profile, 28, now, workouts = efforts.map { it.second } + loggedSpans(log))
                 // Workout captures score their load against the same resting heart rate, so it is kept for them.

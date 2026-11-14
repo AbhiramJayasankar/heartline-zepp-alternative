@@ -89,6 +89,45 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
                 // Beat-to-beat intervals: [seconds from start, interval ms, 1 if ectopic]. Enough to recompute any HRV measure.
                 .put("rr", org.json.JSONArray(r.rr.map { org.json.JSONArray().put(Math.round(it.t * 100) / 100.0).put(Math.round(it.rrMs * 10) / 10.0).put(if (it.ectopic) 1 else 0) }))
         }
+        /** A night's overnight HRV: the median of its clean samples, stamped at the latest one; none when it has no clean sample. */
+        suspend fun storeNight(db: dev.heartline.data.HeartlineDatabase, night: LocalDate, zone: ZoneId) {
+            val from = night.minusDays(1).atStartOfDay(zone).toEpochSecond(); val to = night.plusDays(1).atStartOfDay(zone).toEpochSecond()
+            val samples = db.health.series(SAMPLE, from.toDouble(), to.toDouble())
+                .filter { p -> p.value != null && runCatching { JSONObject(p.extra ?: "{}").optString("night") }.getOrNull() == night.toString() }
+            db.health.deleteTypeRange(NIGHT, from, to)
+            if (samples.isEmpty()) return
+            val v = samples.map { it.value!! }.sorted()
+            val median = if (v.size % 2 == 1) v[v.size / 2] else (v[v.size / 2 - 1] + v[v.size / 2]) / 2
+            db.health.upsert(listOf(HealthPoint(NIGHT, samples.maxOf { it.ts }, median, JSONObject().put("night", night.toString()).put("samples", samples.size).toString())))
+        }
+
+        /**
+         * Samples saved before 0.7.1 took RMSSD across beats that had been set aside, which overstated it (about double
+         * on a check with a fifth of its beats dropped). Works each one out again from the intervals it kept, and each
+         * night's median with it. Returns how many samples changed.
+         */
+        suspend fun recomputeSavedSamples(db: dev.heartline.data.HeartlineDatabase, zone: ZoneId): Int {
+            var changed = 0
+            val nights = HashSet<LocalDate>()
+            for (type in listOf(SAMPLE, DAY_SAMPLE)) for (p in db.health.series(type, 0.0)) {
+                if (p.value == null) continue
+                val j = runCatching { JSONObject(p.extra ?: "{}") }.getOrNull() ?: continue
+                val arr = j.optJSONArray("rr") ?: continue
+                val rr = (0 until arr.length()).mapNotNull { i -> arr.optJSONArray(i)?.let { a ->
+                    dev.heartline.analytics.RrSample(a.optDouble(0), a.optDouble(1), a.optInt(2) == 1) } }
+                val h = dev.heartline.analytics.hrvFromIntervals(rr)
+                fun n(v: Double?) = v?.takeIf { it.isFinite() } ?: JSONObject.NULL
+                j.put("rmssd", n(h.rmssdMs))
+                j.optJSONObject("hrv")?.put("rmssd", n(h.rmssdMs))?.put("pnn50", n(h.pnn50))?.put("sd1", n(h.sd1Ms))?.put("sd2", n(h.sd2Ms))
+                if (h.rmssdMs == null) j.put("reason", "too few back-to-back clean beats")
+                db.health.upsert(listOf(HealthPoint(type, p.ts, h.rmssdMs, j.toString())))
+                changed++
+                if (type == SAMPLE) runCatching { LocalDate.parse(j.optString("night")) }.getOrNull()?.let(nights::add)
+            }
+            for (night in nights) storeNight(db, night, zone)
+            return changed
+        }
+
         /** Which way the watch faced during a sample, as [x, y, z] of gravity (see WristPose), for sleep positions. */
         fun poseJson(p: dev.heartline.analytics.WristPose) = org.json.JSONArray(listOf(p.x, p.y, p.z).map { Math.round(it * 1000) / 1000.0 })
 
@@ -320,14 +359,7 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
             "${result.hrBpm?.roundToInt()} bpm, breathing ${result.respiratoryRate ?: "–"}/min" else "set aside, $reason")
         if (type != SAMPLE) return Outcome(clean, moving)
         // The night's value: the median of its clean samples, stamped at the latest one.
-        val samples = app.db.health.series(SAMPLE, night.minusDays(1).atStartOfDay(zone).toEpochSecond().toDouble(), night.plusDays(1).atStartOfDay(zone).toEpochSecond().toDouble())
-            .filter { p -> p.value != null && runCatching { JSONObject(p.extra ?: "{}").optString("night") }.getOrNull() == night.toString() }
-        if (samples.isNotEmpty()) {
-            val v = samples.map { it.value!! }.sorted()
-            val median = if (v.size % 2 == 1) v[v.size / 2] else (v[v.size / 2 - 1] + v[v.size / 2]) / 2
-            app.db.health.deleteTypeRange(NIGHT, night.minusDays(1).atStartOfDay(zone).toEpochSecond(), night.plusDays(1).atStartOfDay(zone).toEpochSecond())
-            app.db.health.upsert(listOf(HealthPoint(NIGHT, samples.maxOf { it.ts }, median, JSONObject().put("night", night.toString()).put("samples", samples.size).toString())))
-        }
+        if (clean) storeNight(app.db, night, zone)
         status.value = "Asleep; sample taken at ${clock(ts)}"
         return Outcome(clean, moving)
     }

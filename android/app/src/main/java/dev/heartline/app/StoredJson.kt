@@ -31,7 +31,9 @@ internal fun StoredWorkout.ui(): WorkoutUi {
         j.number("calories")?.toInt(), j.number("steps")?.toInt(), j.number("distance_m")?.toInt(), points)
 }
 /** Bumped when the heart check analysis changes, so saved checks are worked out again (2: breathing ignores Mayer waves, 25 Hz preview). */
-internal const val ANALYSIS_VERSION = 2
+/** 3: RMSSD, pNN50, SD1 and the rhythm check count only back-to-back beats (0.7.1). */
+internal const val ANALYSIS_VERSION = 3
+internal const val HRV_DIFFS_FIXED = "hrv_diffs_fixed"
 
 internal fun SessionResult.json(): String = JSONObject().apply {
     put("analysis_version", ANALYSIS_VERSION)

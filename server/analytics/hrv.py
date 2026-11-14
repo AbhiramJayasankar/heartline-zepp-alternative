@@ -51,12 +51,25 @@ def flag_ectopic(rr: np.ndarray, window: int = 5) -> tuple[np.ndarray, np.ndarra
     return ectopic, artifact
 
 
-def time_domain(nn: np.ndarray) -> dict:
+def successive_diffs(iv: Intervals, keep: np.ndarray) -> np.ndarray:
+    """Differences (s) between kept intervals that are back to back. Where a beat was rejected or an interval set
+    aside, the intervals either side of it are not neighbours, and their difference spans the gap: on a 5-minute
+    check with a fifth of its beats dropped that roughly doubled RMSSD."""
+    if len(iv.rr) < 2:
+        return np.zeros(0)
+    adjacent = np.abs(np.diff(iv.t) - iv.rr[1:]) < 1e-3
+    return np.diff(iv.rr)[keep[:-1] & keep[1:] & adjacent]
+
+
+def time_domain(nn: np.ndarray, diffs: np.ndarray | None = None) -> dict:
     out = dict.fromkeys(("mean_rr_ms", "sdnn_ms", "rmssd_ms", "pnn50", "sd1_ms", "sd2_ms"))
     if len(nn) < 10:
         return out
     ms = nn * 1000
-    diff = np.diff(ms)
+    diff = (np.diff(nn) if diffs is None else diffs) * 1000
+    if len(diff) < 5:
+        out.update(mean_rr_ms=round(float(ms.mean()), 1), sdnn_ms=round(float(np.std(ms, ddof=1)), 1))
+        return out
     sdnn = float(np.std(ms, ddof=1))
     sd1 = float(np.sqrt(0.5) * np.std(diff, ddof=1))
     sd2_sq = 2 * sdnn ** 2 - sd1 ** 2
@@ -114,7 +127,7 @@ def stress_index(nn: np.ndarray) -> float | None:
 
 def hrv_metrics(iv: Intervals) -> dict:
     keep = ~(iv.ectopic | iv.artifact)
-    out = time_domain(iv.rr[keep])
+    out = time_domain(iv.rr[keep], successive_diffs(iv, keep))
     out.update(frequency_domain(iv.t[keep], iv.rr[keep]))
     out["stress_index"] = stress_index(iv.rr[keep])
     return out

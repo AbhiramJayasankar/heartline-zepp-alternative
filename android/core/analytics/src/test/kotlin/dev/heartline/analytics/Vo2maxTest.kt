@@ -62,4 +62,15 @@ class Vo2maxTest {
         // Awake rest 69, max 193: reserve 124, so 20% = 93.8 and 30% = 106.2.
         assertEquals(5, activeMinutesOf(ms, 193, 69.0, listOf(now to now + 4 * 60L)))
     }
+
+    @Test fun aRunWalkCostsItsWalksAsWalking() {
+        // 36 minutes, 3.89 km, two thirds of it run: costed part by part the estimate is lower than as one slow run.
+        val whole = WorkoutEffort(0, "Outdoor running", 2147, 3890, 157)
+        val parts = whole.copy(runShare = 0.63)
+        val a = vo2maxFromWorkout(whole, 60.0, 190).first!!.vo2max
+        val b = vo2maxFromWorkout(parts, 60.0, 190).first!!.vo2max
+        assertTrue("$b vs $a", b < a)
+        // (0.2 x 0.63 + 0.1 x 0.37) x 108.7 m/min = 17.7 ml/kg/min above rest, at 74.6% of reserve.
+        assertEquals(3.5 + 17.72 / ((157 - 60.0) / 130), b, 0.2)
+    }
 }

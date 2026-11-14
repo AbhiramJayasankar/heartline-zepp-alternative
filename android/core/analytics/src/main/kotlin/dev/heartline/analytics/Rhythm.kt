@@ -44,9 +44,9 @@ internal fun assessRhythm(iv: Intervals, hr: Double?, beatNotes: List<String> = 
     if (rr.size < 30) return RhythmResult("insufficient_data", ect, null, beatNotes + listOf(
         "Only ${rr.size} clean beat intervals; at least 30 are needed. " +
             "Sit still with the watch snug for a minute and measure again.", DISCLAIMER), null)
-    var ss = 0.0
-    for (i in 1 until rr.size) ss += (rr[i] - rr[i - 1]).pow(2)
-    val nr = sqrt(ss / (rr.size - 1)) / mean(rr)
+    // Only back-to-back intervals: a difference across a dropped beat is not beat-to-beat variation.
+    val d = iv.successiveDiffs(keep = { !iv.artifact[it] })
+    val nr = if (d.isEmpty()) 0.0 else sqrt(d.sumOf { it * it } / d.size) / mean(rr)
     val she = shannonEntropy(rr)
     val (tpr, randomLike) = turningPointRatio(rr)
     val status: String

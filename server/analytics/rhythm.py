@@ -8,7 +8,7 @@ import math
 
 import numpy as np
 
-from .hrv import Intervals
+from .hrv import Intervals, successive_diffs
 
 MIN_INTERVALS = 30
 NRMSSD_AF = 0.10      # RMSSD / mean RR
@@ -48,7 +48,9 @@ def assess(iv: Intervals, hr_bpm: float | None) -> dict:
         return {"status": "insufficient_data", "ectopic_beats": n_ect, "irregularity": None, "notes": notes,
                 "features": None}
 
-    nrmssd = float(np.sqrt(np.mean(np.diff(rr) ** 2)) / rr.mean())
+    # Only back-to-back intervals: a difference across a dropped beat is not beat-to-beat variation.
+    d = successive_diffs(iv, ~iv.artifact)
+    nrmssd = float(np.sqrt(np.mean(d ** 2)) / rr.mean()) if len(d) else 0.0
     she = shannon_entropy(rr)
     tpr, random_like = turning_point_ratio(rr)
     features = {"nrmssd": round(nrmssd, 3), "shannon_entropy": round(she, 3), "tpr": round(tpr, 3),

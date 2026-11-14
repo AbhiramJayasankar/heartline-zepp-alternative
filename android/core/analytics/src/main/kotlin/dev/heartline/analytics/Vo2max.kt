@@ -2,8 +2,11 @@ package dev.heartline.analytics
 
 import kotlin.math.roundToInt
 
-/** A recorded workout, as much of it as a VO2max estimate needs. */
-data class WorkoutEffort(val start: Long, val type: String, val activeS: Int, val distanceM: Int?, val avgHr: Int?)
+/**
+ * A recorded workout, as much of it as a VO2max estimate needs. [runShare] is the share of its distance covered
+ * running rather than walking, from the watch's per-second cadence ([gaitSummary]), when known.
+ */
+data class WorkoutEffort(val start: Long, val type: String, val activeS: Int, val distanceM: Int?, val avgHr: Int?, val runShare: Double? = null)
 
 /** One workout's VO2max estimate, with what went into it. */
 data class WorkoutVo2(val start: Long, val type: String, val vo2max: Double, val speedKmh: Double, val avgHr: Int, val reservePct: Int, val inclinePct: Double? = null)
@@ -69,10 +72,13 @@ fun vo2maxFromWorkout(w: WorkoutEffort, hrRest: Double?, hrMax: Int?): Pair<Work
     if (reserve < 0.4) return null to "too easy (${(reserve * 100).roundToInt()}% of heart rate reserve, needs 40%)"
     if (reserve > 0.9) return null to "too close to max to be steady"
     // ACSM: walking 0.1 ml/kg/min per m/min (up to about 100 m/min), running 0.2 above about 134 m/min; between the two
-    // the workout type decides.
+    // the workout type decides. A run-walk is costed part by part: its walks at the walking rate, its runs at the
+    // running rate. Costing the whole at the average pace as running counted every walk as a slow run and overstated
+    // the oxygen used (by about a quarter on a 36-minute run-walk with 2.3 km run and 1.3 km walked).
     val running = speed > 134 || (speed > 100 && w.type == "Outdoor running")
     if (speed < 50) return null to "too slow for the walking equation"
-    val vo2 = (if (running) 0.2 else 0.1) * speed + 3.5
+    val share = w.runShare?.takeIf { it in 0.1..0.9 }
+    val vo2 = if (share != null) (0.2 * share + 0.1 * (1 - share)) * speed + 3.5 else (if (running) 0.2 else 0.1) * speed + 3.5
     val vo2max = 3.5 + (vo2 - 3.5) / reserve
     if (vo2max !in 20.0..90.0) return null to "estimate outside a believable range"
     return WorkoutVo2(w.start, w.type, rounded(vo2max, 1), rounded(speed * 0.06, 1), avgHr, (reserve * 100).roundToInt()) to null

@@ -19,7 +19,7 @@
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
-> **Status: 0.7.0.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
+> **Status: 0.7.1.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
 > Other Huami/Zepp watches of the same generation (GTR 2, GTS 2, GTS 2e) speak a similar protocol but are untested.
 
 ## Highlights
@@ -117,11 +117,13 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
   two weeks of nights, sleep score and how regular your timing is.
 - **SpO2, stress, PAI and skin temperature.** Temperature is a reading every minute, synced every 5 minutes.
 - **Trends**: two weeks of readiness, resting HR, HRV, sleep, steps, strain and active time against your 28-day
-  baseline, plus **VO2max, fitness age** and acute:chronic training load.
+  baseline, plus **VO2max, fitness age** and acute:chronic training load. VO2max from a run-walk costs its runs as
+  running and its walks as walking.
 
 **Heart checks from the raw pulse**
 - Records the watch's raw PPG waveform, finds every beat and measures **HRV (RMSSD), rhythm regularity and
-  breathing rate**. Rhythm screening is a hint, not a diagnosis.
+  breathing rate**. Beat-to-beat measures use only beats that are back to back, never a difference across a beat that
+  was set aside. Rhythm screening is a hint, not a diagnosis.
 
 **Workouts**
 - Imports the watch's own workouts with per-second heart rate, pace, cadence, stride, kilometre splits and GPS routes,

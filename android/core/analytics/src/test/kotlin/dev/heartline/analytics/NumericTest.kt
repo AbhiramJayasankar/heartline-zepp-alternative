@@ -82,7 +82,9 @@ class NumericTest {
 
     @Test fun timeDomainUsesSampleDeviationAndPercentagePnn50() {
         val rr = DoubleArray(40) { if (it % 2 == 0) .8 else .86 }
-        val r = hrvMetrics(Intervals(DoubleArray(40) { it.toDouble() }, rr, BooleanArray(40), BooleanArray(40)))
+        // Beat times: each interval ends where the next begins, so every pair is back to back.
+        val t = DoubleArray(40).also { var at = 0.0; for (i in it.indices) { at += rr[i]; it[i] = at } }
+        val r = hrvMetrics(Intervals(t, rr, BooleanArray(40), BooleanArray(40)))
         assertEquals(830.0, r.meanRrMs!!, 0.0)
         assertEquals(60.0, r.rmssdMs!!, 0.0)
         assertEquals(100.0, r.pnn50!!, 0.0)
@@ -133,5 +135,28 @@ class NumericTest {
         assertEquals(100, sleepScore(480, 95.0, 63, 96))
         assertEquals(2.0, rounded(2.5), 0.0)
         assertEquals(2.67, rounded(2.675, 2), 0.0)
+    }
+
+    @Test fun aDroppedBeatIsNotABeatToBeatDifference() {
+        // Steady 800 ms beats with one beat lost after the 20th interval: the intervals either side of the hole are
+        // not neighbours, so no difference is taken across it and RMSSD stays at the steady rhythm's.
+        // The rhythm also settles 100 ms slower after the hole, as it does when the wrist moved for a few seconds.
+        val rr = DoubleArray(40) { (if (it % 2 == 0) .80 else .82) + if (it >= 20) .10 else 0.0 }
+        val t = DoubleArray(40).also { var at = 0.0; for (i in it.indices) { at += rr[i] + if (i == 20) 3.0 else 0.0; it[i] = at } }
+        val r = hrvMetrics(Intervals(t, rr, BooleanArray(40), BooleanArray(40)))
+        assertEquals(20.0, r.rmssdMs!!, 0.5)
+    }
+
+    @Test fun savedIntervalsGiveTheSameHrvAsTheRecording() {
+        // Beats with a varying rhythm and two beats lost, rounded the way a saved sample keeps them (10 ms, 0.1 ms).
+        val times = ArrayList<Double>(); var at = 0.0
+        for (i in 0 until 200) { at += .85 + .05 * sin(i / 3.0) + .02 * cos(i * 1.7); times += at }
+        val good = BooleanArray(times.size) { it != 60 && it != 140 }
+        val iv = intervals(times.toDoubleArray(), good)
+        val live = hrvMetrics(iv)
+        val saved = iv.t.indices.map { RrSample(Math.round(iv.t[it] * 100) / 100.0, Math.round(iv.rr[it] * 10_000) / 10.0, iv.ectopic[it]) }
+        val again = hrvFromIntervals(saved)
+        assertEquals(live.rmssdMs!!, again.rmssdMs!!, 0.2)
+        assertEquals(live.pnn50!!, again.pnn50!!, 0.6)
     }
 }
