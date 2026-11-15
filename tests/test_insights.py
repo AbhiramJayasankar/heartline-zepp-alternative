@@ -153,7 +153,8 @@ def test_real_recordings_sane(path):
 
 # ---- daily scores --------------------------------------------------------------
 
-def minutes_for(nights: int, end: date, bed=23, wake=7, day_hr=70, night_hr=52):
+def minutes_for(nights: int, end: date, bed=23, wake=7, day_hr=70, night_hr=52, still_hr=60):
+    """Nights asleep from bed to wake; days awake with a few steps a minute, except half an hour sitting still at noon."""
     out = []
     start = datetime.combine(end - timedelta(days=nights), datetime.min.time())
     t = start
@@ -161,8 +162,9 @@ def minutes_for(nights: int, end: date, bed=23, wake=7, day_hr=70, night_hr=52):
         h = t.hour
         asleep = h >= bed or h < wake
         state = ("sleep_deep" if t.minute < 15 else "sleep_rem" if t.minute < 27 else "sleep_light") if asleep else "idle"
-        out.append({"ts": int(t.timestamp()), "state": state, "hr": night_hr if asleep else day_hr,
-                    "steps": 0 if asleep else 5})
+        still = not asleep and h == 12 and t.minute < 30
+        out.append({"ts": int(t.timestamp()), "state": state, "hr": night_hr if asleep else still_hr if still else day_hr,
+                    "steps": 0 if asleep or still else 5})
         t += timedelta(minutes=1)
     return out
 
@@ -175,7 +177,8 @@ def test_daily_scores_synthetic():
     assert d["resting_hr"] == 52
     assert 80 <= d["sleep_score"] <= 100
     assert out["trends"]["sleep_regularity"] == pytest.approx(100, abs=1)
-    assert out["trends"]["vo2max_estimate"] == pytest.approx(14.5 * (208 - 21) / 52, abs=0.2)
+    # Uth's VO2max uses resting heart rate awake (the still noon half hour), not the lower sleeping rate.
+    assert out["trends"]["vo2max_estimate"] == pytest.approx(14.5 * (208 - 21) / 60, abs=0.2)
     assert 0 <= out["today"]["readiness"] <= 100
     assert out["today"]["body_battery"] is not None
 
