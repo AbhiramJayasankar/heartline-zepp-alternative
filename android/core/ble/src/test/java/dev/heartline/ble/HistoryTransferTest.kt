@@ -45,6 +45,14 @@ class HistoryTransferTest {
         }
         job.cancelAndJoin(); assertEquals(2, commands.size); assertArrayEquals(byteArrayOf(2), commands.last())
     }
+    @Test fun aRefusalDuringAWorkoutIsBusyNotEmpty() = runBlocking {
+        // 21 Nov 2026: every request between 17:20 and 19:50, through three workouts, was answered 10 01 07.
+        val commands = mutableListOf<ByteArray>()
+        val f = transferHistory(FetchType.WORKOUTS, since, { commands.add(it) }, { control(hex("100107")) })
+        assertTrue(f.busy); assertEquals(0, f.data.size)
+        assertEquals("no go command after a refusal", 1, commands.size)
+        assertFalse(HistoryFetch(capturedHeader, null, byteArrayOf()).busy)
+    }
     @Test fun badCompletionDoesNotReturnPartialData() = runBlocking {
         val received = ArrayDeque(listOf(control(capturedHeader), data(0, 1), control(hex("100204"))))
         try { transferHistory(FetchType.STRESS, since, {}, { received.removeFirst() }); fail() } catch (_: IllegalArgumentException) { }

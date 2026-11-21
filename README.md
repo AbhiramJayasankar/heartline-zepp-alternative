@@ -19,7 +19,7 @@
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
-> **Status: 0.7.1.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
+> **Status: 0.7.2.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
 > Other Huami/Zepp watches of the same generation (GTR 2, GTS 2, GTS 2e) speak a similar protocol but are untested.
 
 ## Highlights
@@ -111,7 +111,9 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
 - **Naps** are kept apart from nights, shown on the Sleep page and Today, and recharge body battery. The night is
   the sleep that falls in your usual sleeping hours (learnt from your own last weeks), so a long evening nap before a
   short, broken night is still a nap.
-- **Automatic HRV**: samples overnight while you sleep and during still moments in the day.
+- **Automatic HRV**: samples overnight while you sleep and during still moments in the day. A check that is recording
+  can be stopped from the banner at any time; one gives way to a workout capture, and daytime checks pause during a
+  watch workout and for an hour after three that aren't clean.
 - **Heart rate** all day (per-minute history plus live readings), sleeping and awake resting heart rate, and zones.
 - **Sleep page**: a hypnogram of the night, each stage against its typical range, heart rate and SpO2 while asleep,
   two weeks of nights, sleep score and how regular your timing is.
@@ -135,6 +137,9 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
 - **Heart rate checked against the raw pulse while you run**: wrist sensors can lock onto your step rhythm and report
   it as heart rate. In a capture, Heartline takes the movement out of the raw optical pulse and, where the watch sat
   on your step rate and the pulse clearly says otherwise, uses the pulse instead (and says so).
+- **A wandering GPS track is caught**: when the watch's distance is 20% more than your steps can cover, at your step
+  lengths learnt from workouts with clean GPS, the distance, pace and each run and walk come from your steps instead,
+  and the workout says why. Checked against laps of a 745 m lake loop: within 1 to 4%, where the watch was 30 to 46% long.
 - **GPS assist (A-GPS)**: sends the week's satellite almanacs and orbit predictions to the watch, so its GPS gets a
   fix in seconds. Needs a Zepp sign-in (the data is only served to Zepp accounts), done in your phone's browser, so Google
   and Apple accounts work in a tap; updates every 3 days.

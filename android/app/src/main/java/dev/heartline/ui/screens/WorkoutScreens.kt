@@ -1039,6 +1039,16 @@ private fun PulseSection(p: dev.heartline.app.PulseUi) {
 
 // ---- Synced watch workouts ----
 
+/** Why a workout's distance and pace aren't the watch's, when its GPS track wandered. */
+internal fun gpsNote(g: dev.heartline.app.GpsCheckUi): String {
+    val km = g.watchM?.let { "%.2f km".format(it / 1000.0) } ?: "distance"
+    val lengths = listOfNotNull(g.walkStepM?.let { "%.2f m a step walking".format(it) }, g.runStepM?.let { "%.2f m running".format(it) }).joinToString(" and ")
+    return "The GPS position wandered, so the watch's $km is ${((g.ratio - 1) * 100).roundToInt()}% more than " +
+        (if (g.fromSteps) "your steps can cover at $lengths, your step lengths from workouts with clean GPS. Distance and pace here, and each run's and walk's, come from your steps."
+        else "the watch's own speed readings add up to. Distance and pace here come from the speed, until Heartline has learnt your step length from workouts with clean GPS.") +
+        " Kilometre splits are left out, and this workout doesn't count towards VO2max."
+}
+
 @Composable
 fun WorkoutScreen(controller: HeartlineController, route: Route.Workout, nav: Navigator) {
     val c = HL.colors
@@ -1053,13 +1063,15 @@ fun WorkoutScreen(controller: HeartlineController, route: Route.Workout, nav: Na
         StatGrid(listOf(
             Triple("Average", fmtInt(w.avgHr), "bpm"), Triple("Max", fmtInt(w.maxHr), "bpm"), Triple("Lowest", fmtInt(d.minHr), "bpm"),
             Triple("Duration", fmtHm(w.durationS / 60), null), Triple("Active", d.activeS?.let { fmtHm(it / 60) } ?: "–", null), Triple("Calories", fmtInt(w.calories), "kcal"),
-            Triple("Distance", w.distanceM?.takeIf { it > 0 }?.let { "%.2f".format(it / 1000.0) } ?: "–", "km"), Triple("Avg pace", pace(d.avgPaceSPerKm), "/km"), Triple("Best pace", pace(d.bestPaceSPerKm), "/km"),
+            Triple("Distance", (if (d.gps != null) "%.2f".format(d.gps.distanceM / 1000.0) else w.distanceM?.takeIf { it > 0 }?.let { "%.2f".format(it / 1000.0) }) ?: "–", "km"),
+            Triple("Avg pace", pace(d.avgPaceSPerKm), "/km"), Triple("Best pace", pace(d.bestPaceSPerKm), "/km"),
             Triple("Avg speed", one(d.avgSpeedKmh), "km/h"), Triple("Max speed", one(d.maxSpeedKmh), "km/h"), Triple("Steps", fmtInt(w.steps), null),
             // A zero from the watch on a gym workout means "not measured"; those tiles are left out.
             Triple("Cadence", fmtInt(d.avgCadence?.takeIf { it > 0 }), "spm"), Triple("Max cadence", fmtInt(d.maxCadence?.takeIf { it > 0 }), "spm"), Triple("Stride", fmtInt(d.avgStrideCm?.takeIf { it > 0 }), "cm"),
             Triple("Ascent", d.ascentM?.takeIf { it > 0 }?.roundToInt()?.toString() ?: "–", "m"), Triple("Descent", d.descentM?.takeIf { it > 0 }?.roundToInt()?.toString() ?: "–", "m"), Triple("Load", d.load?.roundToInt()?.toString() ?: "–", null),
             Triple("Training effect", one(d.trainingEffect), null), Triple("Recovery", d.recoveryHours?.let { "$it h" } ?: "–", null),
         ))
+        d.gps?.let { g -> Gap(14); dev.heartline.ui.components.Note(gpsNote(g)) }
         // A capture recorded over this workout has far finer data: offer it here.
         val captures by controller.captures.collectAsStateWithLifecycle()
         captures.firstOrNull { it.start < w.start + w.durationS && it.start + it.durationS > w.start }?.let { cap ->
@@ -1100,7 +1112,7 @@ fun WorkoutScreen(controller: HeartlineController, route: Route.Workout, nav: Na
                 xLabel = { clock(it) }, readoutX = { "${clock(it)} in, at " + dev.heartline.ui.components.epochClock(w.start + it, seconds = true) }, minSpan = 60.0)
             else HrTraceChart(w.track, w.durationS.toLong().coerceAtLeast(60), w.start + w.durationS)
         }
-        d.gait?.takeIf { it.runS >= 60 || it.walkS >= 300 }?.let { GaitSection(it, w.distanceM?.takeIf { d -> d > 0 }) }
+        d.gait?.takeIf { it.runS >= 60 || it.walkS >= 300 }?.let { GaitSection(it, if (d.gps != null) d.gps.distanceM else w.distanceM?.takeIf { d -> d > 0 }) }
         WorkoutLogSection(controller, w)
         if (d.zones.isNotEmpty()) { Gap(24); SectionTitle("Heart-rate zones"); Gap(12); ZoneBars(d.zones) }
         listOf(Triple("Speed", d.speedKmh, "km/h"), Triple("Cadence", d.cadence, "spm"), Triple("Altitude", d.altitude, "m")).forEach { (title, s, unit) ->

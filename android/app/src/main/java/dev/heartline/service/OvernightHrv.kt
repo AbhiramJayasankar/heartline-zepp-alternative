@@ -12,6 +12,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import org.json.JSONObject
@@ -137,6 +138,9 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         val dayStatus = MutableStateFlow("Off")
         /** The automatic heart check recording right now, if any, for the app-wide banner and the notification. */
         val running = MutableStateFlow<dev.heartline.app.HrvCheckUi?>(null)
+        /** Bumped to stop the check recording now (the banner's Stop, or a watch workout starting). */
+        private val stopRequests = MutableStateFlow(0)
+        fun stopRunning() { if (running.value != null) stopRequests.value++ }
     }
 
     private val zone get() = ZoneId.systemDefault()
@@ -157,7 +161,7 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
     private var lastPrune = 0L
 
     /** What one automatic check found: clean or not, and the share of it the wrist was moving. */
-    private data class Outcome(val clean: Boolean, val movingShare: Double)
+    private data class Outcome(val clean: Boolean, val movingShare: Double, val stopped: Boolean = false)
 
     suspend fun run(): Unit = kotlinx.coroutines.coroutineScope {
         // The watch pushes its step count as it changes; a check waits for a minute with no new steps.
@@ -254,8 +258,10 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         if (busy()) { status.value = "Asleep; waiting for another recording to finish"; return true }
         if (!retry) { lastSample = now; retriesUsed = 0 }
         retryAt = 0L
-        val clean = sample(night, SAMPLE, s.nightLen * 60, status, retriesUsed).clean
+        val out = sample(night, SAMPLE, s.nightLen * 60, status, retriesUsed)
+        val clean = out.clean
         lastPose = System.currentTimeMillis() / 1000 // an HRV recording measures the facing too
+        if (out.stopped) { status.value = "Asleep; sample stopped, next at ${clock(lastSample + every)}"; return true }
         if (!clean && retriesUsed < RETRIES) {
             retriesUsed++
             retryAt = System.currentTimeMillis() / 1000 + RETRY_S
@@ -276,7 +282,7 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         if (now < plan.nextAt) {
             dayStatus.value = when {
                 plan.backingOff -> "You were walking during the last check; next try at ${clock(plan.nextAt)}"
-                plan.gaveUp -> "${DayHrvPlan.STILL_TRIES} checks weren't clean; trying again from ${clock(plan.nextAt)}"
+                plan.gaveUp -> "Paused after ${DayHrvPlan.TRIES} checks that weren't clean, or one you stopped; trying again from ${clock(plan.nextAt)}"
                 else -> "Clean reading taken; next checks from ${clock(plan.nextAt)}"
             }
             return
@@ -289,15 +295,21 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         if (inNightWindow && (newest == null || newest.state.startsWith("sleep_"))) { dayStatus.value = "Waiting for the watch to show you're awake"; return }
         if (now - lastStepChange < DayHrvPlan.STEP_QUIET_S) { dayStatus.value = "Waiting for a minute without steps"; return }
         if (busy()) { dayStatus.value = "Waiting for another recording to finish"; return }
+        if (inWatchWorkout(now)) { dayStatus.value = "Waiting: a workout is running on the watch"; return }
         val out = sample(Instant.ofEpochSecond(now).atZone(zone).toLocalDate(), DAY_SAMPLE, s.dayLen * 60, dayStatus, plan.tries)
         val end = System.currentTimeMillis() / 1000
+        if (out.stopped) {
+            dayPlan = plan.afterStop(end)
+            dayStatus.value = "Stopped; next checks from ${clock(end + DayHrvPlan.GIVE_UP_S)}"
+            return
+        }
         // Steps during the check mean you were walking: back off. Wrist movement alone just gets another try.
         val walked = lastStepChange >= now
         val next = if (out.clean) plan.afterClean(end, every) else plan.afterFail(end, walked, every)
         dayPlan = next
         dayStatus.value = when {
             out.clean -> "Clean reading at ${clock(end)}; next checks from ${clock(next.nextAt)}"
-            next.gaveUp -> "${DayHrvPlan.STILL_TRIES} checks weren't clean; trying again from ${clock(next.nextAt)}"
+            next.gaveUp -> "${DayHrvPlan.TRIES} checks weren't clean; trying again from ${clock(next.nextAt)}"
             next.nextAt > end -> "You walked during that check; next try at ${clock(next.nextAt)}"
             else -> "That check wasn't clean; trying again after a minute without steps"
         }
@@ -330,12 +342,20 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
             attempt == 0 -> ""; type == SAMPLE -> " (retry $attempt of $RETRIES)"; else -> " (try ${attempt + 1} since the last clean one)"
         }
         var file: java.io.File? = null
+        val asked = stopRequests.value
+        var stopped = false
         try {
             file = watch.startRaw(setOf(RawSensor.PPG, RawSensor.ACCEL))
             running.value = dev.heartline.app.HrvCheckUi(type == SAMPLE, System.currentTimeMillis() / 1000, seconds, attempt)
-            delay(seconds * 1000L)
+            // Recording until the length is up, or until it is stopped (the banner's Stop, or a watch workout starting).
+            stopped = kotlinx.coroutines.withTimeoutOrNull(seconds * 1000L) { stopRequests.first { it != asked } } != null
         } finally { running.value = null; withContext(NonCancellable) { runCatching { watch.stopRaw() } } }
         val f = file ?: return Outcome(false, 0.0)
+        if (stopped) {
+            f.delete(); app.db.recordings.delete(f.name)
+            app.db.events.add("info", (if (type == SAMPLE) "Overnight" else "Daytime") + " HRV sample stopped and discarded")
+            return Outcome(false, 0.0, stopped = true)
+        }
         val recording = withContext(Dispatchers.Default) { readRecording(f) }
         val result = withContext(Dispatchers.Default) { analyzeSession(recording, f.name) }
         val pose = dev.heartline.analytics.gravityOf(recording.acc, result.start.toLong())
@@ -390,6 +410,12 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         }
         if (deleted > 0) app.db.events.add("info", "Deleted $deleted automatic HRV recording${if (deleted > 1) "s" else ""} older than ${KEEP_RAW_S / 86_400} days " +
             "(${bytes / 1_000_000} MB); their HRV, breathing and beat intervals stay saved")
+    }
+
+    /** A watch workout started in the last 3 hours and not yet ended, by the starts and ends in its event log. */
+    private suspend fun inWatchWorkout(now: Long): Boolean {
+        val last = app.db.health.series("watch_workout", now - 3 * 3600.0, now.toDouble()).maxByOrNull { it.ts } ?: return false
+        return runCatching { JSONObject(last.extra ?: "{}").optString("event") }.getOrNull() == "start"
     }
 
     private fun clock(ts: Long): String = Instant.ofEpochSecond(ts).atZone(zone).toLocalTime().let { "%02d:%02d".format(it.hour, it.minute) }

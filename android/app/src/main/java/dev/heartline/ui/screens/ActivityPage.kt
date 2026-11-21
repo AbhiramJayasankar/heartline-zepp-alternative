@@ -222,7 +222,7 @@ fun ActivityScreen(controller: HeartlineController, nav: Navigator) {
                             Text(w.type, style = HL.type.bodyStrong, color = c.ink)
                             if (w.friend) FriendTag(Modifier.padding(start = 8.dp))
                         }
-                        MutedText("${timeOf(w.start)}, ${w.durationS / 60} min" + (w.calories?.let { ", $it kcal" } ?: "") + (w.distanceM?.takeIf { it > 0 }?.let { ", %.2f km".format(it / 1000.0) } ?: ""))
+                        MutedText("${timeOf(w.start)}, ${w.durationS / 60} min" + (w.calories?.let { ", $it kcal" } ?: "") + ((w.detail?.gps?.distanceM ?: w.distanceM)?.takeIf { it > 0 }?.let { ", %.2f km".format(it / 1000.0) } ?: ""))
                     }
                     Column(horizontalAlignment = Alignment.End) {
                         Text("${fmtInt(w.avgHr)} bpm", style = HL.type.stat.copy(fontSize = 20.sp), color = c.ink)

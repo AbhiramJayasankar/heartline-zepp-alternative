@@ -99,6 +99,8 @@ class WatchService : Service() {
                         watch.deviceEvents.collect { data ->
                             val w = dev.heartline.protocol.watchWorkoutStart(data) ?: return@collect
                             app.db.events.add("info", "Watch started a workout: ${w.name}" + if (w.needsGps) " (asks for phone GPS)" else "")
+                            // An automatic heart check recording now would hold the watch's sensors through the workout.
+                            OvernightHrv.stopRunning()
                             if (app.db.meta.get(AUTO_CAPTURE) == "true" && captureRunner.run.value == null) {
                                 // Remembered like a start from the event log, so that start (arriving later) doesn't begin
                                 // a second capture and the workout's end stops this one (audit, 2026-11-12).
@@ -113,7 +115,9 @@ class WatchService : Service() {
                     launch { app.settings.profile.collect { p -> userInfo(p)?.let { runCatching { watch.writeUserInfo(it) } } } }
                     // The watch drops idle links every minute or two, so schedule from the last sync, not from each reconnect.
                     launch { periodic(15 * 60_000L, "activity_last_sync") { watch.syncActivity() } }
-                    launch { periodic(60 * 60_000L, "health_last_sync") { watch.syncHealth() } }
+                    // Hourly; while the watch refuses transfers (a workout is running), every 10 minutes until it hands
+                    // them over, so a workout reaches the phone soon after it ends.
+                    launch { periodic(60 * 60_000L, "health_last_sync", busyRetry = 10 * 60_000L) { watch.syncHealth() } }
                     launch { periodic(5 * 60_000L, "quick_last_sync") { watch.syncQuick(); app.db.meta.set("quick_last_sync", (System.currentTimeMillis() / 1000).toString()) } }
                     // The watch's clock, every 6 hours (Zepp sets it on connecting); a time zone change sends it at once.
                     launch { periodic(6 * 3600_000L, CLOCK_SET) { watch.syncTime(); app.db.meta.set(CLOCK_SET, (System.currentTimeMillis() / 1000).toString()) } }
@@ -259,12 +263,14 @@ class WatchService : Service() {
         if (age !in 5..120 || h !in 50.0..250.0 || w !in 20.0..300.0) return null
         return dev.heartline.protocol.userInfoCommand(java.time.LocalDate.now().year - age, 1, 1, p.sex?.name, h.toInt(), w, "heartline".hashCode())
     }
-    private suspend fun periodic(interval: Long, lastKey: String, action: suspend () -> Unit) {
+    private suspend fun periodic(interval: Long, lastKey: String, busyRetry: Long = interval, action: suspend () -> Unit) {
         val last = app.db.meta.get(lastKey)?.toDoubleOrNull()?.let { (it * 1000).toLong() }
         if (last != null) delay((last + interval - System.currentTimeMillis()).coerceIn(0, interval))
         while (currentCoroutineContext().isActive) {
-            try { action() } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); app.db.events.add("warn", "Scheduled watch task failed: ${e.message}") }
-            delay(interval)
+            val wait = try { action(); interval }
+                catch (e: dev.heartline.ble.WatchBusyException) { busyRetry }
+                catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); app.db.events.add("warn", "Scheduled watch task failed: ${e.message}"); interval }
+            delay(wait)
         }
     }
     /** What the notification says: the link's state and battery, or "Starting" until the first update. */

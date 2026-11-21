@@ -177,6 +177,7 @@ class RealController(
                 val details = if (onFoot.isEmpty()) emptyMap() else runCatching {
                     storedWorkoutDetails(db.health.rawFetches(from - 86_400, types = setOf("workouts", "workout_details")))
                 }.getOrDefault(emptyMap())
+                val lengths = learnedStepLengths(details)
                 fun runShare(start: Long, durationS: Int): Double? {
                     val d = details[start]?.details ?: return null
                     if (d.cadence.size < 60) return null
@@ -188,7 +189,9 @@ class RealController(
                     val start = j.optLong("start", w.start)
                     WorkoutEffort(start, j.optString("type"), j.optInt("active_s", j.optInt("duration_s")),
                         j.optInt("distance_m").takeIf { it > 0 }, j.optInt("avg_hr").takeIf { it > 0 },
-                        if (onFoot.any { it.start == w.start }) runShare(start, j.optInt("duration_s", j.optInt("active_s"))) else null) to (start to j.optLong("end", w.start))
+                        if (onFoot.any { it.start == w.start }) runShare(start, j.optInt("duration_s", j.optInt("active_s"))) else null,
+                        gpsWandered = details[start]?.gpsCheck(j.optString("type"), j.optInt("duration_s", j.optInt("active_s")), j.optInt("distance_m").takeIf { it > 0 },
+                            j.optInt("steps").takeIf { it > 0 }, lengths) != null) to (start to j.optLong("end", w.start))
                 } }
                 val result = computeDaily(minutes, values, summaries, profile, 28, now, workouts = efforts.map { it.second } + loggedSpans(log))
                 // Workout captures score their load against the same resting heart rate, so it is kept for them.
@@ -263,11 +266,14 @@ class RealController(
                 .copy(awakeRestingHr = b.awakeRestingHr, naps = b.day.naps, spo2SetAside = b.spo2Aside.map { SeriesPoint(it.ts.toDouble(), it.value) })
         }.flowOn(Dispatchers.Default).shareIn(scope, SharingStarted.WhileSubscribed(15_000), 1)
     }
-    /** Every watch workout's stored details, parsed once for all days and again only when a new transfer arrives. */
+    /**
+     * Every watch workout's stored details, parsed once for all days and again only when a new transfer arrives, with
+     * the step lengths learnt from the ones whose GPS held (to check the others' distance against their steps).
+     */
     private val workoutDetails by lazy {
         db.health.observeRawFetches(-Double.MAX_VALUE, types = setOf("workouts", "workout_details")).throttleLatest(2_000)
             .distinctUntilChangedBy { l -> Triple(l.size, l.lastOrNull()?.ts, l.firstOrNull()?.ts) }
-            .map { storedWorkoutDetails(it) }.flowOn(Dispatchers.Default).shareIn(scope, SharingStarted.WhileSubscribed(30_000), 1)
+            .map { storedWorkoutDetails(it).let { d -> d to learnedStepLengths(d) } }.flowOn(Dispatchers.Default).shareIn(scope, SharingStarted.WhileSubscribed(30_000), 1)
     }
     override fun activityDay(date: LocalDate): Flow<ActivityDayUi> = activityDays.getOrPut(date) {
         val from = date.atStartOfDay(zone).toEpochSecond().toDouble()
@@ -275,7 +281,7 @@ class RealController(
         // The day's active minutes come from the trends once they're worked out; only that number is watched.
         val activeFromTrends = trends.map { t -> t?.series?.firstOrNull { it.key == "active" }?.points?.firstOrNull { it.date == date }?.value?.toInt() }.distinctUntilChanged()
         combine(db.activity.observeRange(from, to).throttleLatest(2_000), db.health.observeWorkouts(from, to), activeFromTrends,
-            workoutDetails, combine(settings.profile, friends, sleepHabit) { p, f, h -> Triple(p, f, h) }) { rows, allWorkouts, activeTrend, details, (profile, f, habit) ->
+            workoutDetails, combine(settings.profile, friends, sleepHabit) { p, f, h -> Triple(p, f, h) }) { rows, allWorkouts, activeTrend, (details, stepLengths), (profile, f, habit) ->
             val tp = System.nanoTime()
             val prevKind = db.activity.prevKind(from)
             val minutes = mappedMinutes(friendFree(rows, f, prevKind), prevKind)
@@ -294,7 +300,7 @@ class RealController(
                 minutes.count { it.state !in setOf(MinuteState.NOT_WORN, MinuteState.CHARGING) }, hr.minOrNull(), hr.takeIf { it.isNotEmpty() }?.average()?.toInt(), hr.maxOrNull(),
                 daily.days.lastOrNull { it.date == date.toString() }?.sleepUi(), workouts.map { workout ->
                     workout.ui().withWorkoutDetail(details[workout.start], ProfileUi(age = profile.age, maxHr = profile.maxHr,
-                        sex = profile.sex?.name?.lowercase(), restingHr = profile.restingHr ?: dailyRest)).copy(friend = f.covers(workout.start))
+                        sex = profile.sex?.name?.lowercase(), restingHr = profile.restingHr ?: dailyRest), stepLengths).copy(friend = f.covers(workout.start))
                 }, naps = daily.days.lastOrNull { it.date == date.toString() }?.naps.orEmpty()).also { perfLog("activityDay $date", tp) }
         }.flowOn(Dispatchers.Default).shareIn(scope, SharingStarted.WhileSubscribed(15_000), 1)
     }
@@ -427,6 +433,9 @@ class RealController(
     override fun syncNow() = launchAction {
         for (attempt in 1..2) {
             try { ensureService().command { it.readBattery(); it.syncActivity(); it.syncHealth() }; return@launchAction }
+            catch (e: dev.heartline.ble.WatchBusyException) {
+                throw IllegalStateException("The watch won't hand over data while a workout is running. Heartline syncs within 10 minutes of it ending.")
+            }
             catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e);
                 if (attempt == 2) throw e
                 db.events.add("warn", "Sync interrupted (${e.message}); retrying once the watch reconnects")
@@ -830,6 +839,7 @@ class RealController(
             j.optInt("attempt", 0), j.optInt("length_s", 0))
     }
     override val hrvCheck: StateFlow<HrvCheckUi?> = dev.heartline.service.OvernightHrv.running
+    override fun stopHrvCheck() { dev.heartline.service.OvernightHrv.stopRunning() }
     override val overnight: StateFlow<OvernightUi> = combine(db.meta.observe(dev.heartline.service.OvernightHrv.KEY), dev.heartline.service.OvernightHrv.status,
         dev.heartline.service.OvernightHrv.dayStatus,
         db.health.observeSeries(dev.heartline.service.OvernightHrv.SAMPLE, System.currentTimeMillis() / 1000.0 - 40 * 86_400),

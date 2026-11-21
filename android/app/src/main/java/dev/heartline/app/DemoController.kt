@@ -295,6 +295,7 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override val watchReadback = MutableStateFlow<List<Pair<String, String>>>(emptyList())
     override val overnight = MutableStateFlow(OvernightUi())
     override val hrvCheck = MutableStateFlow<HrvCheckUi?>(null)
+    override fun stopHrvCheck() { hrvCheck.value = null }
     override val notes = MutableStateFlow("")
     override fun saveNotes(text: String) { notes.value = text }
     override fun setHrvSchedule(night: Boolean, everyMin: Int, lengthMin: Int) {

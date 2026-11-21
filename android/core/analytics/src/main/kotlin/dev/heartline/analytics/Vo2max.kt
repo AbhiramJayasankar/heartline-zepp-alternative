@@ -6,7 +6,8 @@ import kotlin.math.roundToInt
  * A recorded workout, as much of it as a VO2max estimate needs. [runShare] is the share of its distance covered
  * running rather than walking, from the watch's per-second cadence ([gaitSummary]), when known.
  */
-data class WorkoutEffort(val start: Long, val type: String, val activeS: Int, val distanceM: Int?, val avgHr: Int?, val runShare: Double? = null)
+data class WorkoutEffort(val start: Long, val type: String, val activeS: Int, val distanceM: Int?, val avgHr: Int?, val runShare: Double? = null,
+    /** Its GPS track wandered ([gpsWandered]), so its distance does not hold. */ val gpsWandered: Boolean = false)
 
 /** One workout's VO2max estimate, with what went into it. */
 data class WorkoutVo2(val start: Long, val type: String, val vo2max: Double, val speedKmh: Double, val avgHr: Int, val reservePct: Int, val inclinePct: Double? = null)
@@ -61,6 +62,7 @@ fun vo2maxFromWorkout(w: WorkoutEffort, hrRest: Double?, hrMax: Int?): Pair<Work
         "Treadmill" -> "treadmill distance comes from wrist steps and the incline isn't known"
         else -> "not a run or walk with GPS distance"
     }
+    if (w.gpsWandered) return null to "the GPS track wandered, so its distance is too long"
     if (hrRest == null || hrMax == null || hrMax <= hrRest) return null to "needs your max and awake resting heart rate"
     val avgHr = w.avgHr ?: return null to "no average heart rate"
     val distance = w.distanceM?.takeIf { it > 0 } ?: return null to "no distance"

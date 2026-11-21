@@ -198,7 +198,7 @@ private fun Schedule(every: Int, length: Int, everyOptions: List<Int>, day: Bool
     Gap(4)
     Segmented(OvernightSettings.LENGTHS.map { it to "$it min" }, length, { onChange(every, it) }, Modifier.fillMaxWidth())
     Gap(4)
-    Text(if (day) "Checks of $length minutes run back to back until one is clean (or 7 have failed while you sat still), then wait $every minutes. Longer checks give steadier HRV but are harder to get clean." else
+    Text(if (day) "Checks of $length minutes run until one is clean, then wait $every minutes. After 3 in a row that aren't clean, or one you stop, they wait an hour. Longer checks give steadier HRV but are harder to get clean." else
         "Recording ${length} of every ${every} minutes (${(100.0 * length / every).roundToInt()}% of the time). Longer samples give steadier HRV; more often costs more battery.",
         style = HL.type.small.copy(fontSize = 12.sp), color = c.inkSoft)
 }
@@ -216,7 +216,7 @@ private fun mss(s: Long) = "%d:%02d".format(s / 60, s % 60)
 
 /**
  * Across the top of every screen while an automatic heart check records: what it is, the time left, and a reminder to
- * keep the wrist still, with a bar that fills as it runs. Tapping it opens the page that shows the result.
+ * keep the wrist still, with a bar that fills as it runs, and Stop. Tapping it opens the page that shows the result.
  */
 @Composable
 fun HrvCheckBanner(controller: HeartlineController, onOpen: (night: Boolean) -> Unit) {
@@ -237,7 +237,12 @@ fun HrvCheckBanner(controller: HeartlineController, onOpen: (night: Boolean) -> 
                     style = HL.type.bodyStrong, color = c.paper)
                 Text(if (r.night) "Recording while you sleep" else "Keep your wrist still if you can", style = HL.type.small, color = c.paper.copy(alpha = 0.75f))
             }
-            Text("${mss(left)} left", style = HL.type.label, color = c.paper)
+            Text("${mss(left)} left", style = HL.type.label, color = c.paper.copy(alpha = 0.75f))
+            Spacer(Modifier.width(12.dp))
+            // Stops and discards the check at once, so it never holds the watch when a workout is about to start.
+            Text("Stop", style = HL.type.label, color = c.ink, modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(c.paper)
+                .clickable(role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Stop the heart check") { controller.stopHrvCheck() }
+                .padding(horizontal = 14.dp, vertical = 7.dp))
         }
         Box(Modifier.fillMaxWidth().height(3.dp).background(c.paper.copy(alpha = 0.15f))) {
             Box(Modifier.fillMaxWidth(done).height(3.dp).background(c.pulse))
@@ -256,6 +261,10 @@ internal fun RunningCheck(controller: HeartlineController) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("Recording now" + if (r.attempt > 0) ", try ${r.attempt + 1}" else "", style = HL.type.bodyStrong, color = c.pulse, modifier = Modifier.weight(1f))
         Text("${mss(left)} left", style = HL.type.label, color = c.ink)
+        Spacer(Modifier.width(12.dp))
+        Text("Stop", style = HL.type.label, color = c.paper, modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(c.ink)
+            .clickable(role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Stop the heart check") { controller.stopHrvCheck() }
+            .padding(horizontal = 14.dp, vertical = 7.dp))
     }
     Gap(6)
     Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(c.gridMajor)) {

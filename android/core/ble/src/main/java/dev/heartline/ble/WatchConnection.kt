@@ -643,6 +643,8 @@ class WatchConnection(
             for (round in 0 until 20) {
                 if (since > now) break
                 val f = fetch(FetchType.ACTIVITY, since)
+                // During a workout the watch refuses; the next activity sync (15 minutes) tries again.
+                if (f.busy) { log("info", "Activity sync: the watch is busy (a workout is running); trying again later"); break }
                 val rows = f.start?.let { parseActivity(f.data, it) }.orEmpty()
                 if (rows.isEmpty()) break
                 added += persistence.activity(rows)
@@ -658,10 +660,19 @@ class WatchConnection(
         try {
             val types = FetchType.entries.filter { it != FetchType.ACTIVITY && it != FetchType.WORKOUT_DETAILS }
             val failed = ArrayList<String>()
+            val busy = ArrayList<String>()
             for (type in types) {
                 currentCoroutineContext().ensureActive()
                 requireClient()
-                if (!optional("Sync ${type.key}") { if (type == FetchType.WORKOUTS) syncWorkouts() else syncHealthType(type) }) failed += type.key
+                try { if (type == FetchType.WORKOUTS) syncWorkouts() else syncHealthType(type) }
+                catch (e: WatchBusyException) { busy += type.key }
+                catch (e: Exception) { rethrowIfCancelled(e); log("warn", "Sync ${type.key} failed: ${e.message}"); failed += type.key }
+            }
+            // Refused because a workout is running: not done, and the caller tries again in a few minutes.
+            if (busy.isNotEmpty()) {
+                log("info", "Health sync: the watch is busy (a workout is running), so ${if (busy.size == types.size) "nothing" else busy.joinToString()} " +
+                    "came through; trying again in a few minutes")
+                throw WatchBusyException()
             }
             // Nothing came through: not done, so the next connection tries again soon (audit, 2026-11-12).
             check(failed.size < types.size) { "Health sync failed for every type" }
@@ -677,7 +688,8 @@ class WatchConnection(
      */
     suspend fun syncQuick(types: List<FetchType> = QUICK_TYPES) = syncLock.withLock {
         requireClient()
-        for (type in types) optional("Sync ${type.key}") { syncHealthType(type) }
+        // A refusal during a workout just waits for the next quick sync.
+        for (type in types) optional("Sync ${type.key}") { try { syncHealthType(type) } catch (e: WatchBusyException) { return@optional } }
         persistence.lastHealth(FetchType.TEMPERATURE.key)?.let { log("info", "Quick sync: newest temperature reading is %d min old".format((now() - it) / 60)) }
         onSuccessfulSync?.invoke()
     }
@@ -686,6 +698,7 @@ class WatchConnection(
         var previous: ByteArray? = null
         for (round in 0 until if (type.consumedOnTransfer) 30 else 5) {
             val f = fetch(type, since)
+            if (f.busy) throw WatchBusyException()
             if (f.data.isEmpty()) break
             persistence.rawFetch(type.key, f.reply, f.start, f.data)
             val rows = if (type == FetchType.RESTING_HR) parseRestingHeartRate(f.data) else parseHealth(type, f.data, f.start, now())
@@ -703,6 +716,7 @@ class WatchConnection(
         var since = SyncPolicy.healthSince(persistence.lastWorkout(), now())
         for (round in 0 until 20) {
             val f = fetch(FetchType.WORKOUTS, since)
+            if (f.busy) throw WatchBusyException()
             val summary = parseWorkoutSummary(f.data) ?: break
             persistence.rawFetch("workouts", f.reply, f.start, f.data)
             val d = fetch(FetchType.WORKOUT_DETAILS, summary.start)

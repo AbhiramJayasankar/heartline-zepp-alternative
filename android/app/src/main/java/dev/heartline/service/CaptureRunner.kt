@@ -93,11 +93,16 @@ class CaptureRunner(
         require(minutes in 1..720) { "Capture duration must be 1–720 minutes" }
         check(initialized.isCompleted) { "Capture history is still loading; try again shortly" }
         check(!active) { "A workout capture is already running" }
-        check(!watch.raw.value.streaming) { "Stop the current raw recording or heart check first" }
+        // An automatic heart check gives way: it is stopped and discarded, and the capture starts once the watch's
+        // sensors are free. Any other recording still has to be stopped first.
+        val hrvYields = watch.raw.value.streaming && OvernightHrv.running.value != null
+        check(!watch.raw.value.streaming || hrvYields) { "Stop the current raw recording or heart check first" }
         check(watch.ready.value) { "Connect the watch before starting a capture" }
+        if (hrvYields) OvernightHrv.stopRunning()
         active = true
         run.value = CaptureRunUi(label.trim().ifBlank { "Workout" }, now(), minutes * 60, null, 0, 0)
         scope.launch { try { lock.withLock {
+            if (hrvYields) kotlinx.coroutines.withTimeoutOrNull(10_000) { watch.raw.first { !it.streaming } }
             ignoredFile = watch.raw.value.file?.name
             session = CaptureSession(UUID.randomUUID().toString(), run.value!!.label, now(), minutes * 60,
                 restoreHr = watch.heartRate.value.streaming).availability(now(), false)

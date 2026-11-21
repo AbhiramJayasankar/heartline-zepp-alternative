@@ -30,6 +30,8 @@ interface HeartlineController {
     val overnight: StateFlow<OvernightUi>
     /** An automatic heart check recording right now (overnight or daytime HRV), or null. */
     val hrvCheck: StateFlow<HrvCheckUi?>
+    /** Stops the automatic heart check recording now, if any, and discards it. */
+    fun stopHrvCheck() {}
     fun setOvernight(enabled: Boolean)
     /** Accurate positions on or off (see OvernightSettings.positions). */
     fun setAccuratePositions(enabled: Boolean) {}
@@ -257,7 +259,17 @@ data class WorkoutDetailUi(
     val altitude: List<SeriesPoint> = emptyList(), val laps: List<LapUi> = emptyList(), val extras: List<Pair<String, String>> = emptyList(),
     /** Running and walking bouts from the watch's per-second cadence, for runs and walks. */
     val gait: dev.heartline.analytics.GaitSummary? = null,
+    /** Set when the GPS track wandered: the watch's distance doesn't hold, and distance and pace come from its speed. */
+    val gps: GpsCheckUi? = null,
 )
+
+/**
+ * A workout whose GPS track wandered: the watch's distance [watchM] is [ratio] times what was really covered
+ * ([distanceM]: from the steps at [walkStepM] and [runStepM] a step when [fromSteps], else from the watch's speed), and
+ * the track is [wander] times as long as its 15-second line.
+ */
+data class GpsCheckUi(val wander: Double?, val ratio: Double, val watchM: Int?, val distanceM: Int, val fromSteps: Boolean = true,
+                      val walkStepM: Double? = null, val runStepM: Double? = null)
 
 data class CaptureRunUi(val label: String, val startedAt: Long, val plannedS: Int, val hr: Int?, val seconds: Int, val samples: Long, val error: String? = null)
 data class CaptureItemUi(val id: String, val label: String, val start: Long, val durationS: Int, val avgHr: Int?, val sets: Int?, val load: Double?,
