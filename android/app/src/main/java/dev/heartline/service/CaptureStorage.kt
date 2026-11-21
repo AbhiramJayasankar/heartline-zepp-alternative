@@ -14,7 +14,7 @@ internal const val CAPTURE_ENGINE_VERSION = "10"
 
 internal fun CaptureSession.json(): String = JSONObject().apply {
     put("id", id); put("label", label); put("start", start); put("end", end ?: JSONObject.NULL); put("planned", plannedS)
-    put("files", JSONArray(files)); put("samples", samples); put("restoreHr", restoreHr); put("error", error ?: JSONObject.NULL)
+    put("files", JSONArray(files)); put("samples", samples); put("restoreHr", restoreHr); put("error", error ?: JSONObject.NULL); put("gps", gps)
     put("gaps", JSONArray(gaps.map { JSONObject().put("start", it.start).put("end", it.end ?: JSONObject.NULL) }))
 }.toString()
 
@@ -23,7 +23,7 @@ internal fun captureSession(json: String): CaptureSession = JSONObject(json).let
     CaptureSession(o.getString("id"), o.getString("label"), o.getLong("start"), o.getInt("planned"),
         if (o.isNull("end")) null else o.getLong("end"), (0 until files.length()).map { files.getString(it) },
         (0 until gaps.length()).map { i -> gaps.getJSONObject(i).let { CaptureGap(it.getLong("start"), if (it.isNull("end")) null else it.getLong("end")) } },
-        o.optLong("samples"), o.optBoolean("restoreHr"), if (o.isNull("error")) null else o.getString("error"))
+        o.optLong("samples"), o.optBoolean("restoreHr"), if (o.isNull("error")) null else o.getString("error"), o.optBoolean("gps"))
 }
 
 internal fun captureFile(folder: File, name: String): File {

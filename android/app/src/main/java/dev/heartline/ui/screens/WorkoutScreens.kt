@@ -105,6 +105,14 @@ fun CaptureScreen(controller: HeartlineController, nav: Navigator) {
     var label by rememberSaveable { mutableStateOf("Gym") }
     var minutes by rememberSaveable { mutableIntStateOf(180) }
     var forFriend by rememberSaveable { mutableStateOf(false) }
+    val gpsOn by controller.phoneGps.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    fun located() = context.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    var gpsDenied by remember { mutableStateOf(false) }
+    val askLocation = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok ->
+        gpsDenied = !ok; if (ok) controller.setPhoneGps(true)
+    }
+    val onFootLabel = label == "Run" || label == "Walk"
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(r != null) { while (r != null) { delay(1000); now = System.currentTimeMillis() } }
     // When a capture ends, open its report as soon as the analysis lands.
@@ -119,7 +127,16 @@ fun CaptureScreen(controller: HeartlineController, nav: Navigator) {
         if (r == null) {
             Text("What are you doing?", style = HL.type.label, color = c.inkSoft)
             Gap(8)
-            Segmented(listOf("Gym" to "Gym", "Run" to "Run", "Other" to "Other"), label, { label = it })
+            Segmented(listOf("Gym" to "Gym", "Run" to "Run", "Walk" to "Walk", "Other" to "Other"), label, { label = it })
+            if (onFootLabel) {
+                Gap(14)
+                ToggleRow("Track with the phone's GPS too", "Carry the phone and it records the route once a second: it keeps to the path better than the watch, " +
+                    "so distance, pace and laps of a loop come out right. Runs and walks the watch starts use it too.", gpsOn && located()) { on ->
+                    if (!on) controller.setPhoneGps(false) else if (located()) controller.setPhoneGps(true)
+                    else askLocation.launch(android.Manifest.permission.ACCESS_FINE_LOCATION)
+                }
+                if (gpsDenied) { Gap(4); MutedText("Heartline needs precise location for this. Allow it under Heartline's permissions in Settings.") }
+            }
             Gap(18)
             Text("For how long?", style = HL.type.label, color = c.inkSoft)
             Gap(8)
@@ -127,7 +144,8 @@ fun CaptureScreen(controller: HeartlineController, nav: Navigator) {
             Gap(10)
             ForFriendToggle("session", forFriend) { forFriend = it }
             Gap(14)
-            PillButton(if (forFriend) "Start a friend's capture" else "Start capture", { controller.startCapture(label, minutes, forFriend); forFriend = false },
+            PillButton(if (forFriend) "Start a friend's capture" else "Start capture", {
+                    controller.startCapture(label, minutes, forFriend, phoneGps = onFootLabel && gpsOn && located()); forFriend = false },
                 Modifier.fillMaxWidth(), style = ButtonStyle.PULSE, enabled = conn.state == LinkState.CONNECTED)
             if (conn.state != LinkState.CONNECTED) { Gap(6); MutedText("Connect the watch first.") }
             Gap(20)
@@ -153,6 +171,21 @@ fun CaptureScreen(controller: HeartlineController, nav: Navigator) {
                 Stat("Heart rate", fmtInt(r.hr), Modifier.weight(1f), unit = "bpm")
                 Stat("Samples", fmtInt(r.samples), Modifier.weight(1f))
                 Stat("Link", if (conn.state == LinkState.CONNECTED) "OK" else "Lost", Modifier.weight(1f))
+            }
+            r.gps?.let { g ->
+                Gap(16)
+                Row(Modifier.fillMaxWidth()) {
+                    Stat("Distance", if (g.distanceM >= 1000) "%.2f".format(g.distanceM / 1000) else g.distanceM.roundToInt().toString(), Modifier.weight(1f),
+                        unit = if (g.distanceM >= 1000) "km" else "m")
+                    Stat("Pace now", pace(g.paceSPerKm), Modifier.weight(1f), unit = "/km")
+                    Stat("Laps", if (g.laps > 0) g.laps.toString() else "–", Modifier.weight(1f), unit = g.lastLapS?.let { "last ${clock(it)}" })
+                }
+                Gap(6)
+                MutedText(when {
+                    g.fixes == 0 -> "Phone GPS: waiting for a fix. Outdoors with a view of the sky, it takes up to a minute."
+                    else -> "Phone GPS: ${g.fixes} fixes" + (g.accuracyM?.let { ", latest within ${it.roundToInt()} m" } ?: "") +
+                        ". Laps show once you've gone round a loop twice."
+                })
             }
             r.error?.let { Gap(10); Text(it, style = HL.type.small, color = c.pulse) }
             if (conn.state != LinkState.CONNECTED) { Gap(8); MutedText("The watch dropped out. The capture keeps going and resumes when it reconnects; the gap is noted.") }
@@ -280,6 +313,9 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
     // A run or walk reads as one: its intervals instead of sets, reps and rests.
     val gait = remember(a) { a?.let { dev.heartline.app.captureGait(it) } }
     val onFoot = a != null && dev.heartline.app.captureOnFoot(a, gait)
+    // With the phone's GPS: its distance, and laps of a loop in its track.
+    val phoneM = remember(a) { a?.let { dev.heartline.app.capturePhoneDistanceM(it) } }
+    val laps = remember(a, gait) { a?.let { dev.heartline.app.captureLaps(it, gait) } }
     val ins = remember(base, prev, skin, onFoot) { if (base == null || a == null || onFoot) null else dev.heartline.app.sessionInsights(a, log, prev?.recovery ?: emptyList(), skin) }
     Screen(a?.label ?: "Session", onBack = { nav.pop() }, subtitle = a?.let { "${dateTimeOf(it.start)}, ${fmtHm(it.durationS / 60)}" }, scroll = scroll,
         trailing = { TextButton({ confirm = true }) { Text("Delete", color = c.inkSoft) } }) {
@@ -295,7 +331,8 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
         if (onFoot) StatGrid(listOf(
             Triple("Average", fmtInt(a.avgHr), "bpm"), Triple("Max", fmtInt(a.maxHr), "bpm"), Triple("Lowest", fmtInt(a.minHr), "bpm"),
             Triple("Load", a.load?.roundToInt()?.toString() ?: "–", null), Triple("Calories", fmtInt(energy?.total?.roundToInt() ?: a.calories), "kcal"), Triple("Steps", fmtInt(a.steps), null),
-            Triple("Distance", watchDistance?.let { "%.2f".format(it / 1000.0) } ?: "–", "km"),
+            Triple("Distance", (phoneM ?: watchDistance?.toDouble())?.let { "%.2f".format(it / 1000.0) } ?: "–", "km"),
+            Triple("Pace", pace(phoneM?.takeIf { it >= 100 }?.let { a.durationS * 1000.0 / it }), "/km"),
         )) else StatGrid(listOf(
             Triple("Average", fmtInt(a.avgHr), "bpm"), Triple("Max", fmtInt(a.maxHr), "bpm"), Triple("Lowest", fmtInt(a.minHr), "bpm"),
             Triple("Load", a.load?.roundToInt()?.toString() ?: "–", null), Triple("Calories", fmtInt(energy?.total?.roundToInt() ?: a.calories), "kcal"), Triple("Steps", fmtInt(a.steps), null),
@@ -308,6 +345,13 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
             Triple("Work share", a.workS?.let { w -> a.restS?.takeIf { w + it > 0 }?.let { "${100 * w / (w + it)}" } } ?: "–", "%"),
             Triple("Exercises", if (a.sets.isEmpty()) "–" else a.sets.map { it.group }.distinct().size.toString(), null),
         ) + listOfNotNull(ins?.takeIf { it.volumeKg > 0 }?.let { Triple("Volume", "%,d".format(it.volumeKg.roundToInt()), "kg") }))
+        if (a.route.size >= 2) {
+            Gap(20)
+            Panel(padding = PaddingValues(12.dp)) {
+                Text(if (gait?.runs?.isNotEmpty() == true) "Route from the phone's GPS, running and walking coloured" else "Route from the phone's GPS", style = HL.type.label, color = c.inkSoft); Gap(6)
+                dev.heartline.ui.components.RouteMap(a.route, bouts = gait?.routeBouts().orEmpty())
+            }
+        }
         Gap(20)
         Panel(padding = PaddingValues(12.dp)) {
             Text(if (onFoot) "Heart rate, with what your feet were doing underneath" else if (a.floor.size > 1) "Heart rate, sets shaded by exercise, dashed line is your lowest per 5 min" else "Heart rate, sets shaded", style = HL.type.label, color = c.inkSoft)
@@ -343,7 +387,8 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
                 if (a.activities.isNotEmpty()) LegendDot(c.ink.copy(alpha = 0.3f), "Watch workout")
             }
         }
-        if (onFoot) gait?.let { GaitSection(it, watchDistance) } else BaselineNote(a)
+        if (onFoot) gait?.let { GaitSection(it, phoneM?.roundToInt() ?: watchDistance) } else BaselineNote(a)
+        if (onFoot) laps?.let { LapsSection(it, LapSource.PHONE) }
         ins?.let { Findings(it) }
         ins?.let { i -> CoachNote(controller, a, i) }
         if (!friend) AroundSession(controller, a, nav)
@@ -1063,7 +1108,7 @@ fun WorkoutScreen(controller: HeartlineController, route: Route.Workout, nav: Na
         StatGrid(listOf(
             Triple("Average", fmtInt(w.avgHr), "bpm"), Triple("Max", fmtInt(w.maxHr), "bpm"), Triple("Lowest", fmtInt(d.minHr), "bpm"),
             Triple("Duration", fmtHm(w.durationS / 60), null), Triple("Active", d.activeS?.let { fmtHm(it / 60) } ?: "–", null), Triple("Calories", fmtInt(w.calories), "kcal"),
-            Triple("Distance", (if (d.gps != null) "%.2f".format(d.gps.distanceM / 1000.0) else w.distanceM?.takeIf { it > 0 }?.let { "%.2f".format(it / 1000.0) }) ?: "–", "km"),
+            Triple("Distance", ((d.phoneM ?: d.gps?.distanceM ?: w.distanceM?.takeIf { it > 0 })?.let { "%.2f".format(it / 1000.0) }) ?: "–", "km"),
             Triple("Avg pace", pace(d.avgPaceSPerKm), "/km"), Triple("Best pace", pace(d.bestPaceSPerKm), "/km"),
             Triple("Avg speed", one(d.avgSpeedKmh), "km/h"), Triple("Max speed", one(d.maxSpeedKmh), "km/h"), Triple("Steps", fmtInt(w.steps), null),
             // A zero from the watch on a gym workout means "not measured"; those tiles are left out.
@@ -1072,6 +1117,8 @@ fun WorkoutScreen(controller: HeartlineController, route: Route.Workout, nav: Na
             Triple("Training effect", one(d.trainingEffect), null), Triple("Recovery", d.recoveryHours?.let { "$it h" } ?: "–", null),
         ))
         d.gps?.let { g -> Gap(14); dev.heartline.ui.components.Note(gpsNote(g)) }
+        d.phoneM?.let { m -> Gap(14); dev.heartline.ui.components.Note("Distance, pace, route and laps come from the phone's GPS, recorded by the capture alongside: " +
+            "%.2f km, where the watch said %s.".format(m / 1000.0, w.distanceM?.takeIf { it > 0 }?.let { "%.2f km".format(it / 1000.0) } ?: "nothing")) }
         // A capture recorded over this workout has far finer data: offer it here.
         val captures by controller.captures.collectAsStateWithLifecycle()
         captures.firstOrNull { it.start < w.start + w.durationS && it.start + it.durationS > w.start }?.let { cap ->
@@ -1112,7 +1159,8 @@ fun WorkoutScreen(controller: HeartlineController, route: Route.Workout, nav: Na
                 xLabel = { clock(it) }, readoutX = { "${clock(it)} in, at " + dev.heartline.ui.components.epochClock(w.start + it, seconds = true) }, minSpan = 60.0)
             else HrTraceChart(w.track, w.durationS.toLong().coerceAtLeast(60), w.start + w.durationS)
         }
-        d.gait?.takeIf { it.runS >= 60 || it.walkS >= 300 }?.let { GaitSection(it, if (d.gps != null) d.gps.distanceM else w.distanceM?.takeIf { d -> d > 0 }) }
+        d.gait?.takeIf { it.runS >= 60 || it.walkS >= 300 }?.let { GaitSection(it, d.phoneM ?: d.gps?.distanceM ?: w.distanceM?.takeIf { d -> d > 0 }) }
+        d.loop?.let { LapsSection(it, when { d.phoneM != null -> LapSource.PHONE; d.gps != null -> LapSource.WATCH_STEPS; else -> LapSource.WATCH }) }
         WorkoutLogSection(controller, w)
         if (d.zones.isNotEmpty()) { Gap(24); SectionTitle("Heart-rate zones"); Gap(12); ZoneBars(d.zones) }
         listOf(Triple("Speed", d.speedKmh, "km/h"), Triple("Cadence", d.cadence, "spm"), Triple("Altitude", d.altitude, "m")).forEach { (title, s, unit) ->

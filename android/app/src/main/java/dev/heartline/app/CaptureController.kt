@@ -5,10 +5,13 @@ import dev.heartline.service.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import org.json.JSONObject
+import kotlin.math.roundToInt
 
 internal class CaptureController(
     private val scope: CoroutineScope, private val db: HeartlineDatabase,
     private val service: StateFlow<WatchService?>, private val ai: dev.heartline.service.ai.AiStore, private val ensureService: suspend () -> WatchService,
+    /** Where captures' recordings and phone tracks are kept. */
+    private val rawFolder: java.io.File,
 ) {
     val run = MutableStateFlow<CaptureRunUi?>(null)
     val items = MutableStateFlow<List<CaptureItemUi>>(emptyList())
@@ -23,6 +26,7 @@ internal class CaptureController(
             val friends = Friends.parse(meta[Friends.KEY])
             val facts = HashMap<String, TitleFacts>()
             val tp = System.nanoTime()
+            gpsSessions = meta.filterKeys { it.startsWith(CAPTURE_SESSION) }.values.mapNotNull { v -> v?.let { runCatching { captureSession(it) }.getOrNull() }?.takeIf { it.gps } }
             items.value = withContext(Dispatchers.Default) {
                 meta.filterKeys { it.startsWith(CAPTURE_SESSION) }.values.mapNotNull { value ->
                     runCatching {
@@ -47,6 +51,22 @@ internal class CaptureController(
                 .forEach { db.meta.delete(it) }
         } }
     }
+    /** Captures that recorded the phone's GPS. */
+    @Volatile private var gpsSessions: List<CaptureSession> = emptyList()
+
+    /**
+     * The phone's GPS over [start] until [end] (epoch seconds) from a capture that recorded it, with [RoutePoint.t] in
+     * seconds from [start]; empty when none did.
+     */
+    suspend fun phoneTrack(start: Long, end: Long): List<RoutePoint> = withContext(Dispatchers.IO) {
+        gpsSessions.filter { it.start < end && (it.end ?: (it.start + it.plannedS)) > start }.flatMap { s ->
+            readPhoneTrack(java.io.File(rawFolder, phoneTrackName(s.id))).filter { it.ms / 1000 in start until end }.let { fixes ->
+                val alt = fixes.associate { ((it.ms / 1000.0) - start).roundToInt() to it.altM }
+                fixes.geoFixes(start).map { RoutePoint(it.t, it.lat, it.lon, alt[it.t]) }
+            }
+        }.sortedBy { it.t }.distinctBy { it.t }
+    }
+
     /** Parsed analyses by capture, kept while their JSON is unchanged: the list is rebuilt on every capture change. */
     private val parsedCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Int, CaptureAnalysisUi>>()
     private fun parsed(id: String, json: String): CaptureAnalysisUi {
@@ -55,13 +75,13 @@ internal class CaptureController(
         return captureFromJson(json).also { parsedCache[id] = key to it }
     }
 
-    fun start(label: String, minutes: Int, forFriend: Boolean = false) {
+    fun start(label: String, minutes: Int, forFriend: Boolean = false, phoneGps: Boolean = false) {
         if (running) return
         starting = true
         val pending = CaptureRunUi(label.trim().ifBlank { "Workout" }, System.currentTimeMillis() / 1000, minutes * 60, null, 0, 0)
         run.value = pending
         startJob = scope.launch {
-            try { ensureService().captureRunner.start(label, minutes, forFriend) }
+            try { ensureService().captureRunner.start(label, minutes, forFriend, phoneGps) }
             catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); run.value = (run.value ?: pending).copy(error = e.message ?: "Unable to start capture") }
             finally { starting = false }
         }
@@ -74,7 +94,13 @@ internal class CaptureController(
         val session = db.meta.get(CAPTURE_SESSION + id)?.let { runCatching { captureSession(it) }.getOrNull() }
         val a = db.meta.get(CAPTURE_RESULT + id)?.takeIf { session != null && db.meta.get(CAPTURE_ENGINE + id) == captureEngineKey(db, session).first }
             ?.let { withContext(Dispatchers.Default) { parsed(id, it) } }?.withRest(captureRest(db)) ?: ensureService().captureRunner.detail(id)
-        return a?.let { r -> titleOf(db.meta.get(CAPTURE_TITLE + id))?.takeIf { genericLabel(r.label) }?.let { r.copy(label = it) } ?: r }
+        // The phone's track, when it recorded one: read fresh, it isn't part of the stored analysis.
+        val withGps = if (a == null || session?.gps != true) a else withContext(Dispatchers.IO) {
+            val fixes = readPhoneTrack(java.io.File(rawFolder, phoneTrackName(id)))
+            val alt = fixes.associate { ((it.ms / 1000.0) - session.start).roundToInt() to it.altM }
+            a.copy(route = fixes.geoFixes(session.start).filter { it.t <= a.durationS }.map { RoutePoint(it.t, it.lat, it.lon, alt[it.t]) })
+        }
+        return withGps?.let { r -> titleOf(db.meta.get(CAPTURE_TITLE + id))?.takeIf { genericLabel(r.label) }?.let { r.copy(label = it) } ?: r }
     }
 
     private fun titleOf(json: String?): String? = json?.let { runCatching { JSONObject(it).optString("title") }.getOrNull() }?.takeIf { it.isNotBlank() }

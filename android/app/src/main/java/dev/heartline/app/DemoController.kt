@@ -283,7 +283,11 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override val captureRun = MutableStateFlow<CaptureRunUi?>(null)
     override val captures = MutableStateFlow(listOf(CaptureItemUi("demo-gym", "Gym", now() - 7200, 3600, 128, 14, 96.0),
         CaptureItemUi("demo-run", "Run", now() - 86_400 - 3 * 3600, 3600, 148, null, 142.0)))
-    override fun startCapture(label: String, minutes: Int, forFriend: Boolean) { captureRun.value = CaptureRunUi(label, now(), minutes * 60, 92, 0, 0) }
+    override fun startCapture(label: String, minutes: Int, forFriend: Boolean, phoneGps: Boolean) {
+        captureRun.value = CaptureRunUi(label, now(), minutes * 60, 92, 0, 0, gps = if (phoneGps) GpsLiveUi(312, 1184.0, 402.0, 4f, 1, 441.0) else null)
+    }
+    override val phoneGps = MutableStateFlow(true)
+    override fun setPhoneGps(enabled: Boolean) { phoneGps.value = enabled }
     override fun stopCapture() { captureRun.value = null }
     override suspend fun captureDetail(id: String): CaptureAnalysisUi? = if (id == "demo-run") demoRunCapture(now() - 86_400 - 3 * 3600) else demoCapture()
     override fun deleteCapture(id: String) = captures.update { l -> l.filter { it.id != id } }

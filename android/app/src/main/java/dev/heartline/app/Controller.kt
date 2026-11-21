@@ -193,7 +193,11 @@ interface HeartlineController {
     val captureRun: StateFlow<CaptureRunUi?>
     val captures: StateFlow<List<CaptureItemUi>>
     /** Streams pulse, motion, gyroscope and compass plus the watch's own live heart rate until [minutes] pass or [stopCapture]. */
-    fun startCapture(label: String, minutes: Int, forFriend: Boolean = false)
+    /** [phoneGps]: record the phone's GPS alongside, for a run or walk. */
+    fun startCapture(label: String, minutes: Int, forFriend: Boolean = false, phoneGps: Boolean = false)
+    /** Runs and walks record the phone's GPS too, including ones the watch starts. */
+    val phoneGps: StateFlow<Boolean>
+    fun setPhoneGps(enabled: Boolean)
     /** Start a capture automatically when a workout is opened on the watch (if the watch reports it). */
     val autoCapture: StateFlow<Boolean>
     fun setAutoCapture(enabled: Boolean)
@@ -261,6 +265,10 @@ data class WorkoutDetailUi(
     val gait: dev.heartline.analytics.GaitSummary? = null,
     /** Set when the GPS track wandered: the watch's distance doesn't hold, and distance and pace come from its speed. */
     val gps: GpsCheckUi? = null,
+    /** Laps of a loop in the track, with their running and walking ([dev.heartline.analytics.findLapLine]). */
+    val loop: dev.heartline.analytics.LapSummary? = null,
+    /** Metres by the phone's GPS, when a capture recorded it during the workout: distance, pace and laps come from it. */
+    val phoneM: Int? = null,
 )
 
 /**
@@ -271,7 +279,10 @@ data class WorkoutDetailUi(
 data class GpsCheckUi(val wander: Double?, val ratio: Double, val watchM: Int?, val distanceM: Int, val fromSteps: Boolean = true,
                       val walkStepM: Double? = null, val runStepM: Double? = null)
 
-data class CaptureRunUi(val label: String, val startedAt: Long, val plannedS: Int, val hr: Int?, val seconds: Int, val samples: Long, val error: String? = null)
+data class CaptureRunUi(val label: String, val startedAt: Long, val plannedS: Int, val hr: Int?, val seconds: Int, val samples: Long, val error: String? = null,
+                        /** The phone's GPS while it records alongside: null when it isn't. */ val gps: GpsLiveUi? = null)
+/** The phone's GPS so far in a capture: [fixes] good fixes, distance, pace over the last 30 s, the latest fix's accuracy, laps. */
+data class GpsLiveUi(val fixes: Int, val distanceM: Double, val paceSPerKm: Double?, val accuracyM: Float?, val laps: Int, val lastLapS: Double?)
 data class CaptureItemUi(val id: String, val label: String, val start: Long, val durationS: Int, val avgHr: Int?, val sets: Int?, val load: Double?,
                          /** Recorded while a friend wore the watch. */ val friend: Boolean = false)
 /** One repetition. [t] is seconds from the capture start; [slowS] + [fastS] = [durationS]; [arcDeg] is wrist rotation. */
@@ -335,6 +346,8 @@ data class CaptureAnalysisUi(
     val logMatched: Int? = null, val logTotal: Int? = null, val unlogged: List<SetUi> = emptyList(),
     /** Seconds at each heart rate, and the maximum and sex the load was scored with (see [dev.heartline.analytics.captureLoad]). */
     val hrSeconds: Map<Int, Int> = emptyMap(), val loadMaxHr: Int? = null, val loadSex: String? = null,
+    /** The phone's GPS track when it recorded alongside, [RoutePoint.t] in seconds from the capture's start. */
+    val route: List<RoutePoint> = emptyList(),
 )
 
 data class PlaceUi(val name: String, val region: String?, val lat: Double, val lon: Double)

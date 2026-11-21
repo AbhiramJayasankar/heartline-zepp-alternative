@@ -9,6 +9,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Companion-device link to the watch: presence wake-ups and background service starts. -->
     <uses-feature android:name="android.software.companion_device_setup" android:required="false" />
@@ -22,6 +23,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Weather for where the phone is: approximate only; "all the time" keeps it current while Heartline is closed. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Do Not Disturb access, so the watch and the assistant can put the phone on silent (not only vibrate). -->
@@ -59,7 +61,7 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.Heartline">
-        <service android:name=".service.WatchService" android:exported="false" android:foregroundServiceType="connectedDevice" />
+        <service android:name=".service.WatchService" android:exported="false" android:foregroundServiceType="connectedDevice|location" />
         <service android:name=".service.NotificationForwarder" android:label="Heartline" android:exported="true" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
         </service>

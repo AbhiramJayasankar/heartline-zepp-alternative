@@ -6,6 +6,8 @@ data class CaptureSession(
     val id: String, val label: String, val start: Long, val plannedS: Int, val end: Long? = null,
     val files: List<String> = emptyList(), val gaps: List<CaptureGap> = emptyList(),
     val samples: Long = 0, val restoreHr: Boolean = false, val error: String? = null,
+    /** The phone's GPS is recorded too ([phoneTrackName]). */
+    val gps: Boolean = false,
 ) {
     fun due(now: Long): Boolean = end == null && now >= start + plannedS
     fun elapsed(now: Long): Int = ((end ?: now) - start).coerceIn(0, Int.MAX_VALUE.toLong()).toInt()

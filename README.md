@@ -19,7 +19,7 @@
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
-> **Status: 0.7.2.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
+> **Status: 0.8.0.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
 > Other Huami/Zepp watches of the same generation (GTR 2, GTS 2, GTS 2e) speak a similar protocol but are untested.
 
 ## Highlights
@@ -140,6 +140,15 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
 - **A wandering GPS track is caught**: when the watch's distance is 20% more than your steps can cover, at your step
   lengths learnt from workouts with clean GPS, the distance, pace and each run and walk come from your steps instead,
   and the workout says why. Checked against laps of a 745 m lake loop: within 1 to 4%, where the watch was 30 to 46% long.
+- **Runs and walks with the phone's GPS**: choose Run or Walk for a capture and turn on the phone's GPS, and the
+  phone records the route once a second alongside the watch. It keeps to the path where a watch on the wrist can wander,
+  so the capture, and the watch's own workout over the same time, take their route, distance and pace from it. While you
+  go, the capture shows the distance, the pace over the last 30 seconds and the laps so far.
+- **Laps of a loop**: Heartline finds the point on your route you pass most often and splits the session into laps:
+  each lap's time, distance, pace, fastest 30 seconds, running and walking with the pace of each, cadence, step length
+  and heart rate, and a tap opens its runs and walks one by one. Above them: the fastest and slowest lap, how even they
+  were, whether you slowed, and how far each heartbeat carried you. On watch workouts without the phone, laps come from
+  the watch's track; where it wandered, their distances come from your steps (on a 745 m lake loop, 677 to 791 m).
 - **GPS assist (A-GPS)**: sends the week's satellite almanacs and orbit predictions to the watch, so its GPS gets a
   fix in seconds. Needs a Zepp sign-in (the data is only served to Zepp accounts), done in your phone's browser, so Google
   and Apple accounts work in a tap; updates every 3 days.

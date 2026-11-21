@@ -35,7 +35,8 @@ class WatchService : Service() {
     override fun onCreate() {
         super.onCreate()
         watch = WatchConnection(this, scope, app.watchStore)
-        captureRunner = CaptureRunner(scope, app.db, watch, app.settings, java.io.File(filesDir, "raw"))
+        captureRunner = CaptureRunner(scope, app.db, watch, app.settings, java.io.File(filesDir, "raw"),
+            PhoneTrackRecorder(this, scope)) { on -> usingLocation = on; startForeground(ID, notification(status), foregroundTypes()) }
         agps = AgpsUpdater(this, app.db, watch, scope)
         scope.launch { runCatching { agps.load() } }
         app.settings.watch.value.mac?.let { CompanionLink.observe(this, it) }
@@ -105,7 +106,7 @@ class WatchService : Service() {
                                 // Remembered like a start from the event log, so that start (arriving later) doesn't begin
                                 // a second capture and the workout's end stops this one (audit, 2026-11-12).
                                 val now = System.currentTimeMillis() / 1000
-                                runCatching { captureRunner.start(w.name, 180) }
+                                runCatching { captureRunner.start(w.name, 180, phoneGps = phoneGpsFor(w.name)) }
                                     .onSuccess { autoCaptureStartedAt = now; app.db.meta.set(AUTO_CAPTURE_HANDLED, now.toString()) }
                                     .onFailure { app.db.events.add("warn", "Auto capture did not start: ${it.message}") }
                             }
@@ -247,7 +248,7 @@ class WatchService : Service() {
             if (start && now - last.ts < 60 * 60 && captureRunner.run.value == null && autoCaptureStartedAt != last.ts && !seen) {
                 autoCaptureStartedAt = last.ts
                 app.db.meta.set(AUTO_CAPTURE_HANDLED, last.ts.toString())
-                runCatching { captureRunner.start(name, 180) }
+                runCatching { captureRunner.start(name, 180, phoneGps = phoneGpsFor(name)) }
                     .onSuccess { app.db.events.add("info", "Started a capture for the watch's $name, ${(now - last.ts) / 60} min after it began") }
                     .onFailure { app.db.events.add("warn", "Auto capture did not start: ${it.message}") }
             } else if (!start && autoCaptureStartedAt != null && last.ts > autoCaptureStartedAt!! && captureRunner.run.value != null) {
@@ -277,13 +278,19 @@ class WatchService : Service() {
     @Volatile private var status = "Starting"
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Opening the app starts the service again; the notification keeps the status it already shows.
-        startForeground(ID, notification(status), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+        startForeground(ID, notification(status), foregroundTypes())
         if (intent?.action == FindPhone.STOP) { phoneFeatures.stopFindPhone(); return START_STICKY }
         if (intent?.action != IDLE && KeyStore(this).load() != null && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
             app.settings.watch.value.mac?.let { mac -> scope.launch { watch.connect(mac) } }
         }
         return START_STICKY
     }
+    /** While a capture records the phone's GPS, the service runs as a location service too, so it keeps getting fixes with the screen off. */
+    @Volatile private var usingLocation = false
+    /** A capture the watch started records the phone's GPS too when it's a run or walk and the phone's GPS is on for them. */
+    private suspend fun phoneGpsFor(workout: String) = app.db.meta.get(PHONE_GPS) == "true" && dev.heartline.app.gaitWorkout(workout)
+    private fun foregroundTypes(): Int = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+        (if (usingLocation) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0)
     private fun notification(text: String): Notification {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         return Notification.Builder(this, CHANNEL).setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
@@ -309,6 +316,8 @@ class WatchService : Service() {
     companion object {
         /** meta key: start a capture when a workout is opened on the watch. */
         const val AUTO_CAPTURE = "auto_capture_watch_workouts"
+        /** Runs and walks record the phone's GPS too ("true"). */
+        const val PHONE_GPS = "capture_phone_gps"
         /** The watch workout start (epoch seconds) that already began a capture. */
         const val AUTO_CAPTURE_HANDLED = "auto_capture_handled_start"
         const val IDLE = "dev.heartline.IDLE"

@@ -35,7 +35,9 @@ private fun CaptureSet.ui() = SetUi(start, end, reps, avgHr, peakHr, tempoS,
 internal fun CaptureSession.captureItem(result: CaptureAnalysisUi?, now: Long) = CaptureItemUi(
     id, label, start, elapsed(now), result?.avgHr, result?.sets?.size, result?.load)
 
-internal fun CaptureSession.captureProgress(now: Long, hr: Int?) = CaptureRunUi(label, start, plannedS, hr, elapsed(now), samples, error)
+internal fun CaptureSession.captureProgress(now: Long, hr: Int?, gps: dev.heartline.service.PhoneTrackLive? = null) =
+    CaptureRunUi(label, start, plannedS, hr, elapsed(now), samples, error,
+        gps?.let { GpsLiveUi(it.fixes, it.distanceM, it.paceSPerKm, it.accuracyM, it.laps, it.lastLapS) })
 
 /** Same zone names as synced workouts, so both pages read alike. */
 internal fun zoneName(zone: Int): String = when (zone) { 1 -> "Warm-up"; 2 -> "Fat burn"; 3 -> "Aerobic"; 4 -> "Anaerobic"; else -> "Max" }

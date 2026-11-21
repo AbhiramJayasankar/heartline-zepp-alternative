@@ -22,6 +22,8 @@ internal val CAPTURE_SENSORS = setOf(RawSensor.PPG, RawSensor.ACCEL, RawSensor.G
 class CaptureRunner(
     private val scope: CoroutineScope, private val db: HeartlineDatabase, private val watch: WatchConnection,
     private val settings: AppSettings, private val folder: File,
+    /** Records the phone's GPS for runs and walks; [locationForeground] marks the service as using location while it does. */
+    private val phone: PhoneTrackRecorder? = null, private val locationForeground: (Boolean) -> Unit = {},
 ) {
     val run = MutableStateFlow<CaptureRunUi?>(null)
     @Volatile var active = false
@@ -44,7 +46,7 @@ class CaptureRunner(
                     val lastData = it.files.mapNotNull { name -> captureFile(folder, name).takeIf { file -> file.isFile }?.lastModified()?.div(1000) }.maxOrNull() ?: it.start
                     session = it.availability(lastData, false); active = true; publish()
                     if (it.due(now())) finish("The service restarted after the planned end; recording may be incomplete.", it.start + it.plannedS)
-                    else { save(); if (watch.ready.value) resumeStreams() }
+                    else { save(); if (it.gps) startPhone(); if (watch.ready.value) resumeStreams() }
                 }
                 for (s in stored.filter { it.end != null && (db.meta.get(CAPTURE_RESULT + it.id) == null || db.meta.get(CAPTURE_ENGINE + it.id) != captureEngineKey(db, it).first) }) {
                     try { analyze(s) } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); db.events.add("warn", "Capture ${s.id} needs analysis retry: ${e.message}") }
@@ -89,7 +91,7 @@ class CaptureRunner(
     }
 
     /** [forFriend]: someone else wears the watch; the capture and its time are marked as theirs ([Friends]). */
-    fun start(label: String, minutes: Int, forFriend: Boolean = false) {
+    fun start(label: String, minutes: Int, forFriend: Boolean = false, phoneGps: Boolean = false) {
         require(minutes in 1..720) { "Capture duration must be 1–720 minutes" }
         check(initialized.isCompleted) { "Capture history is still loading; try again shortly" }
         check(!active) { "A workout capture is already running" }
@@ -105,8 +107,9 @@ class CaptureRunner(
             if (hrvYields) kotlinx.coroutines.withTimeoutOrNull(10_000) { watch.raw.first { !it.streaming } }
             ignoredFile = watch.raw.value.file?.name
             session = CaptureSession(UUID.randomUUID().toString(), run.value!!.label, now(), minutes * 60,
-                restoreHr = watch.heartRate.value.streaming).availability(now(), false)
+                restoreHr = watch.heartRate.value.streaming, gps = phoneGps).availability(now(), false)
             save()
+            if (phoneGps) startPhone()
             session?.let { s -> if (forFriend) FriendStore.update(db) { it.with(FriendMark(FriendMark.Kind.CAPTURE, s.id, s.start, s.start + s.plannedS), true) } }
             try { resumeStreams() }
             catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e);
@@ -134,6 +137,7 @@ class CaptureRunner(
     private suspend fun finish(error: String? = null, endAt: Long = now()) {
         val current = session ?: return
         stopping = true
+        stopPhone()
         try {
             // Both commands also clear wanted-stream flags while disconnected, preventing a post-stop restart.
             val failures = ArrayList<String>()
@@ -195,8 +199,28 @@ class CaptureRunner(
             check(!file.exists() || file.delete()) { "Unable to delete recording $name" }
             db.recordings.delete(name)
         }
+        captureFile(folder, phoneTrackName(id)).let { check(!it.exists() || it.delete()) { "Unable to delete the phone track" } }
         db.meta.delete(CAPTURE_RESULT + id); db.meta.delete(CAPTURE_SESSION + id); db.meta.delete(CAPTURE_ENGINE + id)
     } } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); db.events.add("error", "Unable to delete capture: ${e.message}") } } }
+
+    /** Starts the phone's GPS for the session; when it can't, the capture goes on without it and says why. */
+    private suspend fun startPhone() {
+        val s = session ?: return
+        val p = phone ?: return
+        try {
+            folder.mkdirs()
+            locationForeground(true)
+            p.start(captureFile(folder, phoneTrackName(s.id)), s.start)
+        } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e)
+            runCatching { locationForeground(false) }
+            session = s.copy(error = "The phone's GPS didn't start: ${e.message}"); save()
+            db.events.add("warn", "Phone GPS didn't start: ${e.message}")
+        }
+    }
+
+    private fun stopPhone() {
+        if (phone?.recording == true) { phone.stop(); runCatching { locationForeground(false) } }
+    }
 
     private suspend fun save() { session?.let { db.meta.set(CAPTURE_SESSION + it.id, it.json()) } }
     private fun launchTask(block: suspend () -> Unit) = scope.launch {
@@ -208,7 +232,7 @@ class CaptureRunner(
     private fun publish() {
         val s = session ?: return
         val h = watch.heartRate.value
-        run.value = s.captureProgress(now(), h.bpm?.takeIf { h.streaming && now() - (h.ts ?: 0) <= 5 })
+        run.value = s.captureProgress(now(), h.bpm?.takeIf { h.streaming && now() - (h.ts ?: 0) <= 5 }, phone?.live?.value)
     }
     private fun now() = System.currentTimeMillis() / 1000
 }

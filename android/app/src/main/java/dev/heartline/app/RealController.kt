@@ -298,9 +298,10 @@ class RealController(
             ActivityDayUi(date, minutes, minutes.sumOf { it.steps }, active,
                 minutes.count { it.state in setOf(MinuteState.SLEEP_DEEP, MinuteState.SLEEP_LIGHT, MinuteState.SLEEP_REM) },
                 minutes.count { it.state !in setOf(MinuteState.NOT_WORN, MinuteState.CHARGING) }, hr.minOrNull(), hr.takeIf { it.isNotEmpty() }?.average()?.toInt(), hr.maxOrNull(),
-                daily.days.lastOrNull { it.date == date.toString() }?.sleepUi(), workouts.map { workout ->
-                    workout.ui().withWorkoutDetail(details[workout.start], ProfileUi(age = profile.age, maxHr = profile.maxHr,
-                        sex = profile.sex?.name?.lowercase(), restingHr = profile.restingHr ?: dailyRest), stepLengths).copy(friend = f.covers(workout.start))
+                daily.days.lastOrNull { it.date == date.toString() }?.sleepUi(), workouts.map { workout -> val wu = workout.ui()
+                    wu.withWorkoutDetail(details[workout.start], ProfileUi(age = profile.age, maxHr = profile.maxHr,
+                        sex = profile.sex?.name?.lowercase(), restingHr = profile.restingHr ?: dailyRest), stepLengths,
+                        captureTask.phoneTrack(wu.start, wu.start + wu.durationS)).copy(friend = f.covers(workout.start))
                 }, naps = daily.days.lastOrNull { it.date == date.toString() }?.naps.orEmpty()).also { perfLog("activityDay $date", tp) }
         }.flowOn(Dispatchers.Default).shareIn(scope, SharingStarted.WhileSubscribed(15_000), 1)
     }
@@ -802,10 +803,12 @@ class RealController(
     init { refreshBackground() }
 
     // ---- Workout capture ----
-    private val captureTask = CaptureController(scope, db, service, ai) { ensureService() }
+    private val captureTask = CaptureController(scope, db, service, ai, { ensureService() }, File(context.filesDir, "raw"))
     override val captureRun = captureTask.run
     override val captures = captureTask.items
-    override fun startCapture(label: String, minutes: Int, forFriend: Boolean) { if (checkJob?.isActive != true) captureTask.start(label, minutes, forFriend) }
+    override fun startCapture(label: String, minutes: Int, forFriend: Boolean, phoneGps: Boolean) { if (checkJob?.isActive != true) captureTask.start(label, minutes, forFriend, phoneGps) }
+    override val phoneGps = db.meta.observe(dev.heartline.service.WatchService.PHONE_GPS).map { it == "true" }.stateIn(scope, SharingStarted.Eagerly, false)
+    override fun setPhoneGps(enabled: Boolean) { scope.launch { db.meta.set(dev.heartline.service.WatchService.PHONE_GPS, enabled.toString()) } }
     override fun stopCapture() = captureTask.stop()
     override suspend fun captureDetail(id: String): CaptureAnalysisUi? = captureTask.detail(id)
     override fun deleteCapture(id: String) = captureTask.delete(id)

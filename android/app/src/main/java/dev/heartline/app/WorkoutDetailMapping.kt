@@ -4,6 +4,7 @@ import dev.heartline.data.model.RawFetch
 import dev.heartline.protocol.*
 import java.util.Locale
 import kotlin.math.ceil
+import dev.heartline.analytics.withMetres
 import kotlin.math.roundToInt
 
 internal data class StoredWorkoutDetail(
@@ -106,6 +107,24 @@ internal fun downsampleWorkoutSeries(points: List<SeriesPoint>, limit: Int = 600
     return (0 until limit).map { points[(it.toLong() * (points.size - 1) / (limit - 1)).toInt()] }
 }
 
+/**
+ * Laps of a loop in a run or walk's track. Each second's metres come from the phone's track when there is one, else
+ * from the bouts' distances by steps when the watch's track wandered (its passes of the lap point still mark the laps,
+ * but its length doesn't hold), else from the watch's track.
+ */
+private fun workoutLoop(track: List<dev.heartline.analytics.GeoFix>?, phoneMetres: DoubleArray?, wandered: Boolean,
+                        gait: dev.heartline.analytics.GaitSummary?, d: WorkoutDetailsExt?, hr: List<TrackPoint>, n: Int): dev.heartline.analytics.LapSummary? {
+    if (track == null || track.size < 60 || gait == null || d == null || n <= 0) return null
+    val line = dev.heartline.analytics.findLapLine(track) ?: return null
+    val metres = phoneMetres ?: if (wandered) DoubleArray(n).also { m ->
+        for (b in gait.bouts) { val per = (b.distanceM ?: continue) / b.seconds; for (t in b.start until minOf(n, b.end)) m[t] = per }
+    } else dev.heartline.analytics.trackMetresPerSecond(track, n)
+    val cadence = dev.heartline.analytics.perSecond(d.cadence.map { it.t to it.value }, n, 3)
+    val beats = dev.heartline.analytics.perSecond(hr.filter { it.hr in 1..254 }.map { it.t to it.hr.toDouble() }, n, 30)
+        .map { if (it.isFinite()) it.roundToInt() else 0 }.toIntArray()
+    return dev.heartline.analytics.lapSummary(line, n, metres, dev.heartline.analytics.gaitFromCadence(cadence), cadence, beats, gait.bouts)
+}
+
 internal fun List<RoutePoint>.geoFixes() = map { dev.heartline.analytics.GeoFix(it.t, it.lat, it.lon) }
 
 /** The workout's gait from its stored details; null for workouts that aren't on foot or lack the cadence. */
@@ -127,8 +146,14 @@ internal fun learnedStepLengths(all: Map<Long, StoredWorkoutDetail>): dev.heartl
         w.gait(type, d.hr, (d.cadence.maxOfOrNull { it.t } ?: 0) + 1)?.let { it to w.route.geoFixes() }
     })
 
+/**
+ * The workout with everything decoded from its stored detail. [phone] is the phone's GPS track from a capture that ran
+ * alongside ([RoutePoint.t] from the workout's start): when it covers the workout, its route, distance and laps are used,
+ * as it keeps to the path where the watch's can wander.
+ */
 internal fun WorkoutUi.withWorkoutDetail(raw: StoredWorkoutDetail?, profile: ProfileUi,
-                                         steps: dev.heartline.analytics.StepLengths = dev.heartline.analytics.StepLengths()): WorkoutUi {
+                                         steps: dev.heartline.analytics.StepLengths = dev.heartline.analytics.StepLengths(),
+                                         phone: List<RoutePoint> = emptyList()): WorkoutUi {
     val s = raw?.summary
     val d = raw?.details
     val hr = d?.hr?.takeIf { it.isNotEmpty() } ?: track.map { TrackPoint((it.ts - start).toInt(), it.bpm) }
@@ -198,25 +223,33 @@ internal fun WorkoutUi.withWorkoutDetail(raw: StoredWorkoutDetail?, profile: Pro
     // A GPS track that wandered: the watch's distance (the track's length), pace, best pace, top speed and kilometre
     // marks all follow the wander, so distance and pace come from your steps instead (or, before step lengths are
     // learnt, the watch's own speed).
-    val check = raw?.gpsCheck(type, durationS, distanceM, this.steps ?: s?.steps, steps)
+    val phoneTrack = phone.takeIf { p -> p.size >= 60 && p.last().t - p.first().t >= 0.8 * durationS }?.geoFixes()
+    val phoneMetres = phoneTrack?.let { dev.heartline.analytics.trackMetresPerSecond(it, durationS) }
+    val phoneM = phoneMetres?.filter { it.isFinite() }?.sum()?.takeIf { it >= 100 }
+    val check = if (phoneM != null) null else raw?.gpsCheck(type, durationS, distanceM, this.steps ?: s?.steps, steps)
     val gps = check?.let { g -> GpsCheckUi(g.wander, g.ratio, distanceM, g.distanceM.roundToInt(), g.fromSteps, steps.walkM, steps.runM) }
-    // With the distance from the steps, each run and walk has its distance from its own steps too.
-    val gait = check?.gait ?: watchGait
+    // With the distance from the steps (or the phone), each run and walk has its distance from them too.
+    val gait = if (phoneMetres != null && phoneM != null) watchGait?.withMetres(phoneMetres)
+        else check?.gait ?: watchGait
+    // The distance shown in place of the watch's: the phone's, else the steps' when the watch's track wandered.
+    val fixedM = phoneM ?: gps?.distanceM?.toDouble()
     val active = s?.activeS ?: durationS
-    return copy(route = raw?.route ?: route, detail = WorkoutDetailUi(
+    return copy(detail = WorkoutDetailUi(
         activeS = s?.activeS,
-        avgPaceSPerKm = if (gps != null) active * 1000.0 / gps.distanceM else s?.avgPaceSPerKm?.toDouble() ?: s?.avgPaceSPerM?.times(1000),
-        bestPaceSPerKm = if (gps != null) null else s?.maxPaceSPerM?.times(1000),
-        avgSpeedKmh = if (gps != null) gps.distanceM * 3.6 / active else s?.avgSpeedMs.positive()?.times(3.6),
-        maxSpeedKmh = if (gps != null) null else s?.maxSpeedMs.positive()?.times(3.6), avgCadence = s?.avgCadence, maxCadence = s?.maxCadence,
+        avgPaceSPerKm = if (fixedM != null) active * 1000.0 / fixedM else s?.avgPaceSPerKm?.toDouble() ?: s?.avgPaceSPerM?.times(1000),
+        bestPaceSPerKm = if (fixedM != null) null else s?.maxPaceSPerM?.times(1000),
+        avgSpeedKmh = if (fixedM != null) fixedM * 3.6 / active else s?.avgSpeedMs.positive()?.times(3.6),
+        maxSpeedKmh = if (fixedM != null) null else s?.maxSpeedMs.positive()?.times(3.6), avgCadence = s?.avgCadence, maxCadence = s?.maxCadence,
         // The watch's stride is its distance over the steps; with the distance from the steps, so is this.
-        avgStrideCm = if (gps != null) (this.steps ?: s?.steps)?.takeIf { it > 0 }?.let { (gps.distanceM * 100.0 / it).roundToInt() } else s?.avgStrideCm, ascentM = s?.ascentM, descentM = s?.descentM,
+        avgStrideCm = if (fixedM != null) (this.steps ?: s?.steps)?.takeIf { it > 0 }?.let { (fixedM * 100.0 / it).roundToInt() } else s?.avgStrideCm, ascentM = s?.ascentM, descentM = s?.descentM,
         minAltM = s?.minAltitudeM, maxAltM = s?.maxAltitudeM,
         minHr = hr.filter { it.hr in 1..254 }.minOfOrNull { it.hr }, load = hr.takeIf { it.isNotEmpty() }?.let { h -> profile.restingHr?.let { banisterLoad(h, durationS, workoutMaxHr(profile), it.toDouble(), profile.sex, d?.pauses.orEmpty(), d?.resumes.orEmpty()) } },
         zones = zones, speedKmh = d?.speedMs.orEmpty().series(3.6), cadence = d?.cadence.orEmpty().series(),
         altitude = d?.altitudeM.orEmpty().series(), extras = extras, gait = gait, gps = gps,
-        laps = if (gps != null) emptyList() else kilometreLaps(d?.kmSplits.orEmpty(), hr, durationS, distanceM),
-    ))
+        laps = if (fixedM != null) emptyList() else kilometreLaps(d?.kmSplits.orEmpty(), hr, durationS, distanceM),
+        loop = workoutLoop(phoneTrack ?: raw?.route?.geoFixes(), phoneMetres, check != null, gait, d, hr, durationS),
+        phoneM = phoneM?.roundToInt(),
+    ), route = if (phoneTrack != null) phone else raw?.route ?: route)
 }
 
 /** Workouts on foot, where the cadence tells running from walking. */
