@@ -19,7 +19,7 @@
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
-> **Status: 0.8.0.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
+> **Status: 0.9.0.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
 > Other Huami/Zepp watches of the same generation (GTR 2, GTS 2, GTS 2e) speak a similar protocol but are untested.
 
 ## Highlights
@@ -149,6 +149,10 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
   and heart rate, and a tap opens its runs and walks one by one. Above them: the fastest and slowest lap, how even they
   were, whether you slowed, and how far each heartbeat carried you. On watch workouts without the phone, laps come from
   the watch's track; where it wandered, their distances come from your steps (on a 745 m lake loop, 677 to 791 m).
+  A run capture without the phone's GPS takes its route, distance and laps from the watch workouts inside it, and
+  links to each; each of those links back to the capture.
+- **A full-screen map**: tap Full screen (or double-tap the map) for a map you can pinch, pan and zoom, with a chip per
+  lap that fades the rest of the route and fits the view to that lap, with its figures underneath.
 - **GPS assist (A-GPS)**: sends the week's satellite almanacs and orbit predictions to the watch, so its GPS gets a
   fix in seconds. Needs a Zepp sign-in (the data is only served to Zepp accounts), done in your phone's browser, so Google
   and Apple accounts work in a tap; updates every 3 days.
@@ -163,6 +167,8 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
   silence them from the watch.
 - **Watch settings**: all-day heart rate and stress monitoring, lift-to-wake (scheduled), do not disturb
   (scheduled), move reminders, high heart rate alerts, disconnect alert, language, wrist, step goal and more.
+- **Let Zepp connect for a while**: on the Watch page, Heartline steps aside for 15 minutes so the Zepp app can sync
+  or change a setting, then takes the watch back by itself (or tap Reconnect now).
 - **Watch app list**: choose and order the apps, and what goes in the More screen.
 - **Alarms, calendar reminders, weather** for where your phone is (Open-Meteo, no API key), vibration counts, set
   clock, find watch.

@@ -49,6 +49,10 @@ interface HeartlineController {
 
     fun connect()
     fun disconnect()
+    /** When a pause of the watch link (so Zepp can connect) ends, epoch ms; null when not paused. */
+    val linkPausedUntil: StateFlow<Long?>
+    /** Lets go of the watch for [minutes] so Zepp can connect, then reconnects; null ends a pause now. */
+    fun pauseLink(minutes: Int?)
     fun setLiveHr(on: Boolean)
     /** [forFriend]: someone else is wearing the watch; the check is marked as theirs and kept out of your figures. */
     fun startCheck(seconds: Int, forFriend: Boolean = false)
@@ -284,7 +288,8 @@ data class CaptureRunUi(val label: String, val startedAt: Long, val plannedS: In
 /** The phone's GPS so far in a capture: [fixes] good fixes, distance, pace over the last 30 s, the latest fix's accuracy, laps. */
 data class GpsLiveUi(val fixes: Int, val distanceM: Double, val paceSPerKm: Double?, val accuracyM: Float?, val laps: Int, val lastLapS: Double?)
 data class CaptureItemUi(val id: String, val label: String, val start: Long, val durationS: Int, val avgHr: Int?, val sets: Int?, val load: Double?,
-                         /** Recorded while a friend wore the watch. */ val friend: Boolean = false)
+                         /** Recorded while a friend wore the watch. */ val friend: Boolean = false,
+                         /** A run or walk rather than a gym session ([captureOnFoot]). */ val onFoot: Boolean = false)
 /** One repetition. [t] is seconds from the capture start; [slowS] + [fastS] = [durationS]; [arcDeg] is wrist rotation. */
 data class RepUi(val t: Double, val durationS: Double, val slowS: Double, val fastS: Double, val arcDeg: Double)
 /**
@@ -346,9 +351,16 @@ data class CaptureAnalysisUi(
     val logMatched: Int? = null, val logTotal: Int? = null, val unlogged: List<SetUi> = emptyList(),
     /** Seconds at each heart rate, and the maximum and sex the load was scored with (see [dev.heartline.analytics.captureLoad]). */
     val hrSeconds: Map<Int, Int> = emptyMap(), val loadMaxHr: Int? = null, val loadSex: String? = null,
-    /** The phone's GPS track when it recorded alongside, [RoutePoint.t] in seconds from the capture's start. */
+    /** The GPS track over the capture, [RoutePoint.t] in seconds from its start: the phone's, else the watch workouts'. */
     val route: List<RoutePoint> = emptyList(),
+    /** Metres each second over the capture when the route's own length doesn't hold (a watch track that wandered: steps). */
+    val metres: DoubleArray? = null,
+    /** Where [route] came from. */
+    val routeSource: RouteSource = RouteSource.PHONE,
 )
+
+/** Where a session's route and distance came from: the phone's GPS, the watch's, or the watch's passes with distances by steps. */
+enum class RouteSource { PHONE, WATCH, WATCH_STEPS }
 
 data class PlaceUi(val name: String, val region: String?, val lat: Double, val lon: Double)
 data class AlexaToolUi(val name: String, val group: String, val description: String, val parameters: String)

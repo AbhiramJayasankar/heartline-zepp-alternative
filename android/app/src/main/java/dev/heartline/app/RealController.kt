@@ -331,7 +331,8 @@ class RealController(
         if (startupHandled) return
         suppressAutomaticConnection = idle
         if (context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) return
-        if (idle || keys.load() != null) { startupHandled = true; launchAction { ensureService(connect = !idle) } }
+        // A pause for Zepp holds through the app opening: the service starts, but doesn't connect until it ends.
+        if (idle || keys.load() != null) { startupHandled = true; launchAction { ensureService(connect = !idle && !dev.heartline.service.LinkPause.active(context)) } }
     }
     private suspend fun ensureService(connect: Boolean = false): WatchService {
         check(context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) { "Allow Bluetooth access first" }
@@ -349,6 +350,12 @@ class RealController(
         launchAction { check(keys.load() != null && settings.watch.value.mac != null) { "Save the watch key and address first" }; ensureService(connect = true) }
     }
     override fun disconnect() { suppressAutomaticConnection = true; cancelCheck(); action { it.disconnect() } }
+    override val linkPausedUntil: StateFlow<Long?> = dev.heartline.service.LinkPause.until(context)
+    override fun pauseLink(minutes: Int?) {
+        if (minutes != null) cancelCheck()
+        suppressAutomaticConnection = minutes != null; startupHandled = true
+        launchAction { ensureService().pauseLink(minutes) }
+    }
     override fun setLiveHr(on: Boolean) { if (!captureTask.running || on) action { if (!captureTask.running || on) it.setLiveHr(on) } }
     override fun setRawSensors(sensors: Set<Sensor>, streaming: Boolean) {
         if (checkJob?.isActive == true || captureTask.running) return
@@ -810,7 +817,13 @@ class RealController(
     override val phoneGps = db.meta.observe(dev.heartline.service.WatchService.PHONE_GPS).map { it == "true" }.stateIn(scope, SharingStarted.Eagerly, false)
     override fun setPhoneGps(enabled: Boolean) { scope.launch { db.meta.set(dev.heartline.service.WatchService.PHONE_GPS, enabled.toString()) } }
     override fun stopCapture() = captureTask.stop()
-    override suspend fun captureDetail(id: String): CaptureAnalysisUi? = captureTask.detail(id)
+    override suspend fun captureDetail(id: String): CaptureAnalysisUi? = captureTask.detail(id)?.let { a ->
+        if (a.route.isNotEmpty()) return@let a
+        // No phone track: the watch workouts within the capture lend it their route, distance and laps.
+        val day = java.time.Instant.ofEpochSecond(a.start).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+        val ws = runCatching { withTimeoutOrNull(8000) { activityDay(day).first().workouts + activityDay(day.plusDays(1)).first().workouts } }.getOrNull().orEmpty()
+        a.withWatchTracks(ws).withWatchActivities(ws)
+    }
     override fun deleteCapture(id: String) = captureTask.delete(id)
     override suspend fun captureCoach(id: String, facts: String, refresh: Boolean): CoachUi = captureTask.coach(id, facts, refresh)
     override suspend fun savedCaptureCoach(id: String): CoachUi? = captureTask.savedCoach(id)
@@ -903,7 +916,7 @@ class RealController(
     fun forwardNotification(title: String, body: String, kind: NotificationKind, app: String, icon: Int = dev.heartline.protocol.WatchIcon.APP) {
         scope.launch {
             notifications.enqueue(listOf(dev.heartline.service.WatchNotification(title, body, kind, app, icon)))
-            if (service.value == null && !suppressAutomaticConnection && settings.watch.value.mac != null && keys.load() != null) {
+            if (service.value == null && !suppressAutomaticConnection && !dev.heartline.service.LinkPause.active(context) && settings.watch.value.mac != null && keys.load() != null) {
                 try { ensureService(connect = true) }
                 catch (e: Exception) { rethrowIfCancelled(e); db.events.add("warn", "Phone notification queued; couldn't start watch service: ${e.message}") }
             }

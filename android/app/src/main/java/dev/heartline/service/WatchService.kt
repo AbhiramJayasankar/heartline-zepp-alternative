@@ -35,6 +35,8 @@ class WatchService : Service() {
     override fun onCreate() {
         super.onCreate()
         watch = WatchConnection(this, scope, app.watchStore)
+        // A pause that outlived the service (restarted by the system) still ends on time.
+        LinkPause.until(this).value?.let { until -> pauseJob = scope.launch { resumeAt(until) } }
         captureRunner = CaptureRunner(scope, app.db, watch, app.settings, java.io.File(filesDir, "raw"),
             PhoneTrackRecorder(this, scope)) { on -> usingLocation = on; startForeground(ID, notification(status), foregroundTypes()) }
         agps = AgpsUpdater(this, app.db, watch, scope)
@@ -280,10 +282,40 @@ class WatchService : Service() {
         // Opening the app starts the service again; the notification keeps the status it already shows.
         startForeground(ID, notification(status), foregroundTypes())
         if (intent?.action == FindPhone.STOP) { phoneFeatures.stopFindPhone(); return START_STICKY }
-        if (intent?.action != IDLE && KeyStore(this).load() != null && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+        if (intent?.action != IDLE && !LinkPause.active(this) && KeyStore(this).load() != null && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
             app.settings.watch.value.mac?.let { mac -> scope.launch { watch.connect(mac) } }
         }
         return START_STICKY
+    }
+    private var pauseJob: kotlinx.coroutines.Job? = null
+    /**
+     * Lets go of the watch for [minutes] so Zepp can connect to it, then takes it back; [minutes] null ends a pause now.
+     * A capture or heart check that is recording is stopped first, as it needs the link.
+     */
+    fun pauseLink(minutes: Int?) {
+        pauseJob?.cancel()
+        val mac = app.settings.watch.value.mac
+        if (minutes == null) {
+            LinkPause.set(this, null)
+            if (mac != null) watch.connect(mac)
+            return
+        }
+        val until = System.currentTimeMillis() + minutes * 60_000L
+        LinkPause.set(this, until)
+        pauseJob = scope.launch {
+            if (captureRunner.active) captureRunner.stop()
+            OvernightHrv.stopRunning()
+            watch.disconnect()
+            app.db.events.add("info", "Watch link paused for $minutes min so another app can connect")
+            resumeAt(until)
+        }
+    }
+    /** Ends a pause at [until] (epoch ms) and reconnects. */
+    private suspend fun resumeAt(until: Long) {
+        delay((until - System.currentTimeMillis()).coerceAtLeast(0))
+        LinkPause.set(this, null)
+        app.db.events.add("info", "Watch link pause ended; reconnecting")
+        app.settings.watch.value.mac?.let { watch.connect(it) }
     }
     /** While a capture records the phone's GPS, the service runs as a location service too, so it keeps getting fixes with the screen off. */
     @Volatile private var usingLocation = false

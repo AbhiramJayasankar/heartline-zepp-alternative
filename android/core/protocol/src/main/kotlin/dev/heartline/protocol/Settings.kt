@@ -93,6 +93,8 @@ fun settingDefault(key: String): Any? = when (key) {
     "inactivity_quiet_start" -> "12:00"; "inactivity_quiet_end" -> "14:00"
     "disconnect_alert" -> "off"; "disconnect_start" -> "08:00"; "disconnect_end" -> "22:00"
     "language" -> "auto"
+    // Zepp's own default, and what Heartline's step rings use until a goal is set.
+    "step_goal" -> 8000
     else -> null
 }
 

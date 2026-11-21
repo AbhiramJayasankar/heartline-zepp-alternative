@@ -169,3 +169,12 @@ private fun LapRow(lap: Lap, name: String, longest: Double, fastest: Boolean) {
     }
     HorizontalDivider(color = c.line)
 }
+
+/** The laps for the map's lap picker: the start, each lap and the end, with a line of each one's figures. */
+internal fun LapSummary.mapLaps(): List<dev.heartline.ui.components.MapLap> =
+    (listOfNotNull(lead) + laps + listOfNotNull(tail)).map { l ->
+        val name = when { l === lead -> "Start"; l === tail -> "End"; else -> "Lap ${l.index}" }
+        dev.heartline.ui.components.MapLap(name, l.start, l.end, listOfNotNull("$name: ${clock(l.seconds)}", km(l.distanceM),
+            l.paceSPerKm?.let { "${pace(it)} /km" }, l.runS.takeIf { it >= 20 }?.let { "ran ${clock(it)}" },
+            l.walkS.takeIf { it >= 20 }?.let { "walked ${clock(it)}" }, l.avgHr?.let { "$it bpm" }).joinToString(", "))
+    }

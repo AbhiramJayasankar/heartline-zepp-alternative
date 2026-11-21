@@ -113,9 +113,28 @@ fun WatchHubScreen(controller: HeartlineController, nav: Navigator) {
                 }
                 conn.error?.let { Gap(10); Text(it, style = HL.type.small, color = c.pulse) }
                 Gap(14)
-                PillButton(when { connected -> "Disconnect"; busy -> "Connecting…"; else -> "Connect" },
-                    { if (connected) controller.disconnect() else controller.connect() }, Modifier.fillMaxWidth(),
-                    style = if (connected) ButtonStyle.QUIET else ButtonStyle.PRIMARY, enabled = !busy)
+                val pausedUntil by controller.linkPausedUntil.collectAsStateWithLifecycle()
+                val paused = pausedUntil
+                if (paused == null) {
+                    PillButton(when { connected -> "Disconnect"; busy -> "Connecting…"; else -> "Connect" },
+                        { if (connected) controller.disconnect() else controller.connect() }, Modifier.fillMaxWidth(),
+                        style = if (connected) ButtonStyle.QUIET else ButtonStyle.PRIMARY, enabled = !busy)
+                    Gap(8)
+                    PillButton("Let Zepp connect for 15 min", { controller.pauseLink(15) }, Modifier.fillMaxWidth(), style = ButtonStyle.QUIET)
+                    Gap(6)
+                    MutedText("Heartline lets go of the watch so Zepp can sync or change a setting, then takes it back by itself. A capture or heart check that is recording stops.")
+                } else {
+                    Text("Paused so Zepp can connect, until ${dev.heartline.ui.components.epochClock(paused / 1000.0)}", style = HL.type.bodyStrong, color = c.ink)
+                    Gap(4)
+                    MutedText("Open Zepp now; it finds the watch within a minute. Close Zepp before the pause ends, or the two apps take turns with the watch.")
+                    Gap(10)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        PillButton("Reconnect now", { controller.pauseLink(null) }, Modifier.weight(1f))
+                        PillButton("15 min more", {
+                            controller.pauseLink(((paused - System.currentTimeMillis()) / 60_000L).toInt().coerceAtLeast(0) + 15)
+                        }, Modifier.weight(1f), style = ButtonStyle.QUIET)
+                    }
+                }
             }
             Gap(10)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

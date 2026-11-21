@@ -286,6 +286,8 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override fun startCapture(label: String, minutes: Int, forFriend: Boolean, phoneGps: Boolean) {
         captureRun.value = CaptureRunUi(label, now(), minutes * 60, 92, 0, 0, gps = if (phoneGps) GpsLiveUi(312, 1184.0, 402.0, 4f, 1, 441.0) else null)
     }
+    override val linkPausedUntil = MutableStateFlow<Long?>(null)
+    override fun pauseLink(minutes: Int?) { linkPausedUntil.value = minutes?.let { System.currentTimeMillis() + it * 60_000L } }
     override val phoneGps = MutableStateFlow(true)
     override fun setPhoneGps(enabled: Boolean) { phoneGps.value = enabled }
     override fun stopCapture() { captureRun.value = null }

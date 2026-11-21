@@ -44,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -360,13 +361,29 @@ private fun SettingRow(s: WatchSettingUi, enabled: Boolean, onChange: (Any) -> U
                 )
             }
             else -> {
-                var text by remember(s.value) { mutableStateOf(s.value?.toString() ?: "") }
+                // A number goes to the watch once, when you press Done or leave the field: sending each keystroke
+                // that happened to be in range wrote 1,000 to the watch on the way to typing 10,000.
+                val current = (s.value as? Number)?.toInt()
+                var text by remember(current) { mutableStateOf(current?.toString() ?: "") }
+                val typed = text.toIntOrNull()
+                val inRange = typed != null && (s.min == null || typed >= s.min) && (s.max == null || typed <= s.max)
+                val focus = androidx.compose.ui.platform.LocalFocusManager.current
+                fun commit() { if (inRange && typed != current) onChange(typed!!) else if (!inRange) text = current?.toString() ?: "" }
+                var focused by remember { mutableStateOf(false) }
                 OutlinedTextField(
-                    text, { text = it.filter(Char::isDigit).take((s.max ?: 999).toString().length); text.toIntOrNull()?.let { v -> if ((s.min == null || v >= s.min) && (s.max == null || v <= s.max)) onChange(v) } },
-                    singleLine = true, enabled = enabled, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.width(96.dp),
+                    text, { text = it.filter(Char::isDigit).take((s.max ?: 999).toString().length) },
+                    singleLine = true, enabled = enabled, isError = text.isNotEmpty() && !inRange,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { commit(); focus.clearFocus() }),
+                    modifier = Modifier.width(if ((s.max ?: 0) >= 10000) 112.dp else 96.dp).onFocusChanged { f -> if (focused && !f.isFocused) commit(); focused = f.isFocused },
                 )
             }
         }
+    }
+    if (s.type == "int" && s.min != null && s.max != null) {
+        val typedHint = when (s.key) { "step_goal" -> "Steps a day, ${"%,d".format(s.min)} to ${"%,d".format(s.max)}. Press Done to send it to the watch."
+            else -> "${s.min} to ${s.max}. Press Done to send it to the watch." }
+        MutedText(typedHint, Modifier.padding(bottom = 10.dp))
     }
     HorizontalDivider(color = c.line)
 }

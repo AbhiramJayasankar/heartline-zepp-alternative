@@ -290,3 +290,58 @@ internal fun kilometreLaps(splits: List<WorkoutSplit>, hr: List<TrackPoint>, dur
         laps += LapUi(splits.size + 1, restS, rest, avgHr(splits.last().t, durationS), restS * 1000.0 / rest)
     return laps
 }
+
+/**
+ * Metres each second of a watch workout as its page shows them: along the phone's track when one was used, by steps
+ * when the watch's track wandered, else along the watch's track. Null without a route.
+ */
+internal fun WorkoutUi.metresPerSecond(): DoubleArray? {
+    if (route.size < 60) return null
+    val d = detail
+    val wandered = d?.phoneM == null && d?.gps != null
+    val g = d?.gait
+    // Distance from steps: within the workout, a second in no walk or run is standing, so it covers nothing.
+    if (wandered && g != null && d.gps?.fromSteps == true) return DoubleArray(durationS) { 0.0 }.also { m ->
+        for (b in g.bouts) { val per = (b.distanceM ?: continue) / b.seconds; for (t in b.start until minOf(durationS, b.end)) m[t] = per }
+    }
+    if (wandered) return null
+    return dev.heartline.analytics.trackMetresPerSecond(route.geoFixes(), durationS)
+}
+
+/**
+ * A capture with the route and distance of the watch workouts within it, when it has no phone track of its own: each
+ * workout's track and metres placed at its time in the capture.
+ */
+/**
+ * The watch workouts within a capture as they stand now, clipped to it, with their corrected distances: a capture is
+ * often analysed before the watch hands over its workouts (it holds them back while one is running), so the list it
+ * stored can miss some or carry a wandered GPS distance.
+ */
+internal fun CaptureAnalysisUi.withWatchActivities(workouts: List<WorkoutUi>): CaptureAnalysisUi {
+    val end = start + durationS
+    val found = workouts.filter { it.start < end && it.start + it.durationS > start }.sortedBy { it.start }.map { w ->
+        CaptureActivityUi((w.start - start).toDouble().coerceAtLeast(0.0), (w.start + w.durationS - start).toDouble().coerceAtMost(durationS.toDouble()),
+            w.type, w.durationS, w.detail?.phoneM ?: w.detail?.gps?.distanceM ?: w.distanceM, w.steps, w.calories, w.avgHr, w.maxHr)
+    }
+    return if (found.isEmpty()) this else copy(activities = found)
+}
+
+internal fun CaptureAnalysisUi.withWatchTracks(workouts: List<WorkoutUi>): CaptureAnalysisUi {
+    if (route.isNotEmpty()) return this
+    val n = durationS
+    val metres = DoubleArray(n) { Double.NaN }
+    val points = ArrayList<RoutePoint>()
+    var steps = false; var phone = false; var any = false
+    for (w in workouts.sortedBy { it.start }) {
+        if (w.start >= start + n || w.start + w.durationS <= start) continue
+        val m = w.metresPerSecond() ?: continue
+        val off = (w.start - start).toInt()
+        for (t in m.indices) { val ct = t + off; if (ct in 0 until n && m[t].isFinite()) metres[ct] = m[t] }
+        points += w.route.map { it.copy(t = it.t + off) }.filter { it.t in 0 until n }
+        any = true
+        if (w.detail?.phoneM != null) phone = true else if (w.detail?.gps != null) steps = true
+    }
+    if (!any || points.size < 60) return this
+    return copy(route = points.sortedBy { it.t }.distinctBy { it.t }, metres = metres,
+        routeSource = when { phone && !steps -> RouteSource.PHONE; steps -> RouteSource.WATCH_STEPS; else -> RouteSource.WATCH })
+}

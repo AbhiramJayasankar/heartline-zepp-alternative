@@ -35,7 +35,7 @@ private fun captureSeconds(a: CaptureAnalysisUi): CaptureSeconds {
 internal fun CaptureAnalysisUi.track(): List<GeoFix> = route.map { GeoFix(it.t, it.lat, it.lon) }
 
 /** Metres each second from the phone's GPS, or null without a track. */
-internal fun CaptureAnalysisUi.phoneMetres(): DoubleArray? = route.takeIf { it.size >= 60 }?.let { trackMetresPerSecond(track(), durationS) }
+internal fun CaptureAnalysisUi.phoneMetres(): DoubleArray? = metres ?: route.takeIf { it.size >= 60 }?.let { trackMetresPerSecond(track(), durationS) }
 
 /**
  * The capture's running and walking, from its motion segments (the wrist's own step rate and how hard it moved) and its
@@ -58,6 +58,9 @@ fun captureLaps(a: CaptureAnalysisUi, g: GaitSummary?): LapSummary? {
     val s = captureSeconds(a)
     return lapSummary(line, a.durationS, metres, s.kind, s.cadence, s.hr, g?.bouts)
 }
+
+/** Seconds of the capture its track covers (the whole capture without one). */
+fun captureCoveredS(a: CaptureAnalysisUi): Int = a.phoneMetres()?.count { it.isFinite() }?.takeIf { it > 0 } ?: a.durationS
 
 /** How far the phone's GPS says the capture went, or null without a track. */
 fun capturePhoneDistanceM(a: CaptureAnalysisUi): Double? = a.phoneMetres()?.filter { it.isFinite() }?.sum()?.takeIf { it > 0 }
