@@ -24,12 +24,22 @@ fun findLapLine(track: List<GeoFix>, minLapM: Double = 250.0): LapLine? =
 
 private val LAP_RADII = listOf(20.0, 30.0, 45.0)
 
+/** The longest a lap's track may run, against the median lap, when it went round the same loop: GPS wander adds this. */
+private const val LONG_LAP = 1.6
+
 fun findLapLine(track: List<GeoFix>, radiusM: Double, minLapM: Double): LapLine? {
     val p = smoothTrack(track)
     if (p.size < 60) return null
     val s = pathLengths(p)
     if (s.last() < 2 * minLapM) return null
-    val heading = DoubleArray(p.size) { i -> bearing(p[max(0, i - 5)], p[min(p.lastIndex, i + 5)]) }
+    // The way you came: from 20 m back along the track. Over a few seconds instead, a stop at the lap point (21 Nov
+    // 2026, ending the workout there) gives the GPS jitter's direction, and the pass is lost.
+    val heading = DoubleArray(p.size)
+    var back = 0
+    for (i in p.indices) {
+        while (back + 1 < i && s[back + 1] <= s[i] - 20) back++
+        heading[i] = if (back < i && s[i] - s[back] >= 10) bearing(p[back], p[i]) else bearing(p[max(0, i - 5)], p[min(p.lastIndex, i + 5)])
+    }
     var best: Pair<Int, List<Pass>>? = null
     var next = 0.0
     for (c in p.indices) {
@@ -39,29 +49,41 @@ fun findLapLine(track: List<GeoFix>, radiusM: Double, minLapM: Double): LapLine?
         if (passes.size < 3 || passes.size <= (best?.second?.size ?: 0)) continue
         val laps = passes.zipWithNext { a, b -> b.at - a.at }
         val median = laps.sorted()[laps.size / 2]
-        if (median < minLapM || laps.any { it < 0.75 * median || it > 1.25 * median }) continue
+        if (median < minLapM || laps.any { it < 0.75 * median || it > LONG_LAP * median }) continue
         // Each lap goes out from the point and back: a walk out and home along a different street is no lap.
         val reach = passes.zipWithNext { a, b -> p.indices.filter { s[it] > a.at && s[it] < b.at }.maxOfOrNull { metresBetween(p[it], p[c]) } ?: 0.0 }
         if (reach.any { it < 100 }) continue
+        // A lap whose track is a quarter longer than the rest is a track that wandered (21 Nov 2026: a walked lap traced
+        // 1,278 m where the others traced 820 to 883) when it went as far round as the others did, in no more than 2.5
+        // times their time (a walked lap among run ones takes up to twice as long); otherwise it's no lap (one that
+        // took 31 minutes held a 7-minute gap in the track and a long stop).
+        val times = passes.zipWithNext { a, b -> b.t - a.t }
+        val usual = laps.indices.filter { laps[it] <= 1.25 * median }
+        val usualReach = usual.map { reach[it] }.sorted().let { r -> r.getOrNull(r.size / 2) } ?: continue
+        val usualTime = usual.map { times[it] }.sorted().let { r -> r[r.size / 2] }
+        if (laps.indices.any { laps[it] > 1.25 * median && (abs(reach[it] - usualReach) > 0.2 * usualReach || times[it] > 2.5 * usualTime) }) continue
         best = c to passes
     }
     val (c, found) = best ?: return null
     val loop = found.zipWithNext { x, y -> y.at - x.at }.sorted().let { it[it.size / 2] }
-    val passes = fillMissed(p, s, heading, c, found, loop)
+    val lapS = found.zipWithNext { x, y -> y.t - x.t }.sorted().let { it[it.size / 2] }
+    val passes = fillMissed(p, s, heading, c, found, loop, lapS)
     return LapLine(p[c].lat, p[c].lon, passes.map { it.t }, loop)
 }
 
 /**
- * Passes a wandering track missed: wherever a lap (or what follows the last pass) runs to 1.4 loops or more, the track's
- * closest approach to the point about a loop on (0.7 to 1.3 loops), going the same way, within 80 m.
+ * Passes a wandering track missed: wherever a lap (or what follows the last pass) runs to 1.4 loops or more and took
+ * 1.6 times the usual lap time [lapS] or more (a lap that only wandered takes no longer), the track's closest approach
+ * to the point about a loop on (0.7 to 1.3 loops), going the same way, within 80 m.
  */
-private fun fillMissed(p: List<GeoFix>, s: DoubleArray, heading: DoubleArray, c: Int, passes: List<Pass>, loop: Double): List<Pass> {
+private fun fillMissed(p: List<GeoFix>, s: DoubleArray, heading: DoubleArray, c: Int, passes: List<Pass>, loop: Double, lapS: Double): List<Pass> {
     val out = ArrayList<Pass>()
     val ends = passes.drop(1).map { it.at } + s.last()
+    val endT = passes.drop(1).map { it.t } + p.last().t.toDouble()
     for ((k, pass) in passes.withIndex()) {
         out += pass
         var from = pass
-        while (ends[k] - from.at >= 1.4 * loop) {
+        while (ends[k] - from.at >= 1.4 * loop && endT[k] - from.t >= 1.6 * lapS) {
             val window = p.indices.filter { s[it] - from.at in 0.7 * loop..1.3 * loop && s[it] < ends[k] }
             val i = window.minByOrNull { metresBetween(p[it], p[c]) } ?: break
             if (metresBetween(p[i], p[c]) > 80 || abs(angleBetween(heading[i], heading[c])) > 60) break
@@ -70,7 +92,10 @@ private fun fillMissed(p: List<GeoFix>, s: DoubleArray, heading: DoubleArray, c:
                 val (f, d) = closest(p[q], p[q + 1], p[c])
                 if (d < bestD) { bestD = d; fill = Pass(p[q].t + f * (p[q + 1].t - p[q].t), s[q] + f * (s[q + 1] - s[q])) }
             }
-            out += fill!!; from = fill
+            // What's left of the lap after the fill must itself be most of a loop: a fill near the end of a lap whose
+            // track only wandered would split it into a lap and a sliver.
+            if (ends[k] - fill!!.at < 0.6 * loop) break
+            out += fill; from = fill
         }
     }
     return out
@@ -269,7 +294,8 @@ fun lapSummary(line: LapLine, n: Int, metres: DoubleArray, gait: Array<Gait>, ca
             h.takeIf { it.isNotEmpty() }?.average()?.roundToInt(), h.maxOrNull(), segs)
     }
     val laps = line.passes.zipWithNext().mapIndexed { i, (a, b) -> lap(i + 1, a, b, false) }
-    fun counts(l: Lap) = l.seconds >= 20 && (l.distanceM ?: 0.0) >= 30
+    // A part-lap at the start or end shows when it went somewhere, or lasted a while where the GPS lost its fix.
+    fun counts(l: Lap) = l.seconds >= 20 && ((l.distanceM ?: 0.0) >= 30 || (l.distanceM == null && l.seconds >= 120))
     val lead = lap(0, 0.0, line.passes.first(), true).takeIf(::counts)
     val tail = lap(laps.size + 1, line.passes.last(), n.toDouble(), true).takeIf(::counts)
     val times = laps.map { it.seconds }

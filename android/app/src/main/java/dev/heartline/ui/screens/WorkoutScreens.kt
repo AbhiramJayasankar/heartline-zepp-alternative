@@ -102,7 +102,10 @@ fun CaptureScreen(controller: HeartlineController, nav: Navigator) {
     val run by controller.captureRun.collectAsStateWithLifecycle()
     val conn by controller.connection.collectAsStateWithLifecycle()
     val r = run
-    var label by rememberSaveable { mutableStateOf("Gym") }
+    // One switch for a session on foot (runs, walks, laps, the walk there and back); otherwise the gym or something else.
+    var onFootOn by rememberSaveable { mutableStateOf(false) }
+    var kind by rememberSaveable { mutableStateOf("Gym") }
+    val label = if (onFootOn) dev.heartline.app.ON_FOOT_LABEL else kind
     var minutes by rememberSaveable { mutableIntStateOf(180) }
     var forFriend by rememberSaveable { mutableStateOf(false) }
     val gpsOn by controller.phoneGps.collectAsStateWithLifecycle()
@@ -112,7 +115,7 @@ fun CaptureScreen(controller: HeartlineController, nav: Navigator) {
     val askLocation = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok ->
         gpsDenied = !ok; if (ok) controller.setPhoneGps(true)
     }
-    val onFootLabel = label == "Run" || label == "Walk"
+    val onFootLabel = onFootOn
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(r != null) { while (r != null) { delay(1000); now = System.currentTimeMillis() } }
     // When a capture ends, open its report as soon as the analysis lands.
@@ -123,13 +126,18 @@ fun CaptureScreen(controller: HeartlineController, nav: Navigator) {
         endedAt = null
         if (item != null) nav.replace(Route.CaptureResult(item.id))
     } }
-    Screen("Workout capture", onBack = { nav.pop() }, subtitle = "Records everything the watch can stream for the whole session, then breaks it down: sets, reps, rest, heart-rate recovery, zones and load.") {
+    Screen("Workout capture", onBack = { nav.pop() }, subtitle = "Records everything the watch can stream for the whole session, then breaks it down: sets, reps and recovery in the gym; runs, walks and laps on foot.") {
         if (r == null) {
-            Text("What are you doing?", style = HL.type.label, color = c.inkSoft)
-            Gap(8)
-            Segmented(listOf("Gym" to "Gym", "Run" to "Run", "Walk" to "Walk", "Other" to "Other"), label, { label = it })
+            ToggleRow("Run / walk", "The whole session on foot: the walk there, runs and walks, laps of a loop, the walk back. Heartline splits it into " +
+                "runs and walks and finds the laps, however often you change the workout on the watch.", onFootOn) { onFootOn = it }
+            if (!onFootLabel) {
+                Gap(10)
+                Text("What are you doing?", style = HL.type.label, color = c.inkSoft)
+                Gap(8)
+                Segmented(listOf("Gym" to "Gym", "Other" to "Other"), kind, { kind = it })
+            }
             if (onFootLabel) {
-                Gap(14)
+                Gap(6)
                 ToggleRow("Track with the phone's GPS too", "Carry the phone and it records the route once a second: it keeps to the path better than the watch, " +
                     "so distance, pace and laps of a loop come out right. Start the capture here before you set off: the watch only reports a workout it started once it has ended.", gpsOn && located()) { on ->
                     if (!on) controller.setPhoneGps(false) else if (located()) controller.setPhoneGps(true)
@@ -315,7 +323,8 @@ fun CaptureResultScreen(controller: HeartlineController, id: String, nav: Naviga
     val onFoot = a != null && dev.heartline.app.captureOnFoot(a, gait)
     // With the phone's GPS: its distance, and laps of a loop in its track.
     val phoneM = remember(a) { a?.let { dev.heartline.app.capturePhoneDistanceM(it) } }
-    val laps = remember(a, gait) { a?.let { dev.heartline.app.captureLaps(it, gait) } }
+    // Laps only for a session on foot: a gym session that passes the same spot isn't going round a loop.
+    val laps = remember(a, gait, onFoot) { if (onFoot) a?.let { dev.heartline.app.captureLaps(it, gait) } else null }
     val ins = remember(base, prev, skin, onFoot) { if (base == null || a == null || onFoot) null else dev.heartline.app.sessionInsights(a, log, prev?.recovery ?: emptyList(), skin) }
     Screen(a?.label ?: "Session", onBack = { nav.pop() }, subtitle = a?.let { "${dateTimeOf(it.start)}, ${fmtHm(it.durationS / 60)}" }, scroll = scroll,
         trailing = { TextButton({ confirm = true }) { Text("Delete", color = c.inkSoft) } }) {

@@ -65,6 +65,12 @@ fun captureCoveredS(a: CaptureAnalysisUi): Int = a.phoneMetres()?.count { it.isF
 /** How far the phone's GPS says the capture went, or null without a track. */
 fun capturePhoneDistanceM(a: CaptureAnalysisUi): Double? = a.phoneMetres()?.filter { it.isFinite() }?.sum()?.takeIf { it > 0 }
 
+/** The capture label for a session on foot: the walk there, runs and walks, laps, the walk back. */
+const val ON_FOOT_LABEL = "Run / walk"
+
+/** A label that means a session on foot: [ON_FOOT_LABEL], or Run and Walk from before 0.9.1. */
+fun isOnFootLabel(label: String): Boolean = listOf(ON_FOOT_LABEL, "Run", "Walk").any { it.equals(label, ignoreCase = true) }
+
 /**
  * Whether to read a capture as a run or walk rather than a gym session: labelled Run or Walk with five minutes or more
  * on foot, or most of it on foot with hardly any sets and no gym log.
@@ -72,6 +78,6 @@ fun capturePhoneDistanceM(a: CaptureAnalysisUi): Double? = a.phoneMetres()?.filt
 fun captureOnFoot(a: CaptureAnalysisUi, g: GaitSummary?): Boolean {
     if (g == null) return false
     val onFoot = g.runS + g.walkS
-    return ((a.label.equals("Run", ignoreCase = true) || a.label.equals("Walk", ignoreCase = true)) && onFoot >= 300) ||
+    return (isOnFootLabel(a.label) && onFoot >= 300) ||
         (onFoot >= 0.6 * a.durationS && a.sets.size <= 3 && a.logTotal == null)
 }

@@ -17,8 +17,8 @@ android {
         // Keep native code for the phone (arm64) and the emulator (x86_64) only.
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
         targetSdk = 36
-        versionCode = 14
-        versionName = "0.9.0"
+        versionCode = 15
+        versionName = "0.10.0"
     }
 
     // A release key, when android/keystore.properties names one (storeFile, storePassword, keyAlias, keyPassword; never in

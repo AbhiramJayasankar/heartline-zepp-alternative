@@ -88,6 +88,24 @@ class LapsTest {
         assertEquals(6, line.passes.size)
     }
 
+    @Test fun aWalkedLapWhoseTrackWanderedStillCounts() {
+        // 21 Nov 2026: four laps traced about 860 m each, then a walked lap traced 1,278 m as the watch's GPS zigzagged.
+        // Here: four laps at 2.5 m/s, a walked lap at 1.4 m/s whose track swings 7 m either side of the path every 20 s
+        // (about 1.4 times the path), then 100 m more.
+        val loopM = 745.0; val r = loopM / (2 * PI)
+        val run = (4 * loopM / 2.5).toInt(); val walk = (loopM / 1.4).toInt()
+        var s = 0.0
+        val track = (0 until run + walk + 40).map { t ->
+            s += when { t < run -> 2.5; t < run + walk -> 1.4; else -> 2.5 }
+            val a = s / r
+            val swing = if (t in run until run + walk) { val ph = (t % 20) / 20.0; 7.0 * (if (ph < 0.5) 4 * ph - 1 else 3 - 4 * ph) } else 0.0
+            at(t, (r + swing) * sin(a), -(r + swing) * cos(a))
+        }
+        val line = assertNotNull(findLapLine(track))
+        assertEquals(6, line.passes.size, "passes ${line.passes}")
+        assertEquals(run + walk.toDouble(), line.passes[5], 10.0)
+    }
+
     @Test fun anOutAndBackWalkIsNoLap() {
         // 600 m east and back along the same street.
         val track = (0 until 860).map { t -> val x = if (t < 430) t * 1.4 else (860 - t) * 1.4; at(t, x, 0.0) }

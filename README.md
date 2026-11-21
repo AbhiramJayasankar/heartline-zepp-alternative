@@ -19,7 +19,7 @@
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
-> **Status: 0.9.0.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
+> **Status: 0.10.0.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
 > Other Huami/Zepp watches of the same generation (GTR 2, GTS 2, GTS 2e) speak a similar protocol but are untested.
 
 ## Highlights
@@ -140,7 +140,10 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
 - **A wandering GPS track is caught**: when the watch's distance is 20% more than your steps can cover, at your step
   lengths learnt from workouts with clean GPS, the distance, pace and each run and walk come from your steps instead,
   and the workout says why. Checked against laps of a 745 m lake loop: within 1 to 4%, where the watch was 30 to 46% long.
-- **Runs and walks with the phone's GPS**: choose Run or Walk for a capture and turn on the phone's GPS, and the
+- **One Run / walk switch**: turn it on when you start a capture and the whole session is read on foot: the walk
+  there, runs and walks, laps of a loop and the walk back, however often you change the workout on the watch. Laps
+  are only looked for in a Run / walk session.
+- **Runs and walks with the phone's GPS**: under Run / walk, turn on the phone's GPS, and the
   phone records the route once a second alongside the watch. It keeps to the path where a watch on the wrist can wander,
   so the capture, and the watch's own workout over the same time, take their route, distance and pace from it. While you
   go, the capture shows the distance, the pace over the last 30 seconds and the laps so far.
