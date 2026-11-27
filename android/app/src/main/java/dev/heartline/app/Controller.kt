@@ -21,6 +21,8 @@ interface HeartlineController {
     val trends: StateFlow<TrendsUi?>
     val checks: StateFlow<List<CheckUi>>
     val checkRun: StateFlow<CheckRunUi?>
+    /** What the heart check recording now (started here or automatic) has found so far, about once a second. */
+    val liveCheck: StateFlow<dev.heartline.analytics.LiveCheck?>
     val sensors: StateFlow<SensorsUi>
     val recordings: StateFlow<List<RecordingUi>>
     val watchSettings: StateFlow<List<WatchSettingUi>>

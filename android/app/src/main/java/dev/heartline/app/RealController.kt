@@ -43,6 +43,10 @@ class RealController(
     override val trends = MutableStateFlow<TrendsUi?>(null)
     override val checks = MutableStateFlow<List<CheckUi>>(emptyList())
     override val checkRun = MutableStateFlow<CheckRunUi?>(null)
+    override val liveCheck = MutableStateFlow<LiveCheck?>(null)
+    private val liveFeed = LiveCheckFeed {
+        checkRun.value?.let { it.result == null && it.error == null && !it.analysing } == true || hrvCheck.value != null
+    }
     override val sensors = MutableStateFlow(SensorsUi())
     override val recordings = MutableStateFlow<List<RecordingUi>>(emptyList())
     override val watchSettings = MutableStateFlow<List<WatchSettingUi>>(emptyList())
@@ -136,6 +140,8 @@ class RealController(
                 selected = if (r.file == null) settings.rawSensorDefaultSelection.value.mapNotNull { sensorFromName(it.name) }.toSet() else r.sensors.map { Sensor.valueOf(it.name) }.toSet(), file = r.file?.name) }
         } }
         launch { w.rawUpdates.collect { buffers.feed(it) } }
+        launch { w.rawTimed.collect { liveFeed.feed(it) } }
+        launch { while (isActive) { delay(1000); liveCheck.value = withContext(Dispatchers.Default) { liveFeed.now() } } }
         launch { while (isActive) { delay(200); sensors.value = buffers.snapshot(sensors.value) } }
         launch { w.gps.collect { g -> sensors.update { s -> s.copy(gps = g?.let {
             GpsUi(it.fix, it.satsUsed, it.satellites.filter { sat -> sat.elev != null && sat.az != null }.map { sat -> SatUi(sat.id, sat.system, sat.elev!!, sat.az!!, sat.snr) },
