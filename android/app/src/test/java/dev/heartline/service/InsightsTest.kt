@@ -125,4 +125,15 @@ class InsightsTest {
         assertEquals("gemini-3.8-flash ran out of tokens before it answered", runCatching { cut.generate("k", "gemini-3.8-flash", "s", "u") }.exceptionOrNull()?.message)
         assertTrue(runCatching { g.generate("", "m", "s", "u") }.exceptionOrNull()!!.message!!.contains("no Gemini key"))
     }
+
+    @Test
+    fun everyHealthTopicAnswers() = runBlocking {
+        // The assistant and the insights read health data through one tool: a topic listed but not answered is a
+        // section the model silently never sees.
+        val tools = HealthTools(dev.heartline.app.DemoController(kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined)))
+        HealthTools.TOPICS.forEach { (topic, _) ->
+            val answer = tools.run(HealthTools.TOOL, JSONObject().put("topic", topic))
+            assertTrue("topic $topic answered nothing", !answer.isNullOrBlank())
+        }
+    }
 }
