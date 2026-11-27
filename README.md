@@ -19,7 +19,7 @@
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
-> **Status: 0.10.0.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
+> **Status: 0.11.0.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
 > Other Huami/Zepp watches of the same generation (GTR 2, GTS 2, GTS 2e) speak a similar protocol but are untested.
 
 ## Highlights
@@ -115,7 +115,8 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
   can be stopped from the banner at any time; one gives way to a workout capture, and daytime checks pause during a
   watch workout and for an hour after three that aren't clean.
 - **Heart rate** all day (per-minute history plus live readings), sleeping and awake resting heart rate, and zones.
-- **Sleep page**: a hypnogram of the night, each stage against its typical range, heart rate and SpO2 while asleep,
+- **Sleep page**: the night's stages as rounded blocks on four rows (awake, REM, light, deep) with each one's total,
+  touch for the stretch, heart rate and SpO2 at that minute; each stage against its typical range, heart rate and SpO2 while asleep,
   two weeks of nights, sleep score and how regular your timing is.
 - **SpO2, stress, PAI and skin temperature.** Temperature is a reading every minute, synced every 5 minutes.
 - **Trends**: two weeks of readiness, resting HR, HRV, sleep, steps, strain and active time against your 28-day
@@ -126,6 +127,11 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
 - Records the watch's raw PPG waveform, finds every beat and measures **HRV (RMSSD), rhythm regularity and
   breathing rate**. Beat-to-beat measures use only beats that are back to back, never a difference across a beat that
   was set aside. Rhythm screening is a hint, not a diagnosis.
+- **A live chart while it records**: the pulse on ECG paper with every beat marked (used or set aside), moving
+  stretches shaded and the wrist's movement underneath, with heart rate, beats used, clean time and HRV so far.
+- **Movement is caught, turning included**: beats taken while the wrist moves more than 0.015 g are set aside, the
+  level where, on 374 recorded checks, beats stopped behaving like still ones. Why moving beats can't be rescued with
+  this sensor is in [research/heartcheck-motion.md](research/heartcheck-motion.md).
 
 **Workouts**
 - Imports the watch's own workouts with per-second heart rate, pace, cadence, stride, kilometre splits and GPS routes,
@@ -143,6 +149,12 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
 - **One Run / walk switch**: turn it on when you start a capture and the whole session is read on foot: the walk
   there, runs and walks, laps of a loop and the walk back, however often you change the workout on the watch. Laps
   are only looked for in a Run / walk session.
+- **Rides inside a session**: cycle part of a Run / walk session and the ride is found by itself, from a Cycling
+  workout on the watch or a minute or more at bike speed on the phone's GPS. It gets its own section: distance, moving
+  time, average speed, best 5 minutes and 30 seconds, stops, climbing, heart rate while riding, how far each heartbeat
+  carried you, speed through the ride with the stops shaded, and each kilometre's speed and heart rate. The route
+  colours it blue, its calories are counted apart, and it's left out of the runs, walks and laps. A Cycling workout on
+  the watch gets the same ride section, and its distance is never "corrected" from steps.
 - **Runs and walks with the phone's GPS**: under Run / walk, turn on the phone's GPS, and the
   phone records the route once a second alongside the watch. It keeps to the path where a watch on the wrist can wander,
   so the capture, and the watch's own workout over the same time, take their route, distance and pace from it. While you
@@ -156,6 +168,10 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
   links to each; each of those links back to the capture.
 - **A full-screen map**: tap Full screen (or double-tap the map) for a map you can pinch, pan and zoom, with a chip per
   lap that fades the rest of the route and fits the view to that lap, with its figures underneath.
+- **Scrub through the route**: drag through the session's time, or press play, and a marker follows the route with the
+  time, distance, speed, heart rate and altitude at that moment. Colour the route by activity, heart rate, speed or
+  altitude; kilometre marks are numbered along it. When the phone recorded alongside the watch, switch between the
+  phone's and the watch's GPS track, or overlay them and see how far apart they were.
 - **GPS assist (A-GPS)**: sends the week's satellite almanacs and orbit predictions to the watch, so its GPS gets a
   fix in seconds. Needs a Zepp sign-in (the data is only served to Zepp accounts), done in your phone's browser, so Google
   and Apple accounts work in a tap; updates every 3 days.
@@ -183,9 +199,14 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
 - **Delete** heart checks, captures, sensor recordings and watch workouts you don't want.
 
 **AI insights**
-- The model you choose under AI models, with its fallbacks. Two weeks of readiness, trends, sleep, heart rate,
-  activity, stress, SpO2, temperature and gym captures go in; ranked findings with the numbers and one thing to try
-  come out. Nothing is sent until you ask: daily insights are off unless you switch them on in the page's settings.
+- The model you choose under AI models. Two weeks of readiness and trends, the last two nights' sleep, HRV (overnight,
+  daytime and heart checks), heart rate, activity, stress, SpO2, temperature and workout captures go in; ranked
+  findings with the numbers and one thing to try come out. Nothing is sent until you ask: daily insights are off unless
+  you switch them on in the page's settings.
+- **When you tap for insights**, one request goes to the main model, with no retries and no fallbacks, so it answers
+  or fails quickly; if it fails, pick another model right there. The daily run keeps the whole chain and its retries.
+- **See exactly what's sent**: "What's sent to the AI" shows the instructions, the message and every section of your
+  data as the model will get them, gathered fresh, with a button to copy it all.
 
 **AI models**
 - **Providers and keys**: OpenRouter, Gemini and any OpenAI-compatible endpoint (Groq, Together, a local server),

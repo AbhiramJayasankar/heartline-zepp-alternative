@@ -119,7 +119,10 @@ interface HeartlineController {
     fun clearAlexaTurns()
     /** AI insights from all the health data (the Insights page), apart from the Alexa assistant. */
     val insights: StateFlow<InsightsUi>
-    fun refreshInsights()
+    /** Writes insights now: once, to [model] (the section's main model if null), with no retry or fallback. */
+    fun refreshInsights(model: dev.heartline.service.ai.ModelRef? = null)
+    /** Exactly what the next run would send (instructions, message, data), gathered now; nothing is sent. */
+    suspend fun insightsPreview(): dev.heartline.service.InsightsPreview
     /** Which AI writes the insights (Gemini or OpenRouter) and its model. */
     val insightsSettings: StateFlow<dev.heartline.service.InsightsSettings>
     fun setInsightsSettings(s: dev.heartline.service.InsightsSettings)
@@ -273,6 +276,8 @@ data class WorkoutDetailUi(
     val loop: dev.heartline.analytics.LapSummary? = null,
     /** Metres by the phone's GPS, when a capture recorded it during the workout: distance, pace and laps come from it. */
     val phoneM: Int? = null,
+    /** For a ride ([isRideType]): speed, stops, climbing and kilometre splits from its track. */
+    val ride: dev.heartline.analytics.RideSummary? = null,
 )
 
 /**
@@ -289,7 +294,8 @@ data class CaptureRunUi(val label: String, val startedAt: Long, val plannedS: In
 data class GpsLiveUi(val fixes: Int, val distanceM: Double, val paceSPerKm: Double?, val accuracyM: Float?, val laps: Int, val lastLapS: Double?)
 data class CaptureItemUi(val id: String, val label: String, val start: Long, val durationS: Int, val avgHr: Int?, val sets: Int?, val load: Double?,
                          /** Recorded while a friend wore the watch. */ val friend: Boolean = false,
-                         /** A run or walk rather than a gym session ([captureOnFoot]). */ val onFoot: Boolean = false)
+                         /** A run or walk rather than a gym session ([captureOnFoot]). */ val onFoot: Boolean = false,
+                         /** Five minutes or more of it was a ride ([captureRideS]). */ val ride: Boolean = false)
 /** One repetition. [t] is seconds from the capture start; [slowS] + [fastS] = [durationS]; [arcDeg] is wrist rotation. */
 data class RepUi(val t: Double, val durationS: Double, val slowS: Double, val fastS: Double, val arcDeg: Double)
 /**
@@ -357,6 +363,8 @@ data class CaptureAnalysisUi(
     val metres: DoubleArray? = null,
     /** Where [route] came from. */
     val routeSource: RouteSource = RouteSource.PHONE,
+    /** The watch's own GPS over the capture when [route] is the phone's, to compare the two on the map. */
+    val watchRoute: List<RoutePoint> = emptyList(),
 )
 
 /** Where a session's route and distance came from: the phone's GPS, the watch's, or the watch's passes with distances by steps. */
@@ -456,7 +464,9 @@ enum class MinuteState { NOT_WORN, SLEEP_LIGHT, SLEEP_DEEP, SLEEP_REM, ACTIVE, I
 data class MinuteUi(val ts: Long, val state: MinuteState, val steps: Int, val hr: Int?, /** The watch's movement score for the minute. */ val intensity: Int = 0)
 data class RoutePoint(val t: Int, val lat: Double, val lon: Double, val altM: Double? = null)
 data class WorkoutUi(val start: Long, val durationS: Int, val type: String, val avgHr: Int?, val maxHr: Int?, val calories: Int?, val steps: Int?, val distanceM: Int?, val track: List<HrPoint>, val route: List<RoutePoint> = emptyList(), val detail: WorkoutDetailUi? = null,
-    /** Recorded while a friend wore the watch. */ val friend: Boolean = false)
+    /** Recorded while a friend wore the watch. */ val friend: Boolean = false,
+    /** The watch's own GPS track when [route] is the phone's (a capture ran alongside), to compare the two on the map. */
+    val watchRoute: List<RoutePoint> = emptyList())
 data class ActivityDayUi(
     val date: LocalDate, val minutes: List<MinuteUi>, val steps: Int, val activeMinutes: Int, val sleepMinutes: Int,
     val wornMinutes: Int, val hrMin: Int?, val hrAvg: Int?, val hrMax: Int?, val sleep: SleepNightUi?, val workouts: List<WorkoutUi>,

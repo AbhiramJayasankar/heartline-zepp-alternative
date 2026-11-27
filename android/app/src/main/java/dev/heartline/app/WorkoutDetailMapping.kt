@@ -226,7 +226,9 @@ internal fun WorkoutUi.withWorkoutDetail(raw: StoredWorkoutDetail?, profile: Pro
     val phoneTrack = phone.takeIf { p -> p.size >= 60 && p.last().t - p.first().t >= 0.8 * durationS }?.geoFixes()
     val phoneMetres = phoneTrack?.let { dev.heartline.analytics.trackMetresPerSecond(it, durationS) }
     val phoneM = phoneMetres?.filter { it.isFinite() }?.sum()?.takeIf { it >= 100 }
-    val check = if (phoneM != null) null else raw?.gpsCheck(type, durationS, distanceM, this.steps ?: s?.steps, steps)
+    // A ride has no steps to check its GPS against, and rides fast enough that the wander is small next to the distance.
+    val riding = isRideType(type)
+    val check = if (phoneM != null || riding) null else raw?.gpsCheck(type, durationS, distanceM, this.steps ?: s?.steps, steps)
     val gps = check?.let { g -> GpsCheckUi(g.wander, g.ratio, distanceM, g.distanceM.roundToInt(), g.fromSteps, steps.walkM, steps.runM) }
     // With the distance from the steps (or the phone), each run and walk has its distance from them too.
     val gait = if (phoneMetres != null && phoneM != null) watchGait?.withMetres(phoneMetres)
@@ -249,7 +251,20 @@ internal fun WorkoutUi.withWorkoutDetail(raw: StoredWorkoutDetail?, profile: Pro
         laps = if (fixedM != null) emptyList() else kilometreLaps(d?.kmSplits.orEmpty(), hr, durationS, distanceM),
         loop = workoutLoop(phoneTrack ?: raw?.route?.geoFixes(), phoneMetres, check != null, gait, d, hr, durationS),
         phoneM = phoneM?.roundToInt(),
-    ), route = if (phoneTrack != null) phone else raw?.route ?: route)
+        ride = if (riding) workoutRide(phoneMetres ?: raw?.route?.takeIf { it.size >= 60 }?.geoFixes()?.let { dev.heartline.analytics.trackMetresPerSecond(it, durationS) },
+            hr, d?.altitudeM.orEmpty(), durationS) else null,
+    ), route = if (phoneTrack != null) phone else raw?.route ?: route,
+        watchRoute = if (phoneTrack != null) raw?.route.orEmpty() else emptyList())
+}
+
+/** A watch ride from its per-second track [metres], heart rate held between records, and altitude. */
+private fun workoutRide(metres: DoubleArray?, hr: List<TrackPoint>, alt: List<WorkoutValuePoint>, durationS: Int): dev.heartline.analytics.RideSummary? {
+    if (metres == null || durationS < 60) return null
+    val h = hr.filter { it.hr in 1..254 }.sortedBy { it.t }
+    val bpm = IntArray(durationS).also { a -> var j = 0; var cur = 0
+        for (t in 0 until durationS) { while (j < h.size && h[j].t <= t) { cur = h[j].hr; j++ }; a[t] = cur } }
+    val altM = DoubleArray(durationS) { Double.NaN }.also { a -> alt.forEach { p -> if (p.t in a.indices && p.value.isFinite()) a[p.t] = p.value } }
+    return dev.heartline.analytics.rideSummary(durationS, metres, bpm, altM)
 }
 
 /** Workouts on foot, where the cadence tells running from walking. */
@@ -327,8 +342,13 @@ internal fun CaptureAnalysisUi.withWatchActivities(workouts: List<WorkoutUi>): C
 }
 
 internal fun CaptureAnalysisUi.withWatchTracks(workouts: List<WorkoutUi>): CaptureAnalysisUi {
-    if (route.isNotEmpty()) return this
     val n = durationS
+    // The watch's own GPS over the capture, kept beside the phone's track to compare the two.
+    fun watchPoints() = workouts.sortedBy { it.start }.filter { it.start < start + n && it.start + it.durationS > start }.flatMap { w ->
+        val off = (w.start - start).toInt()
+        w.watchRoute.ifEmpty { if (w.detail?.phoneM != null) emptyList() else w.route }.map { it.copy(t = it.t + off) }.filter { it.t in 0 until n }
+    }.sortedBy { it.t }.distinctBy { it.t }
+    if (route.isNotEmpty()) return copy(watchRoute = watchPoints().takeIf { it.size >= 60 }.orEmpty())
     val metres = DoubleArray(n) { Double.NaN }
     val points = ArrayList<RoutePoint>()
     var steps = false; var phone = false; var any = false

@@ -199,7 +199,9 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override fun clearAlexaTurns() { alexaTurns.value = emptyList() }
     override val insights = MutableStateFlow(InsightsUi(dev.heartline.service.InsightReport(System.currentTimeMillis() / 1000 - 3600, "demo", "Sleep is your lever this week.",
         listOf(dev.heartline.service.Insight("sleep", "Short nights add up", "You averaged 5.3 h over 14 nights, 1.5 h under your best weeks.", "Aim for lights out by 23:30.", "watch")))))
-    override fun refreshInsights() {}
+    override fun refreshInsights(model: dev.heartline.service.ai.ModelRef?) {}
+    override suspend fun insightsPreview() = dev.heartline.service.HealthInsights(dev.heartline.service.HealthTools(this),
+        dev.heartline.service.ai.AiStore({ null }, { _, _ -> })).preview()
     override val insightsSettings = MutableStateFlow(dev.heartline.service.InsightsSettings())
     override fun setInsightsSettings(s: dev.heartline.service.InsightsSettings) { insightsSettings.value = s }
     private val demoRefs = listOf(dev.heartline.service.ai.ModelRef("openrouter", "nvidia/nemotron-3.5-super-vl:free"), dev.heartline.service.ai.ModelRef("openrouter", "google/gemma-4-31b-it:free"),

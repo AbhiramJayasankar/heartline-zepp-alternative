@@ -69,16 +69,20 @@ class AiRouter(
 
     /**
      * [from] starts further down the chain (a conversation that already fell back stays there). [deadlineMs] (a clock
-     * time) stops trying once passed. [block] makes the request; throw [AiError] (or [badAnswer]) to have it sorted.
+     * time) stops trying once passed. [only] asks that one model instead of the chain. [once] makes a single request
+     * (one key, no retry, no fallback): for something the user asked for and is waiting on. [block] makes the request;
+     * throw [AiError] (or [badAnswer]) to have it sorted.
      */
-    suspend fun <T> run(section: AiSection, from: Int = 0, deadlineMs: Long? = null, block: suspend (AiTarget) -> T): AiOutcome<T> {
+    suspend fun <T> run(section: AiSection, from: Int = 0, deadlineMs: Long? = null, only: ModelRef? = null, once: Boolean = false,
+                        block: suspend (AiTarget) -> T): AiOutcome<T> {
         val s = setup()
         val sec = s.section(section)
-        val pol = sec.policy
+        val pol = if (once) sec.policy.copy(busyRetries = 0, badAnswerRetries = 0, otherKeys = false, waitForLimitS = 0) else sec.policy
         val attempts = ArrayList<AiAttempt>()
         try {
             val seen = HashSet<ModelRef>()
-            val levels = (0..2).mapNotNull { l -> sec.at(l)?.takeIf { seen.add(it) }?.let { l to it } }.let { all -> all.filter { it.first >= from }.ifEmpty { all } }
+            val chain = (0..2).mapNotNull { l -> sec.at(l)?.takeIf { seen.add(it) }?.let { l to it } }.let { all -> all.filter { it.first >= from }.ifEmpty { all } }
+            val levels = when { only != null -> listOf(0 to only); once -> chain.take(1); else -> chain }
             for ((level, ref) in levels) {
                 fun note(n: String) { attempts += AiAttempt(clock(), section.key, ref.provider, ref.model, -1, "", level, 0, note = n) }
                 val p = s.provider(ref.provider) ?: run { note("provider ${ref.provider} was removed"); null } ?: continue
@@ -112,7 +116,7 @@ class AiRouter(
                         FailKind.QUOTA, FailKind.AUTH -> nextKey(QUOTA_REST_MS)
                         FailKind.RATE_LIMIT -> {
                             val after = err.retryAfterMs
-                            if (after != null && after <= pol.waitForLimitS * 1000L && busy < maxOf(pol.busyRetries, 1)) {
+                            if (!once && after != null && after <= pol.waitForLimitS * 1000L && busy < maxOf(pol.busyRetries, 1)) {
                                 busy++; waited = after + 500; pause(waited); true
                             } else nextKey(after ?: RATE_REST_MS)
                         }

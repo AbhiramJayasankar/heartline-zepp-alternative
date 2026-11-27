@@ -26,6 +26,8 @@ import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -49,6 +51,7 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
@@ -65,6 +68,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import dev.heartline.app.MapView
 import dev.heartline.app.RoutePoint
+import dev.heartline.app.SeriesPoint
 import dev.heartline.app.TileId
 import dev.heartline.app.TileStore
 import dev.heartline.app.fitRoute
@@ -81,7 +85,7 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 
 /** A stretch of the route, by time from the workout's start: running (true) or walking. */
-data class RouteBout(val start: Int, val end: Int, val running: Boolean)
+data class RouteBout(val start: Int, val end: Int, val running: Boolean, val riding: Boolean = false)
 
 /** A lap to pick out on the map: its name, its span in seconds from the session's start, and a line of its figures. */
 data class MapLap(val name: String, val start: Double, val end: Double, val summary: String)
@@ -106,28 +110,58 @@ private const val TILES_ON = "tiles"
  *
  * On the page, two fingers move and zoom the map so one finger still scrolls the page. Full screen (its button, or a
  * double tap) takes one finger, pinch, double tap and zoom buttons, and with [laps] picks out one lap at a time.
+ *
+ * Under it, a scrubber moves a marker along the route through the session's time (or plays it back), reading out the
+ * time, distance, speed, heart rate ([hr], seconds from the start like [RoutePoint.t]) and altitude there. With [other]
+ * (the watch's track beside the phone's, [routeName]) the map switches between the two or overlays them. The route
+ * can be coloured by activity ([bouts]), heart rate, speed or altitude, and kilometre marks are numbered along it.
  */
 @Composable
 fun RouteMap(route: List<RoutePoint>, modifier: Modifier = Modifier, bouts: List<RouteBout> = emptyList(),
-             laps: List<MapLap> = emptyList(), lapPoint: Pair<Double, Double>? = null, title: String = "Route") {
+             laps: List<MapLap> = emptyList(), lapPoint: Pair<Double, Double>? = null, title: String = "Route",
+             routeName: String = "Phone GPS", other: MapTrack? = null, hr: List<SeriesPoint> = emptyList(), startEpoch: Long? = null) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(MAP_PREFS, Context.MODE_PRIVATE) }
     var tilesOn by remember { mutableStateOf(prefs.getBoolean(TILES_ON, true)) }
     var full by remember { mutableStateOf(false) }
     val toggle = { tilesOn = !tilesOn; prefs.edit().putBoolean(TILES_ON, tilesOn).apply() }
-    if (full) FullscreenMap(title, route, bouts, laps, lapPoint, tilesOn, toggle) { full = false }
-    MapArea(route, bouts, lapPoint, tilesOn, toggle, modifier.fillMaxWidth().aspectRatio(1.25f).clip(RoundedCornerShape(8.dp)),
-        fullscreen = false, selected = null, onExpand = { full = true })
+    val main = remember(route) { TrackInfo(route) }
+    val second = remember(other) { other?.points?.takeIf { it.size >= 60 }?.let { TrackInfo(it) } }
+    val colourings = remember(bouts, hr, main) {
+        listOfNotNull(if (bouts.isNotEmpty()) MapColouring.ACTIVITY else MapColouring.PLAIN, MapColouring.HEART.takeIf { hr.size >= 10 },
+            MapColouring.SPEED, MapColouring.ALTITUDE.takeIf { main.hasAlt })
+    }
+    val state = remember(route) { MapState(colourings.first()) }
+    val active = if (state.source == MapSource.OTHER && second != null) second else main
+    val values = remember(active, state.colouring, hr) { active.values(state.colouring, hr) }
+    val range = remember(values) { values?.let(::valueRange) }
+    val look = MapLook(state, main, second, bouts, values, range)
+    if (full) FullscreenMap(title, look, laps, lapPoint, tilesOn, toggle, routeName, other?.name, hr, startEpoch, colourings) { full = false }
+    Column(modifier.fillMaxWidth()) {
+        MapArea(look, lapPoint, tilesOn, toggle, Modifier.fillMaxWidth().aspectRatio(1.25f).clip(RoundedCornerShape(8.dp)),
+            fullscreen = false, selected = null, onExpand = { full = true })
+        if (route.size >= 10) {
+            Spacer(Modifier.height(10.dp))
+            MapControls(state, main, routeName, second, other?.name, hr, startEpoch, colourings, range)
+        }
+    }
 }
 
-/** The map full screen: one finger moves it, pinch or double tap zooms, and a row of laps picks one out. */
+/** Everything the map draws from: the choices, the tracks, the activity bouts and the colour values with their scale. */
+private class MapLook(val state: MapState, val main: TrackInfo, val other: TrackInfo?, val bouts: List<RouteBout>,
+                      val values: DoubleArray?, val range: Pair<Double, Double>?) {
+    val active: TrackInfo get() = if (state.source == MapSource.OTHER && other != null) other else main
+}
+
+/** The map full screen: one finger moves it, pinch or double tap zooms, the scrubber, and a row of laps picks one out. */
 @Composable
-private fun FullscreenMap(title: String, route: List<RoutePoint>, bouts: List<RouteBout>, laps: List<MapLap>, lapPoint: Pair<Double, Double>?,
-                          tilesOn: Boolean, toggle: () -> Unit, onClose: () -> Unit) {
+private fun FullscreenMap(title: String, look: MapLook, laps: List<MapLap>, lapPoint: Pair<Double, Double>?,
+                          tilesOn: Boolean, toggle: () -> Unit, routeName: String, otherName: String?, hr: List<SeriesPoint>,
+                          startEpoch: Long?, colourings: List<MapColouring>, onClose: () -> Unit) {
     val c = HL.colors
     var selected by remember { mutableStateOf<MapLap?>(null) }
     androidx.compose.ui.window.Dialog(onClose, androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        androidx.compose.foundation.layout.Column(Modifier.fillMaxSize().background(c.paper)
+        Column(Modifier.fillMaxSize().background(c.paper)
             .padding(androidx.compose.foundation.layout.WindowInsets.safeDrawing.asPaddingValues())) {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(title, style = HL.type.section, color = c.ink, modifier = Modifier.weight(1f))
@@ -140,14 +174,16 @@ private fun FullscreenMap(title: String, route: List<RoutePoint>, bouts: List<Ro
                     }
                 }
             }
-            MapArea(route, bouts, lapPoint, tilesOn, toggle, Modifier.fillMaxWidth().weight(1f).clipToBounds(), fullscreen = true, selected = selected, onExpand = {})
-            if (laps.isNotEmpty()) {
-                androidx.compose.foundation.layout.Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+            MapArea(look, lapPoint, tilesOn, toggle, Modifier.fillMaxWidth().weight(1f).clipToBounds(), fullscreen = true, selected = selected, onExpand = {})
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+                if (look.main.points.size >= 10) MapControls(look.state, look.main, routeName, look.other, otherName, hr, startEpoch, colourings, look.range)
+                if (laps.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         LapChip("All laps", selected == null) { selected = null }
                         laps.forEach { l -> LapChip(l.name, selected == l) { selected = if (selected == l) null else l } }
                     }
-                    androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(8.dp))
                     Text(selected?.summary ?: "Pick a lap to see it on its own.", style = HL.type.small, color = if (selected == null) c.inkSoft else c.ink,
                         modifier = Modifier.heightIn(min = 36.dp))
                 }
@@ -165,16 +201,22 @@ private fun LapChip(text: String, on: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun MapArea(route: List<RoutePoint>, bouts: List<RouteBout>, lapPoint: Pair<Double, Double>?, tilesOn: Boolean, toggle: () -> Unit,
+private fun MapArea(look: MapLook, lapPoint: Pair<Double, Double>?, tilesOn: Boolean, toggle: () -> Unit,
                     modifier: Modifier, fullscreen: Boolean, selected: MapLap?, onExpand: () -> Unit) {
     val c = HL.colors
     val context = LocalContext.current
+    val state = look.state
+    val route = look.active.points
+    val both = state.source == MapSource.BOTH && look.other != null
     var size by remember { mutableStateOf(IntSize.Zero) }
-    // The part to fit: the picked lap, else the whole route.
-    val shown = remember(route, selected) { selected?.let { l -> route.filter { it.t >= l.start - 1 && it.t <= l.end + 1 } }?.takeIf { it.size >= 2 } ?: route }
+    // The part to fit: the picked lap, else the whole route (both tracks when both are shown).
+    val shown = remember(route, selected, both) {
+        selected?.let { l -> route.filter { it.t >= l.start - 1 && it.t <= l.end + 1 } }?.takeIf { it.size >= 2 }
+            ?: if (both) route + look.other!!.points else route
+    }
     val points = remember(shown) { shown.map { it.lat to it.lon } }
-    var view by remember(route, size, selected) { mutableStateOf(if (size.width > 0 && points.size >= 2) fitRoute(points, size.width, size.height, (size.width / 12).coerceAtLeast(1)) else null) }
-    val fitted = remember(route, size, selected) { view }
+    var view by remember(route, size, selected, both) { mutableStateOf(if (size.width > 0 && points.size >= 2) fitRoute(points, size.width, size.height, (size.width / 12).coerceAtLeast(1)) else null) }
+    val fitted = remember(route, size, selected, both) { view }
     val tiles = remember { mutableStateMapOf<TileId, ImageBitmap>() }
     val tm = rememberTextMeasurer()
     val store = remember { OsmTiles.get(context) }
@@ -184,6 +226,15 @@ private fun MapArea(route: List<RoutePoint>, bouts: List<RouteBout>, lapPoint: P
         for (p in placed) if (p.id !in tiles) launch {
             store.tile(p.id)?.let { bytes -> BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let { tiles[p.id] = it.asImageBitmap() } }
         }
+    }
+    // While scrubbing or playing, the marker stays in view: the map moves when it nears an edge.
+    LaunchedEffect(state.follow) {
+        val at = state.at ?: return@LaunchedEffect
+        val cur = view ?: return@LaunchedEffect
+        val (lat, lon) = look.active.positionAt(at) ?: return@LaunchedEffect
+        val (x, y) = screenOf(lat, lon, cur, size.width, size.height)
+        val mx = size.width * 0.12f; val my = size.height * 0.12f
+        if (x < mx || x > size.width - mx || y < my || y > size.height - my) view = cur.panned(size.width / 2f - x, size.height / 2f - y)
     }
     // Dark themes: the light map inverted and greyed, so it sits under the track like the paper does.
     val filter = remember(c.isDark) {
@@ -231,15 +282,27 @@ private fun MapArea(route: List<RoutePoint>, bouts: List<RouteBout>, lapPoint: P
                     dstSize = IntSize((p.left + p.size).roundToInt() - p.left.roundToInt(), (p.top + p.size).roundToInt() - p.top.roundToInt()),
                     colorFilter = filter)
             }
-            fun at(i: Int) = screenOf(route[i].lat, route[i].lon, cur, size.width, size.height).let { Offset(it.first, it.second) }
+            fun scr(lat: Double, lon: Double) = screenOf(lat, lon, cur, size.width, size.height).let { Offset(it.first, it.second) }
+            fun at(i: Int) = scr(route[i].lat, route[i].lon)
             val casing = if (tilesOn) c.surface.copy(alpha = 0.9f) else c.paper
+            val scrub = state.at
             val whole = Path().apply { moveTo(at(0).x, at(0).y); for (i in 1 until route.size) lineTo(at(i).x, at(i).y) }
             drawPath(whole, casing, style = Stroke(8.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-            // The track in pieces by what the feet were doing, faded outside the lap picked.
+            // The track in pieces by its colouring; faded outside the lap picked and after the moment scrubbed to.
+            val vals = look.values; val range = look.range
             val colorOf = { i: Int ->
                 val t = route[i].t
-                val base = if (bouts.isEmpty()) c.pulse else bouts.firstOrNull { t >= it.start && t < it.end }?.let { if (it.running) c.warn else c.ok } ?: c.inkSoft
-                if (selected == null || (t >= selected.start && t <= selected.end)) base else base.copy(alpha = 0.22f)
+                val base = when (state.colouring) {
+                    MapColouring.ACTIVITY -> look.bouts.firstOrNull { t >= it.start && t < it.end }?.let { if (it.riding) c.oxygen else if (it.running) c.warn else c.ok } ?: c.inkSoft
+                    MapColouring.PLAIN -> c.pulse
+                    else -> vals?.getOrNull(i)?.takeIf { it.isFinite() && range != null }?.let { x ->
+                        // Eight steps along the scale, so the track draws in a few long pieces rather than one per fix.
+                        val f = ((x - range!!.first) / (range.second - range.first)).coerceIn(0.0, 1.0)
+                        rampColor(kotlin.math.round(f * 8) / 8, c.ok, c.warn, c.pulse)
+                    } ?: c.inkSoft
+                }
+                val faded = (selected != null && (t < selected.start || t > selected.end)) || (scrub != null && t > scrub)
+                if (faded) base.copy(alpha = 0.22f) else base
             }
             var a = 0
             for (i in 1..route.size) {
@@ -251,12 +314,42 @@ private fun MapArea(route: List<RoutePoint>, bouts: List<RouteBout>, lapPoint: P
                 }
                 a = i
             }
+            // The other track, dashed over this one, to see where the two part (where they agree it sits on top).
+            val o = look.other
+            if (both && o != null) {
+                val path = Path().apply { moveTo(scr(o.points[0].lat, o.points[0].lon).x, scr(o.points[0].lat, o.points[0].lon).y)
+                    for (p in o.points) { val q = scr(p.lat, p.lon); lineTo(q.x, q.y) } }
+                drawPath(path, c.ink.copy(alpha = 0.9f), style = Stroke(2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(7.dp.toPx(), 5.dp.toPx()))))
+            }
             drawCircle(casing, 7.5.dp.toPx(), at(0)); drawCircle(c.ok, 5.5.dp.toPx(), at(0))
             drawCircle(casing, 7.5.dp.toPx(), at(route.lastIndex)); drawCircle(c.ink, 5.5.dp.toPx(), at(route.lastIndex))
+            // Kilometre marks along the track shown, numbered.
+            val cum = look.active.cumM
+            if (cum.last() >= 1000 && cum.last() < 60_000) {
+                var next = 1000.0
+                for (i in route.indices) if (cum[i] >= next) {
+                    val p = at(i)
+                    drawCircle(casing, 9.dp.toPx(), p); drawCircle(c.ink, 7.5.dp.toPx(), p)
+                    label(tm, "${(next / 1000).roundToInt()}", p.x, p.y, c.paper, center = true)
+                    next += 1000.0
+                }
+            }
             // The lap point: a ring where each lap starts and ends.
             lapPoint?.let { (lat, lon) ->
-                val p = screenOf(lat, lon, cur, size.width, size.height).let { Offset(it.first, it.second) }
+                val p = scr(lat, lon)
                 drawCircle(casing, 10.dp.toPx(), p); drawCircle(c.pulse, 8.dp.toPx(), p, style = Stroke(3.dp.toPx()))
+            }
+            // Where you were at the moment scrubbed to (on both tracks, joined, when both are shown).
+            if (scrub != null) {
+                val here = look.active.positionAt(scrub)?.let { scr(it.first, it.second) }
+                val there = if (both && o != null) o.positionAt(scrub)?.let { scr(it.first, it.second) } else null
+                if (here != null && there != null) drawLine(c.ink, here, there, 1.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx())))
+                there?.let { drawCircle(casing, 7.dp.toPx(), it); drawCircle(c.inkSoft, 5.dp.toPx(), it) }
+                here?.let {
+                    drawCircle(c.ink.copy(alpha = 0.16f), 18.dp.toPx(), it)
+                    drawCircle(casing, 9.5.dp.toPx(), it); drawCircle(c.ink, 7.dp.toPx(), it); drawCircle(c.paper, 2.5.dp.toPx(), it)
+                }
             }
             scaleBar(tm, cur, c.ink, c.inkSoft, if (tilesOn) c.surface.copy(alpha = 0.85f) else null)
         }
@@ -268,9 +361,9 @@ private fun MapArea(route: List<RoutePoint>, bouts: List<RouteBout>, lapPoint: P
             MapChip(if (tilesOn) "Paper" else "Map") { toggle() }
             if (!fullscreen) MapChip("Full screen") { onExpand() }
         }
-        if (fullscreen) androidx.compose.foundation.layout.Column(Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 32.dp)) {
+        if (fullscreen) Column(Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 32.dp)) {
             ZoomButton("+", "Zoom in") { zoomBy(2f) }
-            androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(8.dp))
             ZoomButton("−", "Zoom out") { zoomBy(0.5f) }
         }
     }

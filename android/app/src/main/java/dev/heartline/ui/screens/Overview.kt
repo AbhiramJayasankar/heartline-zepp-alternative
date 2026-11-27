@@ -174,11 +174,14 @@ fun OverviewScreen(controller: HeartlineController, nav: Navigator, onTab: (Tab)
             val stepsNow = steps?.steps ?: t?.stepsToday ?: day?.stepsTotal
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Tile("Sleep", c.hue(Area.SLEEP), Modifier.weight(1f).fillMaxHeight(), { onTab(Tab.SLEEP) }) {
-                    BigValue(night?.let { hm(it.deepMin + it.lightMin + it.remMin) } ?: "–", size = 28)
+                    dev.heartline.ui.components.SleepLength(night?.let { it.deepMin + it.lightMin + it.remMin }, c.hue(Area.SLEEP), size = 28)
                     if (night != null) {
                         val ended = java.time.Instant.ofEpochSecond(night.end).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
                         Text("${timeOf(night.start)} – ${timeOf(night.end)}" + (if (ended != date) ", ${shortDate(ended)}" else "") + (if (night.ongoing) ", so far" else ""), style = HL.type.small, color = c.inkSoft)
-                        Gap(8); StagesBar(night)
+                        // The night's stages in small when its minutes are here (they span yesterday and today), else the shares bar.
+                        val nightMinutes = remember(day, yday, night) { (yday?.minutes.orEmpty() + day?.minutes.orEmpty()).filter { it.ts in night.start until night.end } }
+                        Gap(10)
+                        if (nightMinutes.size >= 30) dev.heartline.ui.components.SleepStagesMini(nightMinutes, night.start, night.end) else StagesBar(night)
                     } else MutedText("No night synced yet")
                     // Today's naps, kept apart from the night.
                     t?.napsToday?.takeIf { it.isNotEmpty() }?.let { naps ->

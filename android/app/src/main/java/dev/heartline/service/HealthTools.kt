@@ -36,7 +36,7 @@ class HealthTools(
      */
     fun tool(extraTopics: List<Pair<String, String>> = emptyList()): Tool {
         val all = topics + extraTopics
-        return Tool("get_info", "Look something up. Topics: " + all.joinToString("; ") { (t, d) -> "$t: $d" } +
+        return Tool(TOOL, "Look something up. Topics: " + all.joinToString("; ") { (t, d) -> "$t: $d" } +
             ". Call it several times for several topics.",
             JSONObject().put("type", "object").put("properties", JSONObject()
                 .put("topic", JSONObject().put("type", "string").put("enum", JSONArray(all.map { it.first })))
@@ -50,7 +50,7 @@ class HealthTools(
 
     /** Answers get_info for one of [topics]; null for any other tool or topic. Bad arguments come back as an error line. */
     suspend fun run(name: String, args: JSONObject): String? {
-        if (name != "get_info") return null
+        if (name != TOOL) return null
         val topic = args.optString("topic").trim().lowercase(Locale.ROOT)
         if (topics.none { it.first == topic }) return null
         val day = when (val d = args.optString("date").trim().lowercase(Locale.ROOT)) {
@@ -75,6 +75,8 @@ class HealthTools(
     }
 
     companion object {
+        /** The one lookup tool's name. */
+        const val TOOL = "get_info"
         val TOPICS = listOf(
             "readiness" to "today's readiness score, what drove it, strain, sleep score, body battery and the suggestion",
             "sleep" to "the night that ended on the morning of date: bed and wake time, stages, awakenings, timeline",
@@ -231,7 +233,7 @@ class HealthTools(
         if (c.isEmpty()) return "No workout captures recorded with Heartline yet."
         return c.joinToString("\n") { w ->
             "${w.label}: ${Instant.ofEpochSecond(w.start).atZone(zone).format(DateTimeFormatter.ofPattern("EEE d MMM HH:mm", Locale.ENGLISH))}, ${hm(w.durationS / 60)}" +
-                listOfNotNull(w.avgHr?.let { "average heart rate $it" }, w.sets?.let { "$it sets" }, w.load?.let { "load ${r(it)}" }).joinToString(", ", ", ")
+                listOfNotNull((if (w.ride) "with a bike ride" else "on foot").takeIf { w.onFoot }, w.avgHr?.let { "average heart rate $it" }, w.sets?.takeIf { !w.onFoot }?.let { "$it sets" }, w.load?.let { "load ${r(it)}" }).joinToString(", ", ", ")
         }
     }
 

@@ -440,7 +440,7 @@ fun LevelHistory(db: FloatArray, modifier: Modifier = Modifier) {
 @Composable
 fun StagesBar(night: SleepNightUi, modifier: Modifier = Modifier) {
     val c = HL.colors
-    val parts = listOf(night.deepMin to c.sleepDeep, night.lightMin to c.sleepLight, night.remMin to c.sleepRem, night.awakeMin to c.idle)
+    val parts = listOf(night.deepMin to c.stageDeep, night.lightMin to c.stageLight, night.remMin to c.stageRem, night.awakeMin to c.stageAwake.copy(alpha = 0.7f))
     val total = parts.sumOf { it.first }.coerceAtLeast(1)
     Canvas(modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp))) {
         var x = 0f

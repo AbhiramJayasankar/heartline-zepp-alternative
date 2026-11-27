@@ -40,6 +40,14 @@ data class Palette(
     val oxygen: Color = Color(0xFF2A7FA8),
     /** Tinted boxes, chips and wells inside the page; [wash] when unset. OLED Black keeps these grey while its page stays black. */
     val box: Color = Color.Unspecified,
+    /**
+     * Sleep stages on the stages chart and its bars: deep a dark indigo, light a bright blue, REM a pale cyan and awake a
+     * red, so the night reads from cool and deep to warm and awake. Night-sky values by default; light themes darken them.
+     */
+    val stageDeep: Color = Color(0xFF5146D9),
+    val stageLight: Color = Color(0xFF2F8CFF),
+    val stageRem: Color = Color(0xFF72D7F7),
+    val stageAwake: Color = Color(0xFFFF5E4D),
 )
 
 /** The fill for tinted boxes inside a page (see [Palette.box]); [Palette.wash] is the page-level band behind headers. */
@@ -52,6 +60,7 @@ val LightPalette = Palette(
     ok = Color(0xFF2F7A4F), warn = Color(0xFFA8641A),
     sleepDeep = Color(0xFF2B3870), sleepLight = Color(0xFF8D97C4), sleepRem = Color(0xFFC79BC3), idle = Color(0xFFEAD8D4),
     isDark = false,
+    stageDeep = Color(0xFF3A2FA6), stageLight = Color(0xFF1F74E0), stageRem = Color(0xFF2FB2E2), stageAwake = Color(0xFFDB4334),
 )
 
 val DarkPalette = Palette(
@@ -81,6 +90,8 @@ val DuskPalette = Palette(
     ok = Color(0xFF8CD3A1), warn = Color(0xFFF2C46D),
     sleepDeep = Color(0xFFB4A4F2), sleepLight = Color(0xFF5E5089), sleepRem = Color(0xFFE09AC2), idle = Color(0xFF2E2427),
     isDark = true, oxygen = Color(0xFF7FCBE0),
+    // Dusk: the same night, a shade towards violet and coral to sit with its warm page.
+    stageDeep = Color(0xFF6A4FD8), stageLight = Color(0xFF5B86F2), stageRem = Color(0xFF8FD0F0), stageAwake = Color(0xFFFF7A5C),
 )
 
 /** Cool light: sage paper and pine ink. */
@@ -91,6 +102,7 @@ val SagePalette = Palette(
     ok = Color(0xFF237A4B), warn = Color(0xFFA9620E),
     sleepDeep = Color(0xFF2E4A7D), sleepLight = Color(0xFF8DA2C9), sleepRem = Color(0xFFB98DB8), idle = Color(0xFFDDE5D9),
     isDark = false, oxygen = Color(0xFF1F7A9E),
+    stageDeep = Color(0xFF34348F), stageLight = Color(0xFF1F6FCF), stageRem = Color(0xFF2AA9C6), stageAwake = Color(0xFFD2483A),
 )
 
 /** Cool light: lavender paper, aubergine ink and a raspberry pulse. */
@@ -101,6 +113,7 @@ val LilacPalette = Palette(
     ok = Color(0xFF2B7A57), warn = Color(0xFF9E5A10),
     sleepDeep = Color(0xFF3A2F80), sleepLight = Color(0xFF9D94D0), sleepRem = Color(0xFFBF7FBF), idle = Color(0xFFE7E1F1),
     isDark = false, oxygen = Color(0xFF1D6E9E),
+    stageDeep = Color(0xFF3B2A99), stageLight = Color(0xFF4A6AE0), stageRem = Color(0xFF45ADE6), stageAwake = Color(0xFFD7445E),
 )
 
 /** Deep green dark: pine-black page, mint and coral accents. */
@@ -111,6 +124,8 @@ val ForestPalette = Palette(
     ok = Color(0xFF7FD8A4), warn = Color(0xFFE9C46A),
     sleepDeep = Color(0xFFA3B6F2), sleepLight = Color(0xFF4D6385), sleepRem = Color(0xFFC99AD2), idle = Color(0xFF1F2C26),
     isDark = true, oxygen = Color(0xFF6CC7DE),
+    // Forest: the night a shade towards teal.
+    stageDeep = Color(0xFF5158D6), stageLight = Color(0xFF3A98E6), stageRem = Color(0xFF7DDFD6), stageAwake = Color(0xFFFF7A6A),
 )
 
 /** A ready-made theme: its name, what it's like, and its palette ([ThemeMode.SYSTEM] has none of its own). */

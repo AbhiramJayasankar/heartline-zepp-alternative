@@ -34,7 +34,7 @@ private fun CaptureSet.ui() = SetUi(start, end, reps, avgHr, peakHr, tempoS,
 
 internal fun CaptureSession.captureItem(result: CaptureAnalysisUi?, now: Long) = CaptureItemUi(
     id, label, start, elapsed(now), result?.avgHr, result?.sets?.size, result?.load,
-    onFoot = result?.let { captureOnFoot(it, captureGait(it)) } == true)
+    onFoot = result?.let { captureOnFoot(it, captureGait(it)) } == true, ride = result?.let { captureRideS(it) >= 300 } == true)
 
 internal fun CaptureSession.captureProgress(now: Long, hr: Int?, gps: dev.heartline.service.PhoneTrackLive? = null) =
     CaptureRunUi(label, start, plannedS, hr, elapsed(now), samples, error,

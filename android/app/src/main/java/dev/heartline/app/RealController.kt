@@ -655,14 +655,15 @@ class RealController(
         "$t: HRV (RMSSD) ${c.rmssd?.let { "%.0f ms".format(it) } ?: "not measured"}, heart rate ${c.hr?.let { "%.0f bpm".format(it) } ?: "-"}, rhythm ${c.rhythm.name.lowercase().replace('_', ' ')}"
     }.orEmpty()
 
-    override fun refreshInsights() = runInsights(auto = false)
-    private fun runInsights(auto: Boolean) {
+    override fun refreshInsights(model: dev.heartline.service.ai.ModelRef?) = runInsights(auto = false, model)
+    private fun insightsWriter() = dev.heartline.service.HealthInsights(dev.heartline.service.HealthTools(this@RealController), ai, extra = { checksSummary() })
+    override suspend fun insightsPreview() = insightsWriter().preview()
+    private fun runInsights(auto: Boolean, model: dev.heartline.service.ai.ModelRef? = null) {
         if (insightsRun.value.running) return
         insightsRun.value = InsightsRun(running = true)
         scope.launch {
             val failure = try {
-                val writer = dev.heartline.service.HealthInsights(dev.heartline.service.HealthTools(this@RealController), ai, extra = { checksSummary() })
-                db.meta.set(dev.heartline.service.InsightReport.KEY, writer.generate(auto).json()); null
+                db.meta.set(dev.heartline.service.InsightReport.KEY, insightsWriter().generate(auto, model).json()); null
             } catch (e: dev.heartline.service.InsightsFailed) { e
             } catch (e: CancellationException) {
                 currentCoroutineContext().ensureActive()
@@ -818,8 +819,8 @@ class RealController(
     override fun setPhoneGps(enabled: Boolean) { scope.launch { db.meta.set(dev.heartline.service.WatchService.PHONE_GPS, enabled.toString()) } }
     override fun stopCapture() = captureTask.stop()
     override suspend fun captureDetail(id: String): CaptureAnalysisUi? = captureTask.detail(id)?.let { a ->
-        if (a.route.isNotEmpty()) return@let a
-        // No phone track: the watch workouts within the capture lend it their route, distance and laps.
+        // The watch workouts within the capture: without a phone track they lend it their route, distance and laps;
+        // with one, their own GPS is kept beside it for the map. Either way they're listed and linked.
         val day = java.time.Instant.ofEpochSecond(a.start).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
         val ws = runCatching { withTimeoutOrNull(8000) { activityDay(day).first().workouts + activityDay(day.plusDays(1)).first().workouts } }.getOrNull().orEmpty()
         a.withWatchTracks(ws).withWatchActivities(ws)

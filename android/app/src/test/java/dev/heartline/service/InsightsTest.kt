@@ -39,11 +39,46 @@ class InsightsTest {
             }
         }
         val tools = HealthTools(dev.heartline.app.DemoController(kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined)))
-        val r = HealthInsights(tools, fake.store).generate()
+        val r = HealthInsights(tools, fake.store).generate(auto = true)
         assertEquals("h", r.headline)
         assertEquals("a/b", r.model)
         // Busy once (asked again), then twice the wrong shape (once more, then the fallback).
         assertEquals(listOf("Busy", "Unusable answer", "Unusable answer", null), r.attempts.map { it.error?.substringBefore(":") })
+    }
+
+    @Test fun insightsYouAskForGoOnceToOneModel() = runBlocking {
+        val g = dev.heartline.service.ai.ModelRef("gemini", "gemini-3.8-flash")
+        val o = dev.heartline.service.ai.ModelRef("openrouter", "a/b")
+        val fake = dev.heartline.service.ai.FakeAi(dev.heartline.service.ai.FakeAi.setup(listOf("sk"), listOf("g"), dev.heartline.service.ai.AiSection.INSIGHTS, listOf(g, o))) { _, url, _, _ ->
+            if ("googleapis" in url) dev.heartline.service.ai.HttpReply(503, """{"error":{"code":503,"message":"This model is currently experiencing high demand."}}""")
+            else dev.heartline.service.ai.HttpReply(200, JSONObject().put("model", "a/b").put("choices", org.json.JSONArray().put(JSONObject().put("message",
+                JSONObject().put("content", """{"headline":"h","insights":[{"title":"t","detail":"d"}]}""")))).toString())
+        }
+        val tools = HealthTools(dev.heartline.app.DemoController(kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined)))
+        // The main model is busy: one request, no retry, no fallback.
+        val failed = runCatching { HealthInsights(tools, fake.store).generate() }.exceptionOrNull()
+        assertTrue(failed is InsightsFailed)
+        assertEquals(1, (failed as InsightsFailed).attempts.size)
+        assertEquals(1, fake.requests.size)
+        // Picking another model asks that one.
+        val r = HealthInsights(tools, fake.store).generate(model = o)
+        assertEquals("a/b", r.model)
+        assertEquals(1, r.attempts.size)
+    }
+
+    @Test fun theDigestSendsEverySectionIncludingHrv() = runBlocking {
+        // Every topic the digest asks for must be one the health lookups answer: an unknown one used to be skipped silently.
+        HealthInsights.DIGEST.forEach { (topic, _) -> assertTrue("unknown topic $topic", HealthTools.TOPICS.any { it.first == topic }) }
+        val tools = HealthTools(dev.heartline.app.DemoController(kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined)))
+        val p = HealthInsights(tools, dev.heartline.service.ai.AiStore({ null }, { _, _ -> })).preview()
+        val sections = p.digest.lines().filter { it.startsWith("## ") }
+        assertEquals(HealthInsights.DIGEST.size, sections.size)
+        listOf("readiness", "trends", "sleep", "hrv", "hrv (yesterday)", "heart rate", "activity", "stress", "spo2 temperature", "workouts").forEach { name ->
+            assertTrue("no '$name' section in ${sections}", sections.any { it == "## $name" || it.startsWith("## $name (") || it == "## $name" })
+        }
+        assertTrue(p.digest.contains("Overnight HRV checks"))
+        assertTrue(p.ask.contains(p.digest))
+        assertTrue(p.system.contains("heart rate variability"))
     }
 
     @Test fun reportsKeepHowTheyWereMade() {

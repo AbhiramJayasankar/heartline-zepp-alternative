@@ -82,6 +82,8 @@ object AiPages {
     const val MODELS = "models"
     const val ACTIVITY = "activity"
     const val NEW_PROVIDER = "provider:+"
+    /** What an AI insights run sends, gathered now. */
+    const val INSIGHTS_SENT = "insights-sent"
     fun section(s: AiSection) = "section:${s.key}"
     fun provider(id: String) = "provider:$id"
 }
@@ -126,6 +128,7 @@ fun AiModelsScreen(controller: HeartlineController, nav: Navigator) {
             SectionCard(s, setup, cat, activity.firstOrNull { it.section == s.key }) { nav.push(Route.AiPage(AiPages.section(s))) }
             Gap(10)
         }
+        NavGroup { NavRow("What's sent to the AI insights", "The exact instructions and data, gathered now") { nav.push(Route.AiPage(AiPages.INSIGHTS_SENT)) } }
         Gap(12)
         SectionTitle("Providers and keys")
         NavGroup {
@@ -211,6 +214,7 @@ fun AiPageScreen(controller: HeartlineController, page: String, nav: Navigator) 
         page == AiPages.MODELS -> ModelsPage(controller, nav)
         page == AiPages.ACTIVITY -> ActivityPage(controller, nav)
         page == AiPages.NEW_PROVIDER -> NewProviderPage(controller, nav)
+        page == AiPages.INSIGHTS_SENT -> InsightsSentPage(controller, nav)
         page.startsWith("provider:") -> ProviderPage(controller, page.removePrefix("provider:"), nav)
         page.startsWith("section:") -> AiSection.of(page.removePrefix("section:"))?.let { SectionPage(controller, it, nav) }
     }

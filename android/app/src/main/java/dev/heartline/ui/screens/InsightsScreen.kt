@@ -95,22 +95,29 @@ fun InsightsScreen(controller: HeartlineController, nav: Navigator) {
             }
             return@Screen
         }
+        val main = aiSetup.section(dev.heartline.service.ai.AiSection.INSIGHTS).main
         PillButton(when { state.running -> "Reading your data…"; report == null -> "Write my insights"; else -> "Write new insights" },
             { controller.refreshInsights() }, Modifier.fillMaxWidth(), enabled = !state.running)
+        if (!state.running && state.error == null) { Gap(6); MutedText("Asks ${main?.let(::shortModel) ?: "the main model"} once. The daily run goes on to the fallbacks; one you ask for doesn't, so it answers or fails quickly.") }
         if (state.running) {
             Gap(10)
             LinearProgressIndicator(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(50)), color = c.pulse, trackColor = c.line)
             Gap(6)
-            MutedText("Gathering two weeks of data and asking ${aiSetup.section(dev.heartline.service.ai.AiSection.INSIGHTS).main?.model?.substringAfterLast('/') ?: "the model"}. A busy model is asked again after a pause, then the next one is tried; this can take a minute or two.")
+            MutedText("Gathering two weeks of data and asking ${state.failedAttempts.firstOrNull()?.model?.let { shortModel(it) } ?: main?.let(::shortModel) ?: "the model"}, once.")
         }
         state.error?.let { err ->
             Gap(10)
-            Note("Every model failed this time. The last one said: $err", color = c.pulse, title = "Couldn't write insights")
+            val who = state.failedAttempts.lastOrNull()?.model?.let(::shortModel) ?: "The model"
+            Note("$who didn't answer: ${err.substringAfter(": ", err)}. Insights you ask for aren't retried; pick a model to try now.", color = c.pulse, title = "Couldn't write insights")
             if (state.failedAttempts.isNotEmpty()) { Gap(8); Attempts(state.failedAttempts) }
+            Gap(10)
+            TryAnotherModel(aiSetup, state.failedAttempts.lastOrNull()?.model, enabled = !state.running) { controller.refreshInsights(it) }
         }
+        Gap(10)
+        NavRow("What's sent to the AI", "The exact instructions and data a run sends, gathered now") { nav.push(Route.AiPage(AiPages.INSIGHTS_SENT)) }
         if (report == null) {
             Gap(16)
-            Note("Heartline gathers readiness, two weeks of trends, the last two nights of sleep, heart rate, activity, stress, SpO2 and temperature for yesterday and today, gym captures and heart checks, and sends them with its instructions to the model. Nothing is sent until you ask, or until the daily run if it's on.",
+            Note("Heartline gathers readiness, two weeks of trends, the last two nights of sleep, heart rate variability, heart rate, activity, stress, SpO2 and temperature for yesterday and today, workout captures and heart checks, and sends them with its instructions to the model. Nothing is sent until you ask, or until the daily run if it's on.",
                 title = "What is sent")
             return@Screen
         }
@@ -273,13 +280,131 @@ private fun Expandable(title: String, text: String) {
     }
 }
 
+/** A model's short name: the part after the vendor, without :free. */
+internal fun shortModel(ref: dev.heartline.service.ai.ModelRef) = shortModel(ref.model)
+internal fun shortModel(model: String) = model.substringAfterLast('/').removeSuffix(":free").removePrefix("models/")
+
+/** After a failed run: the models with a key, as chips, to ask one of them once. */
+@Composable
+private fun TryAnotherModel(setup: dev.heartline.service.ai.AiSetup, failed: String?, enabled: Boolean, onPick: (dev.heartline.service.ai.ModelRef) -> Unit) {
+    val c = HL.colors
+    val sec = setup.section(dev.heartline.service.ai.AiSection.INSIGHTS)
+    val models = (sec.chain + setup.picked).distinct().filter { r -> setup.provider(r.provider)?.keys?.isNotEmpty() == true }
+        .sortedBy { if (it.model == failed) 1 else 0 }
+    if (models.isEmpty()) return
+    Text("Try with", style = HL.type.label, color = c.inkSoft)
+    Gap(6)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        models.forEach { r ->
+            val again = r.model == failed
+            Box(Modifier.heightIn(min = 40.dp).clip(RoundedCornerShape(50)).background(if (again) c.raised else c.ink)
+                .clickable(enabled = enabled, role = Role.Button, onClickLabel = "Write insights with ${shortModel(r)}") { onPick(r) }
+                .padding(horizontal = 14.dp, vertical = 9.dp), contentAlignment = Alignment.Center) {
+                Text((if (again) "Again: " else "") + shortModel(r), style = HL.type.label, color = if (again) c.ink else c.paper)
+            }
+        }
+    }
+}
+
+/**
+ * Settings: exactly what an insights run sends, gathered now from your data. Who gets it (when you ask, and the daily
+ * run), the instructions, each data section with its text, and the message around them. Nothing is sent from here.
+ */
+@Composable
+fun InsightsSentPage(controller: HeartlineController, nav: Navigator) {
+    val c = HL.colors
+    val setup by controller.aiSetup.collectAsStateWithLifecycle()
+    val sec = setup.section(dev.heartline.service.ai.AiSection.INSIGHTS)
+    var preview by remember { mutableStateOf<dev.heartline.service.InsightsPreview?>(null) }
+    var failed by remember { mutableStateOf<String?>(null) }
+    var gathering by remember { mutableStateOf(true) }
+    var round by remember { mutableStateOf(0) }
+    androidx.compose.runtime.LaunchedEffect(round) {
+        gathering = true
+        runCatching { controller.insightsPreview() }.onSuccess { preview = it; failed = null }.onFailure { failed = it.message ?: it.toString() }
+        gathering = false
+    }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    Screen("What's sent to the AI", onBack = { nav.pop() },
+        subtitle = "Gathered just now from your data, exactly as an insights run would send it. Nothing is sent from this page.") {
+        SectionTitleRow("Who gets it")
+        Card(padding = 14.dp) {
+            Text("When you tap Write", style = HL.type.bodyStrong, color = c.ink)
+            MutedText(sec.main?.let { "${shortModel(it)} (${setup.provider(it.provider)?.name ?: it.provider}), once: no retry and no fallback. If it fails, you can pick another model there." }
+                ?: "No main model chosen yet.")
+            Gap(10)
+            Text("The daily run", style = HL.type.bodyStrong, color = c.ink)
+            MutedText(if (sec.chain.isEmpty()) "No models chosen yet." else sec.chain.joinToString(", then ") { shortModel(it) } +
+                ", each retried by its rules (up to ${sec.policy.busyRetries} times when busy, ${sec.policy.timeoutS} s to answer); if all fail, again every 30 minutes, up to 10 times a day.")
+            Gap(10)
+            PillButton("Change the models", { nav.push(Route.AiPage(AiPages.section(dev.heartline.service.ai.AiSection.INSIGHTS))) }, style = ButtonStyle.QUIET)
+        }
+        val p = preview
+        if (gathering && p == null) { Gap(14); MutedText("Gathering your data…") }
+        failed?.let { Gap(14); Note(it, color = c.pulse, title = "Couldn't gather the data") }
+        if (p == null) return@Screen
+        val sections = p.digest.split("\n## ").map { it.removePrefix("## ") }.filter { it.isNotBlank() }
+        Gap(18)
+        SectionTitleRow("The data")
+        MutedText("${sections.size} sections, ${"%,d".format(p.digest.length)} characters (about ${"%,d".format(p.digest.length / 4)} tokens). Tap one to read it as the model does.")
+        Gap(8)
+        sections.forEach { s ->
+            val title = s.lineSequence().first()
+            val body = s.substringAfter('\n', "").trim()
+            DataSection(title, body)
+        }
+        Gap(18)
+        SectionTitleRow("The instructions")
+        MutedText("Sent as the system prompt, with today's date and time filled in.")
+        Mono(p.system)
+        Gap(18)
+        SectionTitleRow("The message")
+        MutedText("The data above goes in one message, between these lines:")
+        Mono(p.ask.substringBefore(p.digest).trim() + "\n\n[the data above]\n\n" + p.ask.substringAfter(p.digest).trim())
+        Gap(18)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            PillButton("Copy all of it", { clipboard.setText(androidx.compose.ui.text.AnnotatedString("SYSTEM:\n${p.system}\n\nUSER:\n${p.ask}")) }, style = ButtonStyle.QUIET)
+            PillButton(if (gathering) "Gathering…" else "Gather again", { round++ }, style = ButtonStyle.QUIET, enabled = !gathering)
+        }
+    }
+}
+
+@Composable
+private fun SectionTitleRow(text: String) { dev.heartline.ui.components.SectionTitle(text); Gap(4) }
+
+/** One data section: its title and size, opening to the text the model reads. */
+@Composable
+private fun DataSection(title: String, body: String) {
+    val c = HL.colors
+    var open by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClickLabel = if (open) "Hide $title" else "Show $title") { open = !open },
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(title.replaceFirstChar { it.uppercase() }, style = HL.type.body, color = c.ink, modifier = Modifier.weight(1f))
+            Text("${body.lines().size} lines", style = HL.type.small, color = c.inkSoft)
+            Spacer(Modifier.width(10.dp))
+            Text(if (open) "−" else "+", style = HL.type.bodyStrong, color = c.pulse)
+        }
+        if (open) { Mono(body); Gap(8) }
+        androidx.compose.material3.HorizontalDivider(color = c.line)
+    }
+}
+
+@Composable
+private fun Mono(text: String) {
+    val c = HL.colors
+    Box(Modifier.fillMaxWidth().padding(top = 6.dp).clip(RoundedCornerShape(12.dp)).background(c.raised).padding(10.dp)) {
+        SelectionContainer { Text(text, style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 15.sp, color = c.ink)) }
+    }
+}
+
 /** The daily run: saved as soon as it changes. The models and their fallbacks are under AI models. */
 @Composable
 private fun DailyInsights(controller: HeartlineController, s: InsightsSettings) {
     val c = HL.colors
     fun set(n: InsightsSettings) = controller.setInsightsSettings(n)
     Card(padding = 14.dp) {
-        ToggleRow("Write new insights every day", "After the hour below, once a day; if every model is busy it tries again every 30 minutes.", s.auto) { set(s.copy(auto = it)) }
+        ToggleRow("Write new insights every day", "After the hour below, once a day. The daily run goes down the whole chain, main model then fallbacks, with retries; if every model is busy it tries again every 30 minutes.", s.auto) { set(s.copy(auto = it)) }
         if (s.auto) {
             Gap(4)
             Row(verticalAlignment = Alignment.CenterVertically) {

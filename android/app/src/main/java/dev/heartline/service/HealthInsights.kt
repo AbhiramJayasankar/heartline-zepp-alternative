@@ -108,6 +108,9 @@ data class InsightsSettings(
     }
 }
 
+/** What a run sends: the instructions ([system]), the message ([ask]) and the data in it ([digest]). */
+data class InsightsPreview(val system: String, val ask: String, val digest: String)
+
 /** Every model failed; [attempts] says what each one answered. */
 class InsightsFailed(val attempts: List<InsightAttempt>) :
     Exception(attempts.lastOrNull()?.let { "${it.model}: ${it.error}" } ?: "no model is set up (add a Gemini or OpenRouter key)")
@@ -122,25 +125,44 @@ class HealthInsights(private val health: HealthTools, private val store: AiStore
                      private val extra: suspend () -> String = { "" },
                      private val now: () -> ZonedDateTime = { ZonedDateTime.now() }) {
 
-    /** Everything the model is shown up front, one section per lookup. */
+    /**
+     * Everything the model is shown up front, one section per lookup ([DIGEST]). A lookup that answers nothing is a
+     * bug, not missing data (each topic says so itself when a day has no data), so it fails loudly: in Nov 2026 the
+     * lookups were merged into get_info and the digest went on asking for the old names, silently sending almost nothing.
+     */
     suspend fun digest(): String = buildString {
-        for ((name, args) in DIGEST) {
-            val text = runCatching { health.run(name, JSONObject(args)) }.getOrNull() ?: continue
-            val day = JSONObject(args).optString("date").takeIf { it.isNotEmpty() && it != "today" }
-            append("## ").append(name.removePrefix("get_").replace('_', ' ')).append(day?.let { " ($it)" } ?: "")
+        for ((topic, args) in DIGEST) {
+            val a = JSONObject(args).put("topic", topic)
+            val text = try { health.run(HealthTools.TOOL, a) } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); "Couldn't read this: ${e.message}" }
+                ?: error("the insights digest asks for '$topic', which the health lookups don't answer")
+            val day = a.optString("date").takeIf { it.isNotEmpty() && it != "today" }
+            append("## ").append(topic.replace('_', ' ')).append(day?.let { " ($it)" } ?: "")
                 .append('\n').append(text.trim()).append("\n\n")
         }
         runCatching { extra() }.getOrNull()?.takeIf { it.isNotBlank() }?.let { append(it.trim()).append("\n\n") }
     }.trim()
 
-    suspend fun generate(auto: Boolean = false): InsightReport {
+    /** Exactly what a run would send now: the instructions, the message and the data in it. Nothing is sent. */
+    suspend fun preview(): InsightsPreview {
+        val data = digest()
+        return InsightsPreview(AssistantAi.renderPrompt(PROMPT, AiContext(now())), ask(data), data)
+    }
+
+    private fun ask(data: String) = "My health data from the Heartline app:\n\n$data\n\nWrite my insights as the JSON object described."
+
+    /**
+     * Writes insights. The daily run ([auto]) goes down the whole chain with its retries, as it has all day; one you
+     * ask for goes once to [model] (the section's main model if null), with no retry and no fallback, so it answers or
+     * fails quickly and you can pick another model.
+     */
+    suspend fun generate(auto: Boolean = false, model: dev.heartline.service.ai.ModelRef? = null): InsightReport {
         val t = now()
         val data = digest()
-        val ask = "My health data from the Heartline app:\n\n$data\n\nWrite my insights as the JSON object described."
+        val ask = ask(data)
         val system = AssistantAi.renderPrompt(PROMPT, AiContext(t))
         val t0 = System.currentTimeMillis()
         val out = try {
-            store.router.run(AiSection.INSIGHTS) { tg ->
+            store.router.run(AiSection.INSIGHTS, only = if (auto) null else model, once = !auto) { tg ->
                 val r = store.api.chat(tg.provider, tg.key, tg.model, ChatRequest(system, listOf(ChatMsg.User(ask)), temperature = 0.4, maxTokens = 8192, json = true), tg.timeoutMs)
                 val text = r.text ?: throw badAnswer(if (r.finish == "length") "${tg.model} ran out of tokens before it answered" else "${tg.model} gave no answer")
                 val report = try { InsightReport.fromModel(text, t.toEpochSecond(), r.model, 0) } catch (e: Exception) { throw badAnswer(e.message ?: "unreadable answer") }
@@ -155,21 +177,23 @@ class HealthInsights(private val health: HealthTools, private val store: AiStore
     companion object {
         fun attempt(a: AiAttempt) = InsightAttempt(a.provider, a.model, a.ms, a.error?.let { e -> a.kind?.let { "${it.label}: $e" } ?: e } ?: a.note)
 
-        private val DIGEST = listOf(
-            "get_readiness" to "{}", "get_trends" to """{"days":14}""",
-            "get_sleep" to """{"date":"today"}""", "get_sleep" to """{"date":"yesterday"}""",
-            "get_heart_rate" to """{"date":"yesterday"}""", "get_heart_rate" to """{"date":"today"}""",
-            "get_activity" to """{"date":"yesterday"}""", "get_activity" to """{"date":"today"}""",
-            "get_stress" to """{"date":"yesterday"}""", "get_stress" to """{"date":"today"}""",
-            "get_spo2_and_temperature" to """{"date":"yesterday"}""", "get_spo2_and_temperature" to """{"date":"today"}""",
-            "get_workout_captures" to """{"limit":5}""",
+        /** The health lookups ([HealthTools] topics) sent with every run, in order; a test checks each one answers. */
+        val DIGEST = listOf(
+            "readiness" to "{}", "trends" to """{"days":14}""",
+            "sleep" to """{"date":"today"}""", "sleep" to """{"date":"yesterday"}""",
+            "hrv" to """{"date":"today"}""", "hrv" to """{"date":"yesterday"}""",
+            "heart_rate" to """{"date":"yesterday"}""", "heart_rate" to """{"date":"today"}""",
+            "activity" to """{"date":"yesterday"}""", "activity" to """{"date":"today"}""",
+            "stress" to """{"date":"yesterday"}""", "stress" to """{"date":"today"}""",
+            "spo2_temperature" to """{"date":"yesterday"}""", "spo2_temperature" to """{"date":"today"}""",
+            "workouts" to """{"limit":5}""",
         )
 
         private val PROMPT_TEMPLATE = """
             You are a careful health analyst inside Heartline, an app that reads an Amazfit smartwatch. Now: {NOW}.
             The user sends their data: readiness, two weeks of trends against their usual level, the last two nights'
-            sleep, heart rate, activity, stress, SpO2 and temperature for yesterday and today, gym captures and heart
-            checks. Find the 4 to 7 most useful insights: patterns across days, changes from their own
+            sleep, heart rate variability (overnight samples, daytime samples and heart checks), heart rate, activity,
+            stress, SpO2 and temperature for yesterday and today, workout captures and heart checks. Find the 4 to 7 most useful insights: patterns across days, changes from their own
             baseline, links between sleep, strain, stress and resting heart rate, things going well, and things to watch.
             Use their actual numbers and dates. Never invent data; if something is missing or too thin to judge, say so
             briefly or leave it out. Today's totals are still adding up, so judge activity on whole days. No diagnosis:

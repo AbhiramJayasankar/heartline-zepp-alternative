@@ -37,13 +37,13 @@ import dev.heartline.ui.components.Delta
 import dev.heartline.ui.components.FactGrid
 import dev.heartline.ui.components.FactItem
 import dev.heartline.ui.components.Heading
-import dev.heartline.ui.components.Hypnogram
+import dev.heartline.ui.components.SleepLength
+import dev.heartline.ui.components.SleepStagesChart
 import dev.heartline.ui.components.Meter
 import dev.heartline.ui.components.MutedText
 import dev.heartline.ui.components.Note
 import dev.heartline.ui.components.RangeBar
 import dev.heartline.ui.components.Ring
-import dev.heartline.ui.components.StagesBar
 import dev.heartline.ui.components.hm
 import dev.heartline.ui.theme.Area
 import dev.heartline.ui.theme.HL
@@ -181,7 +181,7 @@ private fun NightDetail(n: SleepNightUi, minutes: List<dev.heartline.app.MinuteU
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f).semantics(mergeDescendants = true) {}) {
                 AreaLabel("Asleep", c.hue(Area.SLEEP), dot = false)
-                BigValue(hm(asleep), size = 40)
+                SleepLength(asleep, c.hue(Area.SLEEP), size = 44)
                 Text("${timeOf(n.start)} → ${timeOf(n.end)}", style = HL.type.bodyStrong, color = c.ink)
                 Text("${hm(inBed)} in bed · ${if (inBed > 0) 100 * asleep / inBed else 0}% asleep", style = HL.type.small, color = c.inkSoft)
                 if (n.ongoing) { Gap(4); Text("So far. This night updates with the next sync if you're still asleep or doze off again.", style = HL.type.small, color = c.inkSoft) }
@@ -206,16 +206,15 @@ private fun NightDetail(n: SleepNightUi, minutes: List<dev.heartline.app.MinuteU
     Card(padding = 14.dp) {
         AreaLabel("Stages through the night", c.hue(Area.SLEEP), dot = false)
         Gap(8)
-        Hypnogram(minutes, n.start, n.end, spo2 = spo2Points)
-        Gap(12)
-        StagesBar(n)
-        Gap(12)
+        SleepStagesChart(minutes, n.start, n.end, spo2 = spo2Points, totals = listOf(n.awakeMin, n.remMin, n.lightMin, n.deepMin))
+        Gap(16)
         val total = (asleep + n.awakeMin).coerceAtLeast(1)
+        // In the chart's order, top to bottom.
         listOf(
-            Stage("Deep", n.deepMin, c.sleepDeep, 0.13f, 0.23f, "Body repair and immune work happen mostly here."),
-            Stage("Light", n.lightMin, c.sleepLight, 0.45f, 0.60f, "Most of the night; the bridge between stages."),
-            Stage("REM", n.remMin, c.sleepRem, 0.20f, 0.25f, "Dreaming; memory and mood."),
-            Stage("Awake", n.awakeMin, c.warn, 0f, 0.10f, "Short wakings are normal; most aren't remembered."),
+            Stage("Awake", n.awakeMin, c.stageAwake, 0f, 0.10f, "Short wakings are normal; most aren't remembered."),
+            Stage("REM", n.remMin, c.stageRem, 0.20f, 0.25f, "Dreaming; memory and mood."),
+            Stage("Light", n.lightMin, c.stageLight, 0.45f, 0.60f, "Most of the night; the bridge between stages."),
+            Stage("Deep", n.deepMin, c.stageDeep, 0.13f, 0.23f, "Body repair and immune work happen mostly here."),
         ).forEach { s ->
             val share = s.min / total.toFloat()
             Column(Modifier.padding(vertical = 6.dp).semantics(mergeDescendants = true) {}) {
