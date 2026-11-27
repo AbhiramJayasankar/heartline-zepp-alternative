@@ -30,6 +30,16 @@ class SleepStagesTest {
     }
 
     @Test
+    fun remScoredInRunsReadsAsOneEpisodeAndALoneBlipGoes() {
+        // REM 3, light 4, REM 4, light 1, REM 5 inside light: one REM episode of 17 minutes. A lone REM 2 later is folded.
+        val m = night(MinuteState.SLEEP_LIGHT to 30, MinuteState.SLEEP_REM to 3, MinuteState.SLEEP_LIGHT to 4, MinuteState.SLEEP_REM to 4,
+            MinuteState.SLEEP_LIGHT to 1, MinuteState.SLEEP_REM to 5, MinuteState.SLEEP_LIGHT to 20, MinuteState.SLEEP_REM to 2, MinuteState.SLEEP_LIGHT to 20)
+        val s = smoothStretches(stageStretches(m, t0, t0 + 89 * 60))
+        assertEquals(listOf(2, 1, 2), s.map { it.lane })
+        assertEquals(17, s[1].minutes)
+    }
+
+    @Test
     fun aGapInTheRecordingBreaksAStretch() {
         val a = night(MinuteState.SLEEP_DEEP to 10)
         val b = night(MinuteState.SLEEP_DEEP to 10).map { it.copy(ts = it.ts + 30 * 60) }

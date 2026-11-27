@@ -181,7 +181,7 @@ fun OverviewScreen(controller: HeartlineController, nav: Navigator, onTab: (Tab)
                         // The night's stages in small when its minutes are here (they span yesterday and today), else the shares bar.
                         val nightMinutes = remember(day, yday, night) { (yday?.minutes.orEmpty() + day?.minutes.orEmpty()).filter { it.ts in night.start until night.end } }
                         Gap(10)
-                        if (nightMinutes.size >= 30) dev.heartline.ui.components.SleepStagesMini(nightMinutes, night.start, night.end) else StagesBar(night)
+                        if (nightMinutes.size >= 30) dev.heartline.ui.components.SleepStagesMini(nightMinutes, night.start, night.end, height = dev.heartline.ui.components.TILE_GRAPH_HEIGHT) else StagesBar(night)
                     } else MutedText("No night synced yet")
                     // Today's naps, kept apart from the night.
                     t?.napsToday?.takeIf { it.isNotEmpty() }?.let { naps ->
@@ -192,6 +192,10 @@ fun OverviewScreen(controller: HeartlineController, nav: Navigator, onTab: (Tab)
                 Tile("Heart", c.pulse, Modifier.weight(1f).fillMaxHeight(), { onTab(Tab.HEART) }) {
                     BigValue(restingNow?.first?.roundToInt()?.toString() ?: "–", "bpm", size = 28)
                     Text("Sleeping" + (restingNow?.second?.takeIf { it != date }?.let { ", ${shortDate(it)}" } ?: "") + (t?.awakeRestingHr?.let { " · awake $it" } ?: ""), style = HL.type.small, color = c.inkSoft)
+                    // The last 24 hours of heart rate, ten-minute means: the night's low and the day's rises.
+                    val dayHr = remember(day, yday) { val now = System.currentTimeMillis() / 1000.0
+                        dev.heartline.ui.components.bucketed((yday?.hr.orEmpty() + day?.hr.orEmpty()).filter { it.t >= now - 86_400 }, 600.0) }
+                    if (dayHr.size >= 2) { Gap(10); dev.heartline.ui.components.TileLine(dayHr, dayHr.first().t, dayHr.last().t, c.pulse, description = "Heart rate over the last 24 hours") }
                     Gap(6)
                     if (restingNow != null && rhrUsual != null) {
                         val diff = (restingNow.first - rhrUsual).roundToInt()
@@ -203,9 +207,12 @@ fun OverviewScreen(controller: HeartlineController, nav: Navigator, onTab: (Tab)
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Tile("Steps", c.hue(Area.MOVE), Modifier.weight(1f).fillMaxHeight(), { onTab(Tab.ACTIVITY) }) {
                     BigValue(fmtInt(stepsNow), size = 28)
-                    Text("of ${fmtInt(goal)} goal", style = HL.type.small, color = c.inkSoft)
-                    Gap(8)
-                    Meter((stepsNow ?: 0) / goal.toFloat(), c.hue(Area.MOVE), description = "${((stepsNow ?: 0) * 100 / goal)} percent of the step goal")
+                    Text("of ${fmtInt(goal)} goal" + ((stepsNow ?: 0) * 100 / goal).takeIf { it > 0 }?.let { ", $it%" }.orEmpty(), style = HL.type.small, color = c.inkSoft)
+                    Gap(10)
+                    // Steps each hour of today, up to now.
+                    val hourNow = remember { java.time.LocalTime.now().hour }
+                    dev.heartline.ui.components.TileBars((0..23).map { h -> day?.stepsByHour?.firstOrNull { it.hour == h }?.let { it.total ?: it.avg } },
+                        { c.hue(Area.MOVE) }, current = hourNow, description = "Steps each hour today")
                     Gap(6)
                     MutedText("${day?.distanceM?.let { "%.1f km".format(it / 1000.0) } ?: "– km"} · ${day?.caloriesKcal?.let { "$it kcal" } ?: "– kcal"}")
                 }
@@ -213,8 +220,10 @@ fun OverviewScreen(controller: HeartlineController, nav: Navigator, onTab: (Tab)
                 Tile("Stress", c.hue(Area.STRESS), Modifier.weight(1f).fillMaxHeight(), { nav.push(dayRoute(DayMetric.STRESS, date.toEpochDay())) }) {
                     BigValue(stress?.first?.roundToInt()?.toString() ?: "–", "avg", size = 28)
                     Text(stress?.first?.let { stressWord(it) } ?: "No readings yet", style = HL.type.small, color = c.inkSoft)
-                    Gap(8)
-                    Meter(((stress?.first ?: 0.0) / 100).toFloat(), stress?.first?.let { stressColor(stressWord(it), c) } ?: c.line)
+                    Gap(10)
+                    val stressHourNow = remember { java.time.LocalTime.now().hour }
+                    dev.heartline.ui.components.TileBars((0..23).map { h -> day?.stressByHour?.firstOrNull { it.hour == h }?.avg },
+                        { v -> stressColor(stressWord(v), c) }, current = stressHourNow, top = 100.0, description = "Stress each hour today")
                     day?.stressBands?.firstOrNull { it.name == "Relaxed" }?.minutes?.takeIf { it > 0 }?.let { Gap(6); MutedText("Relaxed ${hm(it)}") }
                 }
             }
@@ -224,12 +233,19 @@ fun OverviewScreen(controller: HeartlineController, nav: Navigator, onTab: (Tab)
                 Tile("Blood oxygen", c.hue(Area.BODY), Modifier.weight(1f).fillMaxHeight(), { nav.push(dayRoute(DayMetric.BODY, date.toEpochDay())) }) {
                     BigValue(spo2?.first?.let { "%.0f".format(it) } ?: "–", "%", size = 28)
                     Text(if (spo2 == null) "No readings yet" else "Average" + (spo2.second.takeIf { it != date }?.let { ", ${shortDate(it)}" } ?: ""), style = HL.type.small, color = c.inkSoft)
+                    // The readings behind the average: today's, else yesterday's, as the number above.
+                    val oxy = remember(day, yday) { val now = System.currentTimeMillis() / 1000.0; (yday?.spo2.orEmpty() + day?.spo2.orEmpty()).filter { it.t >= now - 86_400 } }
+                    if (oxy.size >= 2) { Gap(10); dev.heartline.ui.components.TileDots(oxy, oxy.minOf { it.t }, oxy.maxOf { it.t }, c.hue(Area.BODY), c.pulse, description = "Blood oxygen readings") }
                     (day?.spo2Min ?: yday?.spo2Min)?.let { Gap(6); MutedText("Lowest ${"%.0f".format(it)}%") }
                 }
                 val temp = day?.tempAvg?.let { it to date } ?: yday?.tempAvg?.let { it to date.minusDays(1) } ?: trends.latestOf("temp")
                 Tile("Temperature", c.warn, Modifier.weight(1f).fillMaxHeight(), { nav.push(dayRoute(DayMetric.BODY, date.toEpochDay())) }) {
                     BigValue(temp?.first?.let { "%.1f".format(it) } ?: "–", "°C", size = 28)
                     Text(if (temp == null) "No readings yet" else "Skin, average" + (temp.second.takeIf { it != date }?.let { ", ${shortDate(it)}" } ?: ""), style = HL.type.small, color = c.inkSoft)
+                    // The last 24 hours of skin temperature, half-hour means.
+                    val temps = remember(day, yday) { val now = System.currentTimeMillis() / 1000.0
+                        dev.heartline.ui.components.bucketed((yday?.temperature.orEmpty() + day?.temperature.orEmpty()).filter { it.t >= now - 86_400 }, 1800.0) }
+                    if (temps.size >= 2) { Gap(10); dev.heartline.ui.components.TileLine(temps, temps.first().t, temps.last().t, c.warn, gap = 7200.0, description = "Skin temperature") }
                     if (day?.tempMin != null && day?.tempMax != null) { Gap(6); MutedText("${"%.1f".format(day!!.tempMin)}–${"%.1f".format(day!!.tempMax)} °C") }
                 }
             }

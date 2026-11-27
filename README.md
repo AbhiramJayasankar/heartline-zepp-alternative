@@ -19,7 +19,7 @@
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
-> **Status: 0.11.0.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
+> **Status: 0.12.0.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
 > Other Huami/Zepp watches of the same generation (GTR 2, GTS 2, GTS 2e) speak a similar protocol but are untested.
 
 ## Highlights
@@ -29,7 +29,7 @@
 | 🏋️ **A gym session analysed like a coach would** | Your log's sets and loads plus the watch's raw sensors: new bests, volume against last time, what each exercise cost your heart, recovery between sets, calories per exercise, a treadmill comparison with your last walk, and an AI coach's note with the numbers to aim for next time. |
 | 🎙️ **An Alexa button that knows you** | Ask about your sleep, stress or readiness and get an analysis of *your* data. Ask for the news and it searches the web. Set timers, alarms and reminders by voice. Free AI, your own keys. |
 | 📊 **Health scores Zepp never showed** | Readiness, strain, sleep score and body battery every day, trends against your own 28-day baseline, VO2max and fitness age. |
-| 🌙 **A page for every part of you** | Sleep with a stage-by-stage hypnogram and overnight SpO2, heart rate with resting and HRV against your usual, activity against your goal, and an overview that ties them together. |
+| 🌙 **A page for every part of you** | Sleep with a stage-by-stage hypnogram and overnight SpO2, heart rate with resting and HRV against your usual, activity against your goal, and a Today overview that ties them together, each tile with a small graph of its day. |
 | ✨ **AI insights** | The model you choose reads two weeks of your data and writes what stands out, with the numbers and one thing to try. |
 | 🧠 **Your AI, your models** | Gemini, OpenRouter or any OpenAI-compatible API, as many keys as you like. Every AI feature gets a main model and two fallbacks, and an out-of-quota key hands over to the next. |
 | 🎨 **Seven themes** | Paper, Night, Sage, Dusk, Lilac, Forest and a true-black OLED theme, or follow the phone. |

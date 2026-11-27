@@ -2,6 +2,31 @@
 
 Every Heartline release, newest first. Each entry is also the release's notes on GitHub, where its APK is.
 
+## 0.12.0 (2026-11-28)
+
+### Added
+
+- **Every Today tile has a small graph of its data.**
+  - Heart: the last 24 hours in ten-minute means.
+  - Steps and stress: today's hours as bars, stress coloured by band.
+  - Blood oxygen: the last day's readings as dots, red under 92%.
+  - Temperature: the last 24 hours in half-hour means.
+  - Sleep: keeps its small stages chart.
+  - The steps percentage moved next to the goal.
+
+### Changed
+
+- **Sleep stages read as episodes, as a watch shows them, with no stray lines.** REM and deep stretches a few minutes apart are drawn as one episode (up to 12 minutes of other sleep between), stretches under 5 minutes join their neighbours, and wakings are never folded away. Blocks are joined by soft ribbons instead of thin lines, and the dotted row lines are gone. "Every minute" still shows exactly what the watch scored, and the totals always count every minute.
+
+### Fixed
+
+- **The live heart-check chart's "0" no longer sits on the movement limit's label** when a big move rescales the lane.
+
+### For developers
+
+- The 1,280-line workout screen file is split by page (capture start, capture page, capture sections, watch workout page). AGENTS.md maps where each lives.
+- A test checks that every health topic the AI can ask for answers.
+
 ## 0.11.0 (2026-11-28)
 
 ### Added

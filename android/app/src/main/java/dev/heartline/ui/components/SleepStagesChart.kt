@@ -29,7 +29,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
@@ -86,25 +85,68 @@ fun stageStretches(minutes: List<MinuteUi>, start: Long, end: Long): List<StageS
     return out
 }
 
-/** Stretches shorter than this (minutes) between two of the same stage are folded into them when smoothed. */
-const val STAGE_FOLD_MIN = 4
+/**
+ * REM or deep stretches with no more than this many minutes of other sleep between them are one episode, smoothed. Sleep
+ * scoring commonly treats REM broken by up to 15 minutes as one REM period; 12 keeps clearly separate periods apart.
+ */
+const val STAGE_EPISODE_GAP = 12
+/** A sleep stretch shorter than this (minutes) is folded into its neighbours when smoothed. */
+const val STAGE_FOLD_MIN = 5
 
 /**
- * The stretches as a watch shows a night: a sleep stretch under [STAGE_FOLD_MIN] minutes with the same stage on both
- * sides is folded into them, shortest first, so a minute of light inside REM doesn't break it into a comb. Awake
- * stretches are never folded: a waking, however short, stays on the chart.
+ * The night as a watch shows it, from the stretches [stageStretches] finds minute by minute. The watch scores REM a
+ * minute at a time against a threshold, so a REM period arrives as runs like REM 3, light 4, REM 4, light 1, REM 5 (the
+ * night of 26 to 27 Nov 2026 had 1h 05m of REM in 24 such runs). Smoothed:
+ * 1. REM and deep stretches with up to [STAGE_EPISODE_GAP] minutes of other sleep between them join into one episode;
+ * 2. a sleep stretch under [STAGE_FOLD_MIN] minutes with the same stage either side is folded into it, shortest first;
+ * 3. a sleep stretch under 3 minutes still left joins its longer sleeping neighbour.
+ * Awake stretches are never folded or joined over: a waking, however short, stays. Gaps in the recording stay gaps.
  */
 fun smoothStretches(stretches: List<StageStretch>): List<StageStretch> {
-    val s = stretches.toMutableList()
-    while (true) {
-        val i = (1 until s.size - 1).filter { k ->
-            val m = s[k]; val a = s[k - 1]; val b = s[k + 1]
-            m.lane != 0 && m.minutes < STAGE_FOLD_MIN && a.lane == b.lane && m.start - a.end <= 120 && b.start - m.end <= 120
-        }.minByOrNull { s[it].minutes } ?: break
-        s[i - 1] = s[i - 1].copy(end = s[i + 1].end)
-        s.removeAt(i + 1); s.removeAt(i)
+    if (stretches.size < 3) return stretches
+    val t0 = stretches.first().start
+    val n = ((stretches.last().end - t0 + 59) / 60).toInt()
+    // One lane a minute, -1 where nothing was recorded.
+    val lane = IntArray(n) { -1 }
+    for (st in stretches) for (i in ((st.start - t0) / 60).toInt() until min(n, ((st.end - t0 + 59) / 60).toInt())) lane[i] = st.lane
+    data class Run(val lane: Int, val from: Int, val to: Int) { val len get() = to - from }
+    fun runs(): List<Run> {
+        val out = ArrayList<Run>(); var i = 0
+        while (i < n) { var j = i; while (j < n && lane[j] == lane[i]) j++; out += Run(lane[i], i, j); i = j }
+        return out
     }
-    return s
+    fun sleeping(l: Int) = l in 1..3
+    // 1. Episodes.
+    for (l in listOf(1, 3)) {
+        val r = runs()
+        var k = 0
+        while (k < r.size) {
+            if (r[k].lane != l) { k++; continue }
+            var j = k + 1
+            while (j < r.size && r[j].lane != l && sleeping(r[j].lane) && r[j].to - r[k].to <= STAGE_EPISODE_GAP) j++
+            if (j < r.size && r[j].lane == l && r[j].from - r[k].to <= STAGE_EPISODE_GAP) {
+                for (i in r[k].to until r[j].from) lane[i] = l
+                k = j
+            } else k++
+        }
+    }
+    // 2. Short stretches inside one stage fold into it, shortest first.
+    while (true) {
+        val r = runs()
+        val k = (1 until r.size - 1).filter { sleeping(r[it].lane) && r[it].len < STAGE_FOLD_MIN && r[it - 1].lane == r[it + 1].lane && sleeping(r[it - 1].lane) }
+            .minByOrNull { r[it].len } ?: break
+        for (i in r[k].from until r[k].to) lane[i] = r[k - 1].lane
+    }
+    // 3. Any blip left joins its longer sleeping neighbour.
+    while (true) {
+        val r = runs()
+        val k = r.indices.filter { sleeping(r[it].lane) && r[it].len < 3 && (sleeping(r.getOrNull(it - 1)?.lane ?: -1) || sleeping(r.getOrNull(it + 1)?.lane ?: -1)) }
+            .minByOrNull { r[it].len } ?: break
+        val prev = r.getOrNull(k - 1)?.takeIf { sleeping(it.lane) }; val next = r.getOrNull(k + 1)?.takeIf { sleeping(it.lane) }
+        val into = listOfNotNull(prev, next).maxByOrNull { it.len }!!.lane
+        for (i in r[k].from until r[k].to) lane[i] = into
+    }
+    return runs().filter { it.lane >= 0 }.map { StageStretch(it.lane, t0 + it.from * 60L, min(stretches.last().end, t0 + it.to * 60L)) }
 }
 
 private val hhmm = DateTimeFormatter.ofPattern("HH:mm")
@@ -115,33 +157,35 @@ private fun span(min: Int) = if (min >= 60) "${min / 60}h ${"%02d".format(min % 
 private fun Color.lit(dark: Boolean) = lerp(this, Color.White, if (dark) 0.16f else 0.12f)
 
 /**
- * Draws the stretches in rows [top]..[top] + 4 * [rowH] between [x0] and [x1]: thin connectors from each stretch to the
- * next with a gradient between their colours, then the stretches as rounded blocks over them. Stretches other than
- * [focus] fade when one is picked.
+ * Draws the stretches in rows [top]..[top] + 4 * [rowH] between [x0] and [x1]: each change of stage is a soft ribbon
+ * as wide as [connector], fading from one stage's colour to the next, then the stretches as solid rounded blocks over
+ * it. Stretches other than [focus] fade when one is picked.
  */
 private fun DrawScope.stages(stretches: List<StageStretch>, start: Long, end: Long, x0: Float, x1: Float, top: Float, rowH: Float,
                              c: Palette, blockFrac: Float, connector: Dp, focus: StageStretch?) {
     fun x(ts: Long) = x0 + (ts - start).toFloat() / max(1L, end - start) * (x1 - x0)
     fun cy(lane: Int) = top + rowH * (lane + 0.5f)
     val bh = rowH * blockFrac
-    val fade = { s: StageStretch -> if (focus == null || focus == s) 1f else 0.28f }
-    // Connectors first, so the blocks sit over their ends.
+    val fade = { s: StageStretch -> if (focus == null || focus == s) 1f else 0.25f }
     val cw = connector.toPx()
+    // Ribbons first, so the blocks sit over their ends. They start and end inside the blocks, so no edge shows.
     stretches.zipWithNext().forEach { (a, b) ->
         if (b.start - a.end > 300 || a.lane == b.lane) return@forEach
         val xx = x(b.start) - cw / 2
         val upper = if (a.lane < b.lane) a else b; val lower = if (upper === a) b else a
         val y0 = cy(upper.lane); val y1 = cy(lower.lane)
-        val alpha = 0.85f * min(fade(a), fade(b))
-        drawRect(Brush.verticalGradient(listOf(c.stageColor(upper.lane).copy(alpha = alpha), c.stageColor(lower.lane).copy(alpha = alpha)), y0, y1),
-            Offset(xx, y0), Size(cw, y1 - y0))
+        val alpha = 0.6f * min(fade(a), fade(b))
+        // Strong where it meets each block, nearly gone between them: a change of stage reads as a glow, not a line.
+        val mid = lerp(c.stageColor(upper.lane), c.stageColor(lower.lane), 0.5f).copy(alpha = alpha * 0.18f)
+        drawRoundRect(Brush.verticalGradient(listOf(c.stageColor(upper.lane).copy(alpha = alpha), mid, c.stageColor(lower.lane).copy(alpha = alpha)), y0, y1),
+            Offset(xx, y0), Size(cw, y1 - y0), CornerRadius(cw / 2))
     }
-    val minW = cw * 1.4f
+    val minW = max(cw, 3.dp.toPx())
     stretches.forEach { s ->
         val left = x(s.start); val w = max(minW, x(s.end) - left)
         val col = c.stageColor(s.lane)
         val y = cy(s.lane) - bh / 2
-        val r = min(min(6.dp.toPx(), w / 2), bh / 2)
+        val r = min(min(7.dp.toPx(), w / 2), bh / 2)
         val a = fade(s)
         drawRoundRect(Brush.verticalGradient(listOf(col.lit(c.isDark).copy(alpha = a), col.copy(alpha = a)), y, y + bh), Offset(left, y), Size(w, bh), CornerRadius(r))
     }
@@ -221,9 +265,6 @@ fun SleepStagesChart(minutes: List<MinuteUi>, start: Long, end: Long, modifier: 
         val axisH = 34.dp.toPx()
         val rowH = (size.height - axisH) / 4
         fun x(ts: Long) = x0 + (ts - start).toFloat() / max(1L, end - start) * (x1 - x0)
-        // Dotted lines between the rows.
-        val dots = PathEffect.dashPathEffect(floatArrayOf(2.dp.toPx(), 4.dp.toPx()))
-        for (i in 1..3) drawLine(c.line, Offset(x0, rowH * i), Offset(x1, rowH * i), 1.dp.toPx(), pathEffect = dots)
         // Each row's name and its total for the night.
         STAGE_NAMES.forEachIndexed { i, name ->
             val nameText = tm.measure(name, nameStyle)
@@ -232,7 +273,7 @@ fun SleepStagesChart(minutes: List<MinuteUi>, start: Long, end: Long, modifier: 
             drawText(nameText, topLeft = Offset(0f, y))
             drawText(total, topLeft = Offset(0f, y + nameText.size.height))
         }
-        stages(stretches, start, end, x0, x1, 0f, rowH, c, blockFrac = 0.62f, connector = 2.5.dp, focus = focus)
+        stages(stretches, start, end, x0, x1, 0f, rowH, c, blockFrac = 0.66f, connector = 6.dp, focus = focus)
         // The time along the bottom: a dot every half hour, a bar at each end with its clock time under it.
         val ay = rowH * 4 + 9.dp.toPx()
         val firstHalf = (start / 1800 + 1) * 1800
@@ -241,19 +282,19 @@ fun SleepStagesChart(minutes: List<MinuteUi>, start: Long, end: Long, modifier: 
             if (x(h) - x0 > 6.dp.toPx() && x1 - x(h) > 6.dp.toPx()) drawCircle(c.inkSoft.copy(alpha = if (h % 3600 == 0L) 0.8f else 0.45f), if (h % 3600 == 0L) 1.7.dp.toPx() else 1.2.dp.toPx(), Offset(x(h), ay))
             h += 1800
         }
-        listOf(x0, x1).forEach { xx -> drawLine(c.inkSoft, Offset(xx, ay - 4.dp.toPx()), Offset(xx, ay + 4.dp.toPx()), 1.5.dp.toPx()) }
+        listOf(x0, x1).forEach { xx -> drawCircle(c.inkSoft, 2.4.dp.toPx(), Offset(xx, ay)) }
         val st = tm.measure(clockAt(start), clockStyle)
         val en = tm.measure(clockAt(end), clockStyle)
         drawText(st, topLeft = Offset(x0, ay + 7.dp.toPx()))
         drawText(en, topLeft = Offset(x1 - en.size.width, ay + 7.dp.toPx()))
         // The moment picked.
-        sel?.let { t -> drawLine(c.ink.copy(alpha = 0.55f), Offset(x(t), 0f), Offset(x(t), rowH * 4), 1.2.dp.toPx()) }
+        sel?.let { t -> drawLine(c.ink.copy(alpha = 0.35f), Offset(x(t), 0f), Offset(x(t), rowH * 4), 2.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round) }
     }
     // Smoothed or every minute: what the watch scored minute by minute is a click away.
     if (raw.size != smooth.size) {
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(if (everyMinute) "Every minute as the watch scored it." else "Smoothed: a stage under $STAGE_FOLD_MIN minutes inside another is folded in.",
+            Text(if (everyMinute) "Every minute as the watch scored it." else "Smoothed into episodes, as a watch shows them; the totals count every minute.",
                 style = HL.type.small.copy(fontSize = 12.sp), color = c.inkSoft, modifier = Modifier.weight(1f))
             Spacer(Modifier.width(8.dp))
             Text(if (everyMinute) "Smooth" else "Every minute", style = HL.type.label, color = c.ink,
@@ -271,7 +312,7 @@ fun SleepStagesMini(minutes: List<MinuteUi>, start: Long, end: Long, modifier: M
     val c = HL.colors
     val stretches = remember(minutes, start, end) { smoothStretches(stageStretches(minutes, start, end)) }
     Canvas(modifier.fillMaxWidth().height(height).semantics { contentDescription = "Sleep stages from ${clockAt(start)} to ${clockAt(end)}" }) {
-        stages(stretches, start, end, 0f, size.width, 0f, size.height / 4, c, blockFrac = 0.7f, connector = 1.5.dp, focus = null)
+        stages(stretches, start, end, 0f, size.width, 0f, size.height / 4, c, blockFrac = 0.72f, connector = 3.dp, focus = null)
     }
 }
 
