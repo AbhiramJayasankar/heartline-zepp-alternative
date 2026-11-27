@@ -62,9 +62,18 @@ minute whose heart rate the movement raised, while the watch averages the whole 
 The beat-to-beat evidence (6, 11) is direct, and RMSSD is what the check is for.
 
 The bigger lever for daytime checks is **when** they run, not the signal processing: the wrist moves most of a
-daytime check (median 83% of the time above 0.015 g). Starting a check only after a few seconds of stillness, and
-running it until 45 s of clean beats are in (up to a cap) rather than a fixed 2 minutes, is the follow-up; it needs
-on-watch testing, since the accelerometer can only be watched through the same raw stream. Streaming the gyroscope during
+daytime check (median 83% of the time above 0.015 g). That is the follow-up, designed with Gemini and checked on these
+recordings, not built:
+
+- **Short scouts, spaced out.** Open the stream for 20 s; if the wrist was still (≤ 0.015 g) for less than 6 s of it,
+  stop and try again 8–10 minutes later, instead of three 2-minute tries back to back inside the same bout of typing.
+  On the 191 daytime checks this would have ended **131 after 20 s and lost 3 of the 29 that passed**.
+- **Stop when done.** Run until 50 s of clean beats (5 s spare over the 45 s rule), up to 3 minutes, and give up as soon
+  as the target can no longer be reached. The checks that passed reached 50 s at a median **74 s** (IQR 64–88), not
+  120 s.
+- Untested here, and needing the watch: whether the accelerometer can stream with the LED off (mask 0x01 alone), what
+  continuous scouting costs the watch's battery, and whether the bout patterns of a whole desk day match these
+  2-minute clips. A few hours of continuous accelerometer recording at a desk would settle the spacing. Streaming the gyroscope during
 checks would catch turns about the gravity axis that the accelerometer cannot see; it needs an on-watch test.
 
 ## Verdict on the SpO2 / sleep-breathing mode
@@ -115,9 +124,15 @@ of measurements (never personal data), asked to research and critique. What it s
   data here already overlaps 273 of the watch's own SpO2 readings without any change in the stream, so that probe is
   unlikely to differ, but it has not been run with a manual spot check.
 
-Where it was wrong or loose: its first answer guessed the app might lack sub-sample timing (it already resamples to
-100 Hz and refines peaks), and its 34%-of-still-windows puzzle came from the window test counting only shape-passing
-beats in a gate that let turning wrists through, not from the detector.
+- **Scheduling numbers**: it proposed the scout, early-stop and cap figures in the follow-up above, and the offline
+  checks of them; those checks are the ones reported there.
+
+Where it was wrong or loose: it said that resampling to 100 Hz by straight lines before refining each peak with a
+parabola halves the sub-sample correction. Not here, because the 0.5–4 Hz filter runs after the resampling and smooths
+the straight-line joins away: on synthetic beats with known times the interval error is **0.2 ms RMS** at 25 and at
+50 Hz (4 ms without the refinement). Its first answer also guessed the app might lack sub-sample timing, and
+read the 34%-of-still-windows figure as a detector fault; it came from the old gate letting turning wrists count as
+still.
 
 ## Live chart
 
