@@ -84,7 +84,40 @@ It gives no extra or better raw optical data.
 
 ## Gemini (Neon, reasoning High) as a second reader
 
-GEMINI_SECTION
+Gemini's Neon model (web app, reasoning set to High) was used through the work: given the sensor setup and each set
+of measurements (never personal data), asked to research and critique. What it said, and how it held up here:
+
+- **Recovery during movement is a dead end on this sensor.** No published method recovers RMSSD-grade (10–20 ms) beat
+  timing from one green wrist channel during non-periodic hand movement. Desk movements are tendon and tissue
+  deformation and strap pressure, which the case's acceleration barely sees; it cited Zhang et al. 2019 (Sensors 19:673)
+  on micromotion artifacts that even a second wavelength can't cancel linearly. Matches (1)–(4) here. Deep-learning
+  denoisers report ~12–17 ms RMSSD error on PPG-DaLiA (Empatica, 64 Hz), unvalidated on other hardware: it was
+  explicit that it was unsure there.
+- **The magnitude gate is blind to rotation; use per-axis motion.** Confirmed here (6). It pointed to Charlton et al.
+  2023 (CinC): accelerometer gating at 12.9 mg mean amplitude deviation of the magnitude, AUROC 0.78. It then worked
+  out that this sits near 0.028 g on this app's per-axis measure, and suggested binning beats by motion to find where
+  contamination starts. That test (11) moved the limit from the planned 0.025 g to **0.015 g**.
+- **Template poisoning**: build the template from quiet beats only (Orphanidou et al. 2014). Confirmed, small (8).
+- **Non-contiguous RMSSD over truly adjacent beats, no gap filling, is valid**: Cajal et al. 2022 (Sensors 22:5774),
+  Rossi et al. 2020 (Sensors 20:7122); interpolating across gaps hurts RMSSD (Benchekroun et al. 2023). Confirmed (9).
+  Minimum length: literature lower bounds of 10–30 s (Baek et al. 2015; Shaffer et al. 2020) are cohort-level
+  agreement; for a single displayed check it agreed with 45 s from this data's 90th-percentile errors.
+- **One-beat guard band**: it suggested one, then agreed the ±1 s motion window already pads each movement by about a
+  beat, which explains why it gained nothing here (10).
+- **Disagreement on heart rate agreement**: it read the daytime dip in agreement with the watch's minute heart rate as a
+  sampling mismatch (quiet subset vs a whole, partly moving minute), not a reason to keep the magnitude gate. Nights,
+  where the gates agree, support that.
+- **Scheduling is the bigger lever** than more filtering: start a check after a few seconds of stillness and run it
+  until 45 s of clean beats are in, up to a cap. Not built here; see the follow-up.
+- **SpO2 / red-IR**: no published or reverse-engineered evidence (Gadgetbridge, huami-token tooling) that Huami/Zepp
+  watches stream red or IR samples; SpO2 arrives only as computed records. It suggested one more probe: raw streaming
+  *while* an on-watch SpO2 spot measurement runs, in case the red/IR LEDs only feed the stream when lit. The overnight
+  data here already overlaps 273 of the watch's own SpO2 readings without any change in the stream, so that probe is
+  unlikely to differ, but it has not been run with a manual spot check.
+
+Where it was wrong or loose: its first answer guessed the app might lack sub-sample timing (it already resamples to
+100 Hz and refines peaks), and its 34%-of-still-windows puzzle came from the window test counting only shape-passing
+beats in a gate that let turning wrists through, not from the detector.
 
 ## Live chart
 
