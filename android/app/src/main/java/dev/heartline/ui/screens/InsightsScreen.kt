@@ -381,7 +381,7 @@ private fun DataSection(title: String, body: String) {
         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClickLabel = if (open) "Hide $title" else "Show $title") { open = !open },
             verticalAlignment = Alignment.CenterVertically) {
             Text(title.replaceFirstChar { it.uppercase() }, style = HL.type.body, color = c.ink, modifier = Modifier.weight(1f))
-            Text("${body.lines().size} lines", style = HL.type.small, color = c.inkSoft)
+            Text(body.lines().size.let { if (it == 1) "1 line" else "$it lines" }, style = HL.type.small, color = c.inkSoft)
             Spacer(Modifier.width(10.dp))
             Text(if (open) "−" else "+", style = HL.type.bodyStrong, color = c.pulse)
         }

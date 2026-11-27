@@ -73,9 +73,11 @@ class InsightsTest {
         val p = HealthInsights(tools, dev.heartline.service.ai.AiStore({ null }, { _, _ -> })).preview()
         val sections = p.digest.lines().filter { it.startsWith("## ") }
         assertEquals(HealthInsights.DIGEST.size, sections.size)
-        listOf("readiness", "trends", "sleep", "hrv", "hrv (yesterday)", "heart rate", "activity", "stress", "spo2 temperature", "workouts").forEach { name ->
-            assertTrue("no '$name' section in ${sections}", sections.any { it == "## $name" || it.startsWith("## $name (") || it == "## $name" })
+        HealthInsights.DIGEST.map { it.first }.distinct().forEach { topic ->
+            val name = HealthInsights.TITLES[topic]; org.junit.Assert.assertNotNull("no heading for $topic", name)
+            assertTrue("no '$name' section in $sections", sections.any { it == "## $name" || it.startsWith("## $name (") })
         }
+        assertTrue("no HRV for yesterday in $sections", "## HRV (yesterday)" in sections)
         assertTrue(p.digest.contains("Overnight HRV checks"))
         assertTrue(p.ask.contains(p.digest))
         assertTrue(p.system.contains("heart rate variability"))

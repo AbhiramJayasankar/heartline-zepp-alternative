@@ -14,3 +14,6 @@ android/.kotlin/
 *.jks
 *.keystore
 keystore.properties
+
+# Local agent pointer (the guide itself is AGENTS.md)
+CLAUDE.md

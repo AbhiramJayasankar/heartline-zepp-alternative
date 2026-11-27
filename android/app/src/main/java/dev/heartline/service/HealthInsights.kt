@@ -136,7 +136,7 @@ class HealthInsights(private val health: HealthTools, private val store: AiStore
             val text = try { health.run(HealthTools.TOOL, a) } catch (e: Exception) { dev.heartline.ble.rethrowIfCancelled(e); "Couldn't read this: ${e.message}" }
                 ?: error("the insights digest asks for '$topic', which the health lookups don't answer")
             val day = a.optString("date").takeIf { it.isNotEmpty() && it != "today" }
-            append("## ").append(topic.replace('_', ' ')).append(day?.let { " ($it)" } ?: "")
+            append("## ").append(TITLES[topic] ?: topic.replace('_', ' ')).append(day?.let { " ($it)" } ?: "")
                 .append('\n').append(text.trim()).append("\n\n")
         }
         runCatching { extra() }.getOrNull()?.takeIf { it.isNotBlank() }?.let { append(it.trim()).append("\n\n") }
@@ -176,6 +176,11 @@ class HealthInsights(private val health: HealthTools, private val store: AiStore
 
     companion object {
         fun attempt(a: AiAttempt) = InsightAttempt(a.provider, a.model, a.ms, a.error?.let { e -> a.kind?.let { "${it.label}: $e" } ?: e } ?: a.note)
+
+        /** Each digest section's heading, as the model and the "What's sent" page read it. */
+        internal val TITLES = mapOf("readiness" to "Readiness", "trends" to "Trends", "sleep" to "Sleep", "hrv" to "HRV",
+            "heart_rate" to "Heart rate", "activity" to "Activity", "stress" to "Stress", "spo2_temperature" to "SpO2 and temperature",
+            "workouts" to "Workout captures")
 
         /** The health lookups ([HealthTools] topics) sent with every run, in order; a test checks each one answers. */
         val DIGEST = listOf(
