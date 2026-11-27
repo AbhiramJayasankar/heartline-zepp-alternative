@@ -44,6 +44,9 @@ class WatchConnection(
     val raw = rawState.asStateFlow()
     private val rawEvents = MutableSharedFlow<RawUpdate>(extraBufferCapacity = 1024)
     val rawUpdates = rawEvents.asSharedFlow()
+    private val timedEvents = MutableSharedFlow<TimedSamples>(extraBufferCapacity = 1024)
+    /** Raw samples as they are written to the recording, with their times (for the live heart check). */
+    val rawTimed = timedEvents.asSharedFlow()
     private val gpsState = MutableStateFlow<GpsState?>(null)
     val gps = gpsState.asStateFlow()
     private val watchEvents = MutableSharedFlow<ByteArray>(extraBufferCapacity = 64)
@@ -299,7 +302,7 @@ class WatchConnection(
         if (recording != null) stopRawLocked(c)
         wantRaw = true
         val mode = RawPpgMode(FAST_PPG_ENABLED && RawSensor.PPG in sensors, android.os.SystemClock.elapsedRealtime())
-        val r = RawRecording(File(context.filesDir, "raw"), sensors, mode.fast) { rawEvents.tryEmit(RawUpdate(levels = listOf(it))) }
+        val r = RawRecording(File(context.filesDir, "raw"), sensors, mode.fast, { timedEvents.tryEmit(it) }) { rawEvents.tryEmit(RawUpdate(levels = listOf(it))) }
         recording = r; gpsState.value = null
         rawState.value = RawStatus(false, sensors, r.file)
         try {

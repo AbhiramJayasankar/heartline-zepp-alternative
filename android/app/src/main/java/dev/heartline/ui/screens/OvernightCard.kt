@@ -270,4 +270,7 @@ internal fun RunningCheck(controller: HeartlineController) {
     Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(c.gridMajor)) {
         Box(Modifier.fillMaxWidth(done).height(6.dp).background(c.pulse))
     }
+    val live by controller.liveCheck.collectAsStateWithLifecycle()
+    Gap(12)
+    dev.heartline.ui.components.LiveCheckPanel(live)
 }

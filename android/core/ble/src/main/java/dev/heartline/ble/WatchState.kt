@@ -9,6 +9,12 @@ data class HrStatus(val streaming: Boolean = false, val bpm: Int? = null, val ts
 data class SyncStatus(val running: Boolean = false, val message: String? = null)
 data class RawStatus(val streaming: Boolean = false, val sensors: Set<RawSensor> = setOf(RawSensor.PPG, RawSensor.ACCEL), val file: File? = null)
 data class RawUpdate(val packet: RawPacket? = null, val levels: List<Float> = emptyList())
+/**
+ * Samples of one packet with the times the recording writes for them: phone [epoch] seconds and [watch] clock seconds
+ * per sample ([watch] null when the packet had no stamp). [packet] is PPG, accelerometer, gyro or compass. [file] is the
+ * recording they go into, so a listener can tell one recording from the next.
+ */
+class TimedSamples(val file: File, val packet: RawPacket, val epoch: DoubleArray, val watch: DoubleArray?)
 
 /** The app maps protocol models to the data module's independent storage models. */
 interface WatchPersistence {

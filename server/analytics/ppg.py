@@ -9,7 +9,7 @@ from scipy import signal
 NOMINAL_FS = 25.0      # the watch streams PPG and accel at ~25 Hz
 WORK_FS = 100.0        # beats are located on a 100 Hz cubic resampling for timing precision
 SQI_MIN_CORR = 0.80    # template-match correlation for a usable beat (Li & Clifford 2012 style)
-MOTION_G = 0.05        # accel-magnitude std (g) over a 2 s window above which a beat is rejected
+MOTION_G = 0.015  # g, per-axis spread (motion_series); research/heartcheck-motion.md
 
 
 @dataclass
@@ -99,16 +99,18 @@ def _lowpass(x: np.ndarray, fs: float, hi: float, order: int = 2) -> np.ndarray:
 
 
 def motion_series(rec: Recording, step_s: float = 0.5) -> tuple[np.ndarray, np.ndarray]:
-    """Rolling std of accel magnitude (g) over 2 s windows, sampled every step_s."""
+    """Wrist movement (g): the accelerometer's spread over 2 s windows, summed over its three axes
+    (sqrt of the summed per-axis variances), sampled every step_s. The spread of the magnitude alone
+    stays near zero while the wrist turns, so a hand rotating on a desk looked still."""
     if len(rec.acc) < 10:
         return np.zeros(0), np.zeros(0)
-    mag = np.linalg.norm(rec.acc, axis=1)
+    acc = np.asarray(rec.acc, dtype=float)
     t = rec.acc_t
     grid = np.arange(0, max(t[-1], 0) + step_s, step_s)
     out = np.empty(len(grid))
     for i, g in enumerate(grid):
         m = (t >= g - 1) & (t < g + 1)
-        out[i] = float(np.std(mag[m])) if m.sum() >= 5 else 0.0
+        out[i] = float(np.sqrt(np.var(acc[m], axis=0).sum())) if m.sum() >= 5 else 0.0
     return grid, out
 
 
@@ -124,13 +126,24 @@ def detect_beats(rec: Recording) -> Beats:
 
     # Systolic upstrokes are steeper than the diastolic fall; pick the sign that makes the first
     # derivative positively skewed so beats point up regardless of the sensor's polarity.
+    # Polarity, threshold, template and typical beat size come from quiet time only (8 s or more of it):
+    # movement swings the light signal ~8x harder and would set them for the artifacts.
+    mt, mv = motion_series(rec)
+    still = None
+    if len(mt):
+        q = np.interp(t, mt, mv) <= MOTION_G
+        if q.sum() >= 8 * WORK_FS:
+            still = q
     d = np.diff(y)
+    if still is not None:
+        d = d[still[1:]]
     skew = float(np.mean((d - d.mean()) ** 3) / (np.std(d) ** 3 + 1e-12))
     polarity = 1 if skew >= 0 else -1
     y = y * polarity
 
     # Adaptive prominence: a fraction of the robust signal spread, so gain/baseline do not matter.
-    spread = np.percentile(y, 95) - np.percentile(y, 5)
+    quiet_y = y[still] if still is not None else y
+    spread = np.percentile(quiet_y, 95) - np.percentile(quiet_y, 5)
     peaks, props = signal.find_peaks(y, distance=int(0.33 * WORK_FS), prominence=0.25 * spread)
     if len(peaks) < 4:
         notes.append("Too few clear heartbeats; the watch may be loose or off the wrist.")
@@ -167,7 +180,10 @@ def detect_beats(rec: Recording) -> Beats:
             windows.append(None)
             valid.append(False)
     corr = np.zeros(len(peaks))
-    stack = np.array([w for w in windows if w is not None])
+    quiet_peak = still[peaks] if still is not None else np.ones(len(peaks), bool)
+    stack = np.array([w for w, q in zip(windows, quiet_peak) if w is not None and q])
+    if len(stack) < 3:
+        stack = np.array([w for w in windows if w is not None])
     if len(stack) >= 3:
         template = np.median(stack, axis=0)
         for i, w in enumerate(windows):
@@ -176,11 +192,10 @@ def detect_beats(rec: Recording) -> Beats:
     good = (corr >= SQI_MIN_CORR) & np.array(valid)
 
     # Amplitude outliers (clipping, pressure jumps) are not usable beats either.
-    med_amp = np.median(amp)
+    med_amp = np.median(amp[quiet_peak]) if quiet_peak.sum() >= 3 else np.median(amp)
     good &= (amp > 0.3 * med_amp) & (amp < 3.0 * med_amp)
 
     # Motion rejection from the accelerometer.
-    mt, mv = motion_series(rec)
     if len(mt):
         moving = np.interp(times, mt, mv) > MOTION_G
         if moving.any():

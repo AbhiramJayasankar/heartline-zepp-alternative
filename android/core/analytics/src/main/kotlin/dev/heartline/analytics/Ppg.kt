@@ -91,7 +91,7 @@ fun readRecordingCsv(reader: Reader): Recording {
 
 /** A common watch origin aligns every sensor. Empty wts cells are arrival fallbacks,
  * translated with the nearest valid epoch/watch pair rather than retimed across a gap. */
-private fun watchRecording(
+internal fun watchRecording(
     pt: List<Double>, p: List<Double>, at: List<Double>, a: List<FloatArray>,
     gt: List<Double>, g: List<FloatArray>, mt: List<Double>, m: List<FloatArray>,
     pw: List<Double>, aw: List<Double>, gw: List<Double>, mw: List<Double>,
@@ -169,12 +169,21 @@ private fun csvFields(line: String): List<String> {
 }
 
 internal data class Motion(val t: DoubleArray, val g: DoubleArray)
+
+/**
+ * Beats are set aside where the wrist moves more than this (g, [motionSeries]). Measured on 191 daytime and 183
+ * overnight checks (Nov 2026, research/heartcheck-motion.md): asleep the level sits near 0.005 g; within a check, beats
+ * taken at 0.010-0.015 g varied beat to beat like the quiet ones (ratio 1.01), from 0.015 g on they varied 27-66% more.
+ */
+const val MOVING_G = 0.015
+
+/**
+ * How much the wrist moves, every 0.5 s: the spread of the accelerometer over the 2 s around it, summed over its
+ * three axes (the square root of the summed variances, in g). Until 0.10.x this was the spread of the acceleration's
+ * size only, which stays near 1 g while the wrist turns, so a hand rotating on a desk looked still.
+ */
 internal fun motionSeries(rec: Recording): Motion {
     if (rec.acc.size < 10) return Motion(doubleArrayOf(), doubleArrayOf())
-    val mag = DoubleArray(rec.acc.size) { i ->
-        val a = rec.acc[i]
-        sqrt(a[0].toDouble().pow(2) + a[1].toDouble().pow(2) + a[2].toDouble().pow(2))
-    }
     val t = grid(0.0, max(rec.accT.last(), 0.0) + 0.5, 0.5)
     var left = 0
     var right = 0
@@ -182,12 +191,16 @@ internal fun motionSeries(rec: Recording): Motion {
         while (left < rec.accT.size && rec.accT[left] < t[i] - 1) left++
         while (right < rec.accT.size && rec.accT[right] < t[i] + 1) right++
         if (right - left < 5) 0.0 else {
-            var sum = 0.0
-            for (j in left until right) sum += mag[j]
-            val m = sum / (right - left)
-            var ss = 0.0
-            for (j in left until right) ss += (mag[j] - m).pow(2)
-            sqrt(ss / (right - left))
+            var total = 0.0
+            for (k in 0..2) {
+                var sum = 0.0
+                for (j in left until right) sum += rec.acc[j][k]
+                val m = sum / (right - left)
+                var ss = 0.0
+                for (j in left until right) ss += (rec.acc[j][k] - m).pow(2)
+                total += ss / (right - left)
+            }
+            sqrt(total)
         }
     }
     return Motion(t, g)
@@ -245,19 +258,25 @@ internal fun detectBeats(rec: Recording, motion: Motion, expectedHr: Double? = n
     val x = interpolate(rec.ppgT, rec.ppg, t)
     val baseline = zeroPhase(x, butterworth(100.0, 0.5))
     val y = zeroPhase(x, butterworth(100.0, 0.5, 4.0))
-    val d = DoubleArray(y.size - 1) { y[it + 1] - y[it] }
+    // Where the wrist is quiet, on this grid. Polarity, the peak threshold, the beat template and the typical beat
+    // size come from quiet time only: movement makes the light signal swing ~8x harder, and taken over the whole check
+    // those swings set a threshold most real beats never reach and a template they don't match. Needs 8 s of quiet.
+    val still = if (motion.t.isEmpty()) null else interpolate(motion.t, motion.g, t).let { mv -> BooleanArray(t.size) { mv[it] <= MOVING_G } }
+        .takeIf { q -> q.count { it } >= 800 }
+    val d = DoubleArray(y.size - 1) { y[it + 1] - y[it] }.let { all -> still?.let { q -> all.filterIndexed { i, _ -> q[i + 1] }.toDoubleArray() } ?: all }
     val dm = mean(d)
     var skew = 0.0
     for (v in d) skew += (v - dm).pow(3)
     skew /= d.size * (variance(d).pow(1.5) + 1e-12)
     if (skew < 0) for (i in y.indices) y[i] = -y[i]
+    val quietY = still?.let { q -> y.filterIndexed { i, _ -> q[i] }.toDoubleArray() } ?: y
     // Green-PPG systolic edges are more stable than rounded peaks at elevated HR.
     // Capture mode uses the same detector/quality pipeline on the rising edge of the
     // polarity-corrected waveform. Live HR sets a refractory distance, never beat times.
     val detector = if (expectedHr == null) y else DoubleArray(y.size) { i ->
         (y[min(y.lastIndex, i + 1)] - y[max(0, i - 1)]) * 50
     }
-    val spread = percentile(y, 95.0) - percentile(y, 5.0)
+    val spread = percentile(quietY, 95.0) - percentile(quietY, 5.0)
     val distance = expectedHr?.let { (.55 * 60 / it * 100).toInt().coerceAtLeast(20) } ?: 33
     val prominence = if (expectedHr == null) .25 * spread else max(0.0, .3 * percentile(detector, 90.0))
     val peaks = findPeaks(detector, distance, prominence)
@@ -281,9 +300,10 @@ internal fun detectBeats(rec: Recording, motion: Motion, expectedHr: Double? = n
     val after = expectedHr?.let { (3000 / it).roundToInt().coerceIn(10, 75) } ?: 45
     val valid = BooleanArray(peaks.size) { peaks[it] - before >= 0 && peaks[it] + after < y.size }
     val windows = Array(peaks.size) { i -> if (valid[i]) y.copyOfRange(peaks[i] - before, peaks[i] + after) else null }
-    val stack = windows.filterNotNull()
+    val quietPeak = BooleanArray(peaks.size) { still?.get(peaks[it]) ?: true }
+    val stack = windows.filterIndexed { i, w -> w != null && quietPeak[i] }.filterNotNull().takeIf { it.size >= 3 } ?: windows.filterNotNull()
     val template = if (stack.size >= 3) DoubleArray(before + after) { j -> median(DoubleArray(stack.size) { stack[it][j] }) } else null
-    val medAmp = median(amplitude)
+    val medAmp = amplitude.filterIndexed { i, _ -> quietPeak[i] }.takeIf { it.size >= 3 }?.let { median(it.toDoubleArray()) } ?: median(amplitude)
     val good = BooleanArray(peaks.size) { i ->
         valid[i] && template != null && correlation(windows[i]!!, template) >= 0.80 &&
             amplitude[i] > 0.3 * medAmp && amplitude[i] < 3.0 * medAmp
@@ -299,7 +319,7 @@ internal fun detectBeats(rec: Recording, motion: Motion, expectedHr: Double? = n
     if (motion.t.isNotEmpty()) {
         val mv = interpolate(motion.t, motion.g, times)
         var dropped = 0
-        for (i in good.indices) if (mv[i] > 0.05) { good[i] = false; dropped++ }
+        for (i in good.indices) if (mv[i] > MOVING_G) { good[i] = false; dropped++ }
         if (dropped > 0) notes.add("$dropped beats dropped because the wrist was moving.")
     }
     return Beats(times, good, amplitude, interpolate(t, baseline, times), y, notes)

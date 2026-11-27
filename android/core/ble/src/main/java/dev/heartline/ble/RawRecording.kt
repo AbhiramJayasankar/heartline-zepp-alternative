@@ -7,7 +7,8 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 /** Preserve every raw value; analysis removes LED warm-up, never the recording. */
-internal class RawRecording(folder: File, val sensors: Set<RawSensor>, fastPpg: Boolean, private val level: (Float) -> Unit) : AutoCloseable {
+internal class RawRecording(folder: File, val sensors: Set<RawSensor>, fastPpg: Boolean, private val onTimed: (TimedSamples) -> Unit = {},
+    private val level: (Float) -> Unit) : AutoCloseable {
     val start = System.currentTimeMillis() / 1000.0
     val file: File
     private val csv: java.io.BufferedWriter
@@ -50,6 +51,8 @@ internal class RawRecording(folder: File, val sensors: Set<RawSensor>, fastPpg: 
         fun rows(kind: String, values: List<List<Any?>>) = values.forEachIndexed { i, v ->
             Csv.writeRow(csv, listOf(timed.epoch[i], kind) + v + listOf(timed.watch?.get(i)))
         }
+        if (timed.packet is RawPacket.Ppg || timed.packet is RawPacket.Accel || timed.packet is RawPacket.Gyro)
+            onTimed(TimedSamples(file, timed.packet, timed.epoch, timed.watch))
         when (val p = timed.packet) {
             is RawPacket.Ppg -> rows("ppg", p.values.map { listOf(it, null, null, null) })
             is RawPacket.Accel -> rows("accel", p.samples.map { listOf(null, it.x, it.y, it.z) })

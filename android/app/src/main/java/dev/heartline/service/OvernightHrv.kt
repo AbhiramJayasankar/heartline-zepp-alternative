@@ -1,5 +1,6 @@
 package dev.heartline.service
 
+import dev.heartline.analytics.MOVING_G
 import dev.heartline.HeartlineApp
 import dev.heartline.analytics.analyzeSession
 import dev.heartline.app.analyticsMinutes
@@ -359,15 +360,21 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         val recording = withContext(Dispatchers.Default) { readRecording(f) }
         val result = withContext(Dispatchers.Default) { analyzeSession(recording, f.name) }
         val pose = dev.heartline.analytics.gravityOf(recording.acc, result.start.toLong())
-        // The share of the check the wrist was moving, by the same 0.05 g limit beat detection uses.
-        val moving = result.motion.takeIf { it.isNotEmpty() }?.let { m -> m.count { it.g > 0.05 }.toDouble() / m.size } ?: 0.0
+        // The share of the check the wrist was moving, by the same limit beat detection uses.
+        val moving = result.motion.takeIf { it.isNotEmpty() }?.let { m -> m.count { it.g > MOVING_G }.toDouble() / m.size } ?: 0.0
         val ts = result.start.toLong()
-        val need = seconds / 2
-        val clean = result.hrv.rmssdMs != null && result.signalQuality >= 0.7 && result.usableS >= need
+        // 45 s of clean back-to-back beats, wherever they fall in the check: RMSSD from 45 to 60 s of them was within
+        // 6% of the whole check's (median; 19% at the 90th percentile) when real daytime movement was cut out of clean
+        // overnight checks, with no bias (research/heartcheck-motion.md).
+        val need = minOf(seconds / 2, 45)
+        // Signal quality over the beats found while the wrist was quiet: "beats" found while it moves are noise and
+        // are set aside anyway, so counting them would fail a check for moving rather than for a poor signal.
+        val quality = quietQuality(result)
+        val clean = result.hrv.rmssdMs != null && quality >= 0.7 && result.usableS >= need
         val movingNote = if (moving >= 0.25) "wrist moving ${(moving * 100).roundToInt()}% of the time, " else ""
         val reason = when {
             result.hrv.rmssdMs == null -> "${movingNote}too few clean beats"
-            result.signalQuality < 0.7 -> "${movingNote}signal ${(result.signalQuality * 100).roundToInt()}% (needs 70%)"
+            quality < 0.7 -> "${movingNote}signal ${(quality * 100).roundToInt()}% (needs 70%)"
             result.usableS < need -> "${movingNote}only ${result.usableS.roundToInt()} s of clean beats (needs $need)"
             else -> null
         }
@@ -420,4 +427,18 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
 
     private fun clock(ts: Long): String = Instant.ofEpochSecond(ts).atZone(zone).toLocalTime().let { "%02d:%02d".format(it.hour, it.minute) }
     private fun clock(h: Double): String { val m = Math.floorMod((h * 60).roundToInt(), 1440); return "%02d:%02d".format(m / 60, m % 60) }
+}
+
+/** The share of beats found while the wrist was quiet that passed (all beats when there is no motion record). */
+internal fun quietQuality(result: dev.heartline.analytics.SessionResult): Double {
+    val m = result.motion
+    if (m.isEmpty() || result.beatTimes.isEmpty()) return result.signalQuality
+    var j = 0; var quiet = 0; var good = 0
+    for (i in result.beatTimes.indices) {
+        val t = result.beatTimes[i]
+        while (j < m.lastIndex && kotlin.math.abs(m[j + 1].t - t) <= kotlin.math.abs(m[j].t - t)) j++
+        if (m[j].g > MOVING_G) continue
+        quiet++; if (result.beatGood.getOrElse(i) { false }) good++
+    }
+    return if (quiet == 0) 0.0 else good.toDouble() / quiet
 }

@@ -40,6 +40,7 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
     override val trends = MutableStateFlow<TrendsUi?>(demoTrends())
     override val checks = MutableStateFlow(demoChecks())
     override val checkRun = MutableStateFlow<CheckRunUi?>(null)
+    override val liveCheck = MutableStateFlow<dev.heartline.analytics.LiveCheck?>(null)
     override val sensors = MutableStateFlow(SensorsUi())
     override val recordings = MutableStateFlow(listOf(RecordingUi("20261101-125835", now() - 3600, 20.6, setOf(Sensor.PPG, Sensor.ACCEL, Sensor.MIC), true)))
     override val watchSettings = MutableStateFlow(demoSettings())
@@ -141,17 +142,21 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
         checkRun.value = CheckRunUi(seconds, now(), analysing = false, result = null, error = null)
         setRawSensors(setOf(Sensor.PPG, Sensor.ACCEL), true)
         checkJob = scope.launch {
+            val stream = DemoLiveStream()
+            val live = launch { while (isActive) { stream.next(); liveCheck.value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { dev.heartline.analytics.liveCheck(stream.samples.recording()) }; delay(1000) } }
             delay(seconds * 1000L)
+            live.cancel()
             checkRun.update { it?.copy(analysing = true) }
             delay(1200)
             setRawSensors(sensors.value.selected, false)
             val s = demoSession("c-${now()}")
             checkRun.update { it?.copy(analysing = false, result = s) }
+            liveCheck.value = null
             checks.update { listOf(CheckUi(s.id, s.start, seconds, s.hr, s.rmssd, s.rhythm)) + it }
         }
     }
 
-    override fun cancelCheck() { checkJob?.cancel(); checkRun.value = null; setRawSensors(sensors.value.selected, false) }
+    override fun cancelCheck() { checkJob?.cancel(); checkRun.value = null; liveCheck.value = null; setRawSensors(sensors.value.selected, false) }
     override fun vibrate() = addEvent("Watch vibrated")
     override fun sendNotification(title: String, body: String, kind: NotifyKind, asPackage: String) = addEvent("Sent notification: $title")
     override fun refreshTemperature() {}

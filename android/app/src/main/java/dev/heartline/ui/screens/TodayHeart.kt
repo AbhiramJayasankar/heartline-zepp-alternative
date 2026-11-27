@@ -61,11 +61,9 @@ import dev.heartline.ui.components.PillButton
 import dev.heartline.ui.components.PoincarePlot
 import dev.heartline.ui.components.SectionTitle
 import dev.heartline.ui.components.Segmented
-import dev.heartline.ui.components.SignalCanvas
 import dev.heartline.ui.components.StagesBar
 import dev.heartline.ui.components.Stat
 import dev.heartline.ui.components.Tachogram
-import dev.heartline.ui.components.detrendPulse
 import dev.heartline.ui.components.fmtHm
 import dev.heartline.ui.components.fmtInt
 import dev.heartline.ui.components.fmtOne
@@ -95,7 +93,7 @@ const val DISCLAIMER = "A wellness estimate from your wrist pulse, not a medical
 fun CheckRunScreen(controller: HeartlineController, nav: Navigator) {
     val c = HL.colors
     val run by controller.checkRun.collectAsStateWithLifecycle()
-    val sensors by controller.sensors.collectAsStateWithLifecycle()
+    val live by controller.liveCheck.collectAsStateWithLifecycle()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(250); now = System.currentTimeMillis() } }
     val r = run
@@ -117,15 +115,9 @@ fun CheckRunScreen(controller: HeartlineController, nav: Navigator) {
             Box(Modifier.fillMaxWidth(progress).height(6.dp).background(c.pulse))
         }
         Gap(24)
-        Panel(padding = androidx.compose.foundation.layout.PaddingValues(10.dp)) {
-            Text("Your pulse, live", style = HL.type.label, color = c.inkSoft)
-            val sig = remember(sensors.ppg) { detrendPulse(sensors.ppg).let { it.copyOfRange(maxOf(0, it.size - 200), it.size) } }
-            Box(Modifier.fillMaxWidth().height(150.dp), contentAlignment = Alignment.Center) {
-                if (sig.size < 25) MutedText("Waiting for the watch's pulse signal…")
-                else SignalCanvas(listOf(sig), listOf(c.ink), Modifier.fillMaxWidth().height(150.dp))
-            }
-            MutedText("The last few seconds of light reflected from your wrist. Each wave is one heartbeat; smooth, even waves mean a clean reading.")
-        }
+        dev.heartline.ui.components.LiveCheckPanel(live)
+        Gap(8)
+        MutedText("The light reflected from your wrist, filtered so each heartbeat is one upward wave. Smooth, even waves mean a clean reading.")
         r?.error?.let { Gap(12); Text(it, style = HL.type.body, color = c.pulse) }
         Gap(14)
         PillButton("Cancel", { controller.cancelCheck(); nav.pop() }, Modifier.fillMaxWidth(), style = ButtonStyle.QUIET)
