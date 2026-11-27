@@ -62,13 +62,28 @@ class GattClient(private val context: Context) : AutoCloseable {
             close()
         }
     }
+    private val dead = DeadLink()
+
+    /** The phone's Bluetooth service died under this connection: close it so the caller connects again. */
+    private fun closeDead(why: String) {
+        disconnected.complete(IOException(DEAD_LINK + why))
+        close()
+    }
+
     private suspend fun operation(kind: String, uuid: UUID? = null, timeoutMs: Long = 10_000, start: () -> Boolean): ByteArray =
         queue.run(timeoutMs) {
             check(!disconnected.isCompleted) { "GATT is closed" }
             val p = Pending(kind, uuid, CompletableDeferred())
             pending = p
             try {
-                check(start()) { "Unable to start GATT $kind" }
+                // A request that throws or won't start counts towards a dead link ([DeadLink]); a dead binder ends it now.
+                val ok = try { start() } catch (e: Exception) {
+                    if (DeadLink.isDeadBinder(e)) closeDead("Bluetooth service gone (${e.javaClass.simpleName})")
+                    else if (dead.started(false)) closeDead("Bluetooth stopped taking requests")
+                    throw e
+                }
+                if (dead.started(ok)) closeDead("Bluetooth stopped taking requests")
+                check(ok) { "Unable to start GATT $kind" }
                 p.result.await()
             } finally { pending = null }
         }
@@ -126,7 +141,12 @@ class GattClient(private val context: Context) : AutoCloseable {
         pending?.result?.completeExceptionally(IOException("GATT closed"))
         val old = gatt; gatt = null
         disconnected.complete(null)
-        try { old?.disconnect() } finally { old?.close() }
+        // A dead connection throws from both: closing must still finish.
+        try { old?.disconnect() } catch (_: Exception) {} finally { try { old?.close() } catch (_: Exception) {} }
     }
-    companion object { private val CCCD = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb") }
+    companion object {
+        /** Starts the reason a connection was closed for dying under the app ([DeadLink]). */
+        const val DEAD_LINK = "Dead connection: "
+        private val CCCD = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+    }
 }

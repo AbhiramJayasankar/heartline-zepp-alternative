@@ -23,6 +23,7 @@ Every Heartline release, newest first. Each entry is also the release's notes on
 
 ### Fixed
 
+- **The watch reconnects when Android's Bluetooth restarts under the app.** From 22 Nov 18:51 to 24 Nov 01:50 IST nothing synced: the phone's Bluetooth service had restarted, the old connection never said it was closed, and Heartline kept sending into it (every sync, notification and check failed). A dead connection, or three requests in a row that can't start, now closes it and connects again. The watch's minute history and temperature came back afterwards; that night's SpO2 did not.
 - **Daily insights now get your data.** Since the health lookups were merged into one, the insights went on asking for the old names and were sent almost nothing but heart checks, which is why they said there was no HRV since 10 Nov. They now get readiness, trends, both nights' sleep, HRV (overnight, daytime and heart checks), heart rate, activity, stress, SpO2, temperature and workouts, and a test checks every section answers.
 - **A session with a ride no longer reads as a gym session** (its arm movement on the handlebars looked like 14 sets), in the list and on its page.
 - **The AI's data has readable headings** (HRV, SpO2 and temperature, workout captures), and the What's sent page says "1 line", not "1 lines".

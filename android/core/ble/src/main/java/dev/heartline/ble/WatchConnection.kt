@@ -160,7 +160,8 @@ class WatchConnection(
                     readyState.value = true
                     reconnectNotice?.cancel(); reconnectNotice = null
                     for (message in quietReconnects.authenticated(android.os.SystemClock.elapsedRealtime())) log("info", message)
-                    c.disconnected.await()
+                    c.disconnected.await()?.message?.takeIf { it.startsWith(GattClient.DEAD_LINK) }
+                        ?.let { log("warn", "$it. Connecting again.") }
                     quietReconnects.dropped(android.os.SystemClock.elapsedRealtime())
                     reconnectNotice?.cancel()
                     reconnectNotice = scope.launch {
