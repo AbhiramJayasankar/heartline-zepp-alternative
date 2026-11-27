@@ -45,7 +45,7 @@ class RealController(
     override val checkRun = MutableStateFlow<CheckRunUi?>(null)
     override val liveCheck = MutableStateFlow<LiveCheck?>(null)
     private val liveFeed = LiveCheckFeed {
-        checkRun.value?.let { it.result == null && it.error == null && !it.analysing } == true || hrvCheck.value != null
+        checkRun.value?.let { it.result == null && it.error == null } == true || hrvCheck.value != null
     }
     override val sensors = MutableStateFlow(SensorsUi())
     override val recordings = MutableStateFlow<List<RecordingUi>>(emptyList())

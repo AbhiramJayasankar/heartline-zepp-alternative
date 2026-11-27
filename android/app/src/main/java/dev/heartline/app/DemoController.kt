@@ -145,12 +145,13 @@ class DemoController(private val scope: CoroutineScope) : HeartlineController {
             val stream = DemoLiveStream()
             val live = launch { while (isActive) { stream.next(); liveCheck.value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { dev.heartline.analytics.liveCheck(stream.samples.recording()) }; delay(1000) } }
             delay(seconds * 1000L)
-            live.cancel(); liveCheck.value = null
+            live.cancel()
             checkRun.update { it?.copy(analysing = true) }
             delay(1200)
             setRawSensors(sensors.value.selected, false)
             val s = demoSession("c-${now()}")
             checkRun.update { it?.copy(analysing = false, result = s) }
+            liveCheck.value = null
             checks.update { listOf(CheckUi(s.id, s.start, seconds, s.hr, s.rmssd, s.rhythm)) + it }
         }
     }
