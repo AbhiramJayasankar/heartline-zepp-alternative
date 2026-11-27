@@ -14,6 +14,7 @@ itself, keeps everything on the phone, and analyses the data (sleep, HRV, readin
 | `android/app/.../app/` | Controllers and mapping from stored data to UI models (`*Ui` classes in `Controller.kt`) |
 | `android/app/.../service/` | The foreground `WatchService`, captures, heart checks, AI (`ai/`, `HealthTools`, `HealthInsights`) |
 | `android/app/.../ui/` | `AppRoot.kt` (navigation, `Route`), `screens/` (pages), `components/` (charts, map, kit), `theme/` |
+| `ui/screens/` workouts | `WorkoutScreens.kt` (starting a capture), `CaptureResultScreen.kt` (a capture's page), `CaptureSections.kt` (its gym, calories and pulse sections), `GaitSections.kt` / `LapSections.kt` / `RideSections.kt` (on foot and riding), `WatchWorkoutScreen.kt` (a watch workout's page) |
 | `android/core/protocol` | Pure Kotlin: the watch's commands and the parsers for what it sends |
 | `android/core/ble` | Android: the Bluetooth connection (`WatchConnection`), history transfer, raw sensor recording |
 | `android/core/analytics` | Pure Kotlin: every calculation (sleep, HRV, PPG beats, readiness, gait, laps, rides, captures) |

@@ -177,7 +177,8 @@ private fun MotionLane(live: LiveCheck, from: Double, to: Double, modifier: Modi
         drawLine(c.line, Offset(0f, h - .5f), Offset(w, h - .5f), 1f)
         drawLine(c.warn, Offset(0f, y(LiveCheck.MOVING_G)), Offset(w, y(LiveCheck.MOVING_G)), 1f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 4f)))
         label(tm, "%.3f g".format(LiveCheck.MOVING_G), w + 6.dp.toPx(), y(LiveCheck.MOVING_G), c.warn)
-        label(tm, "0", w + 6.dp.toPx(), h - 5.dp.toPx(), c.inkSoft)
+        // The "0" only where the threshold label leaves room for it (a big move rescales the lane and pushes them together).
+        if (h - 5.dp.toPx() - y(LiveCheck.MOVING_G) > 12.dp.toPx()) label(tm, "0", w + 6.dp.toPx(), h - 5.dp.toPx(), c.inkSoft)
         if (shown.size < 2) return@Canvas
         val path = Path()
         shown.forEachIndexed { n, i -> val px = x(live.motionT[i]); val py = y(live.motionG[i].toDouble()); if (n == 0) path.moveTo(px, py) else path.lineTo(px, py) }

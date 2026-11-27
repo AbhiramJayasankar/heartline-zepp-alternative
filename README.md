@@ -260,7 +260,7 @@ and open it on your phone, or install it with `adb install -r heartline-*.apk`.
 git clone https://github.com/AbhiramJayasankar/heartline-zepp-alternative.git
 cd heartline-zepp-alternative/android
 ./gradlew assembleDebug        # app/build/outputs/apk/debug/app-debug.apk
-./gradlew test                 # unit tests, including real recorded sessions
+./gradlew verify               # every module's unit tests (including real recorded sessions) and lint
 ```
 
 `./gradlew assembleRelease` signs with your own key when `android/keystore.properties` names one (`storeFile`,
@@ -283,7 +283,10 @@ analysis methods in [`android/core/analytics/`](android/core/analytics) and
 | `android/core/analytics` | Readiness, sleep, HRV, rhythm, workout capture (sets and reps) |
 | `android/core/data` | Local SQLite storage, export, encrypted key store |
 | `server/`, `web/` | A Python (FastAPI + bleak) desktop dashboard that talks to the watch from a PC |
-| `research/` | The first protocol exploration scripts (bleak, Windows) |
+| `research/` | The first protocol exploration scripts (bleak, Windows) and research write-ups |
+| `tools/android/` | Helpers for testing on a phone over adb |
+
+Changing the code? [`AGENTS.md`](AGENTS.md) is the guide to the codebase, and [`CHANGELOG.md`](CHANGELOG.md) lists every release.
 
 ## Good to know
 
