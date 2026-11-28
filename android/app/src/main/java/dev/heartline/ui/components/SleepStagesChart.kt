@@ -175,12 +175,29 @@ private fun DrawScope.stages(stretches: List<StageStretch>, start: Long, end: Lo
     fun cy(lane: Int) = top + rowH * (lane + 0.5f)
     val bh = rowH * blockFrac
     val cw = connector.toPx(); val h = cw / 2
-    val minW = max(cw, 3.dp.toPx())
+    // Short stretches keep their true width, as a watch draws them: a waking of a minute or two is a thin bright line
+    // inside its bar. Only one too thin to see at all is widened, to this.
+    val minW = 1.5.dp.toPx()
     val radius = bh * 0.2f
     val fillet = bh * 0.16f
-    val blocks = stretches.map { s ->
-        val left = x(s.start); val w = max(minW, x(s.end) - left); val y = cy(s.lane) - bh / 2
-        RoundRect(left, y, left + w, y + bh, CornerRadius(min(radius, w / 2)))
+    // Where each block is drawn. Stretches that follow on share an edge, and a bar sits on it. A stretch narrower than
+    // [minW] is widened evenly about its middle into the ones either side, so its bars stay on its edges.
+    val n = stretches.size
+    val ls = FloatArray(n) { x(stretches[it].start) }; val rs = FloatArray(n) { x(stretches[it].end) }
+    fun touches(i: Int) = stretches[i + 1].start - stretches[i].end <= 300
+    for (i in 0 until n - 1) if (touches(i)) rs[i] = ls[i + 1]
+    for (i in 0 until n) {
+        if (rs[i] - ls[i] >= minW) continue
+        val m = (ls[i] + rs[i]) / 2
+        ls[i] = m - minW / 2; rs[i] = m + minW / 2
+        if (ls[i] < x0) { rs[i] += x0 - ls[i]; ls[i] = x0 }
+        if (rs[i] > x1) { ls[i] -= rs[i] - x1; rs[i] = x1 }
+        if (i > 0 && touches(i - 1)) rs[i - 1] = max(ls[i - 1] + 1f, ls[i])
+        if (i < n - 1 && touches(i)) ls[i + 1] = min(rs[i + 1] - 1f, rs[i])
+    }
+    val blocks = stretches.mapIndexed { i, s ->
+        val y = cy(s.lane) - bh / 2
+        RoundRect(ls[i], y, rs[i], y + bh, CornerRadius(min(radius, (rs[i] - ls[i]) / 2)))
     }
     val rims = blocks.map { r -> RoundRect(r.left - h, r.top - h, r.right + h, r.bottom + h, CornerRadius(r.topLeftCornerRadius.x + h)) }
     val joins = (0 until stretches.size - 1).filter { i ->
@@ -194,7 +211,7 @@ private fun DrawScope.stages(stretches: List<StageStretch>, start: Long, end: Lo
         for (i in joins) {
             if (only != null && i !in only && i + 1 !in only) continue
             val a = stretches[i]; val b = stretches[i + 1]
-            val bx = x(b.start)
+            val bx = rs[i] // the edge the two blocks share
             val ui = if (a.lane < b.lane) i else i + 1; val li = if (ui == i) i + 1 else i
             val ur = rims[ui]; val lr = rims[li]
             // Which way from the bar each block lies: the earlier stretch on the left, the later on the right.

@@ -2,6 +2,12 @@
 
 Every Heartline release, newest first. Each entry is also the release's notes on GitHub, where its APK is.
 
+## 0.12.3 (2026-11-28)
+
+### Fixed
+
+- **Short sleep stages line up with their bars.** A brief stage, such as a waking of a minute or two, is now drawn at its true width as a thin line on its bar, instead of a widened pill that spilled past the next block and left the bars off its edges. Only a stage too thin to see at all is widened, evenly about its middle.
+
 ## 0.12.2 (2026-11-28)
 
 ### Changed
