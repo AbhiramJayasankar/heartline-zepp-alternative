@@ -54,4 +54,15 @@ class DayHrvPlanTest {
         assertEquals(500L, p.nextAt)
         assertFalse(p.backingOff)
     }
+
+    @Test fun aMovingScoutWaitsTenMinutesAndIsNotATry() {
+        var p = DayHrvPlan().afterFail(0, walked = false, every)
+        p = p.afterMoving(100)
+        assertEquals(700L, p.nextAt); assertEquals(1, p.tries); assertTrue(p.scouting); assertFalse(p.gaveUp)
+        // Scouts all day never reach the hour's pause on their own.
+        repeat(10) { p = p.afterMoving(1000L + it) }
+        assertFalse(p.gaveUp); assertEquals(1, p.tries)
+        p = p.afterClean(5000, every)
+        assertFalse(p.scouting)
+    }
 }

@@ -161,8 +161,11 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
 
     private var lastPrune = 0L
 
-    /** What one automatic check found: clean or not, and the share of it the wrist was moving. */
-    private data class Outcome(val clean: Boolean, val movingShare: Double, val stopped: Boolean = false)
+    /**
+     * What one automatic check found: clean or not, and the share of it the wrist was moving. [scoutMoving] when a
+     * daytime check ended after its scout because the wrist wasn't still ([DayCheckGate]).
+     */
+    private data class Outcome(val clean: Boolean, val movingShare: Double, val stopped: Boolean = false, val scoutMoving: Boolean = false)
 
     suspend fun run(): Unit = kotlinx.coroutines.coroutineScope {
         // The watch pushes its step count as it changes; a check waits for a minute with no new steps.
@@ -283,6 +286,7 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         if (now < plan.nextAt) {
             dayStatus.value = when {
                 plan.backingOff -> "You were walking during the last check; next try at ${clock(plan.nextAt)}"
+                plan.scouting -> "Your wrist was moving during the last check; next try at ${clock(plan.nextAt)}"
                 plan.gaveUp -> "Paused after ${DayHrvPlan.TRIES} checks that weren't clean, or one you stopped; trying again from ${clock(plan.nextAt)}"
                 else -> "Clean reading taken; next checks from ${clock(plan.nextAt)}"
             }
@@ -302,6 +306,12 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         if (out.stopped) {
             dayPlan = plan.afterStop(end)
             dayStatus.value = "Stopped; next checks from ${clock(end + DayHrvPlan.GIVE_UP_S)}"
+            return
+        }
+        if (out.scoutMoving) {
+            val next = plan.afterMoving(end)
+            dayPlan = next
+            dayStatus.value = "Your wrist was moving, so that check stopped after ${DayCheckGate.SCOUT_S.roundToInt()} s; next try at ${clock(next.nextAt)}"
             return
         }
         // Steps during the check mean you were walking: back off. Wrist movement alone just gets another try.
@@ -339,18 +349,38 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
 
     /** Records and analyses one sample; true when it was clean. [attempt] is 0 for a slot's first try, then 1, 2 for retries. */
     private suspend fun sample(night: LocalDate, type: String, seconds: Int, state: MutableStateFlow<String>, attempt: Int): Outcome {
-        state.value = "Recording a ${seconds / 60}-minute sample" + when {
+        val day = type == DAY_SAMPLE
+        state.value = (if (day) "Checking your wrist is still, then recording up to ${seconds / 60} minutes" else "Recording a ${seconds / 60}-minute sample") + when {
             attempt == 0 -> ""; type == SAMPLE -> " (retry $attempt of $RETRIES)"; else -> " (try ${attempt + 1} since the last clean one)"
         }
+        // 45 s of clean back-to-back beats, wherever they fall in the check: RMSSD from 45 to 60 s of them was within
+        // 6% of the whole check's (median; 19% at the 90th percentile) when real daytime movement was cut out of clean
+        // overnight checks, with no bias (research/heartcheck-motion.md).
+        val need = minOf(seconds / 2, 45)
         var file: java.io.File? = null
         val asked = stopRequests.value
         var stopped = false
+        var ended = DayCheckGate.Verdict.CONTINUE
+        val startedAt = System.currentTimeMillis() / 1000.0
         try {
             file = watch.startRaw(setOf(RawSensor.PPG, RawSensor.ACCEL))
             running.value = dev.heartline.app.HrvCheckUi(type == SAMPLE, System.currentTimeMillis() / 1000, seconds, attempt)
             // Recording until the length is up, or until it is stopped (the banner's Stop, or a watch workout starting).
-            stopped = kotlinx.coroutines.withTimeoutOrNull(seconds * 1000L) { stopRequests.first { it != asked } } != null
+            // A daytime check also ends early when the gate says so, from the live result the app works out each second.
+            stopped = kotlinx.coroutines.withTimeoutOrNull(seconds * 1000L) {
+                if (!day) { stopRequests.first { it != asked }; return@withTimeoutOrNull true }
+                while (stopRequests.value == asked) {
+                    delay(1000)
+                    val elapsed = System.currentTimeMillis() / 1000.0 - startedAt
+                    // Only this check's result: the feed starts again with each recording, so one far longer is stale.
+                    val live = app.realController.liveCheck.value?.takeIf { it.durationS <= elapsed + 5 }
+                    ended = DayCheckGate.decide(live, seconds, need)
+                    if (ended != DayCheckGate.Verdict.CONTINUE) return@withTimeoutOrNull false
+                }
+                true
+            } == true
         } finally { running.value = null; withContext(NonCancellable) { runCatching { watch.stopRaw() } } }
+        val recordedS = (System.currentTimeMillis() / 1000.0 - startedAt).roundToInt()
         val f = file ?: return Outcome(false, 0.0)
         if (stopped) {
             f.delete(); app.db.recordings.delete(f.name)
@@ -363,28 +393,33 @@ class OvernightHrv(private val app: HeartlineApp, private val watch: WatchConnec
         // The share of the check the wrist was moving, by the same limit beat detection uses.
         val moving = result.motion.takeIf { it.isNotEmpty() }?.let { m -> m.count { it.g > MOVING_G }.toDouble() / m.size } ?: 0.0
         val ts = result.start.toLong()
-        // 45 s of clean back-to-back beats, wherever they fall in the check: RMSSD from 45 to 60 s of them was within
-        // 6% of the whole check's (median; 19% at the 90th percentile) when real daytime movement was cut out of clean
-        // overnight checks, with no bias (research/heartcheck-motion.md).
-        val need = minOf(seconds / 2, 45)
         // Signal quality over the beats found while the wrist was quiet: "beats" found while it moves are noise and
         // are set aside anyway, so counting them would fail a check for moving rather than for a poor signal.
         val quality = quietQuality(result)
         val clean = result.hrv.rmssdMs != null && quality >= 0.7 && result.usableS >= need
         val movingNote = if (moving >= 0.25) "wrist moving ${(moving * 100).roundToInt()}% of the time, " else ""
+        val scoutMoving = ended == DayCheckGate.Verdict.MOVING
         val reason = when {
+            scoutMoving && !clean -> "wrist moving: still for under ${DayCheckGate.SCOUT_STILL_S.roundToInt()} s of the first ${DayCheckGate.SCOUT_S.roundToInt()} s"
             result.hrv.rmssdMs == null -> "${movingNote}too few clean beats"
             quality < 0.7 -> "${movingNote}signal ${(quality * 100).roundToInt()}% (needs 70%)"
             result.usableS < need -> "${movingNote}only ${result.usableS.roundToInt()} s of clean beats (needs $need)"
             else -> null
         }
         val extra = extract(result, JSONObject().put("file", f.name))
-            .put("night", night.toString()).put("reason", reason ?: JSONObject.NULL).put("attempt", attempt).put("length_s", seconds)
+            .put("night", night.toString()).put("reason", reason ?: JSONObject.NULL).put("attempt", attempt).put("length_s", recordedS).put("max_s", seconds)
+            .put("ended", ended.name.lowercase())
             .put("moving_share", Math.round(moving * 1000) / 1000.0).apply { pose?.let { put("grav", poseJson(it)) } }.toString()
         app.db.health.upsert(listOf(HealthPoint(type, ts, if (clean) result.hrv.rmssdMs else null, extra)))
-        app.db.events.add("info", (if (type == SAMPLE) "Overnight" else "Daytime") + " HRV sample at ${clock(ts)}${if (attempt > 0) " (retry $attempt)" else ""}: " + if (clean) "RMSSD ${result.hrv.rmssdMs?.roundToInt()} ms, " +
-            "${result.hrBpm?.roundToInt()} bpm, breathing ${result.respiratoryRate ?: "–"}/min" else "set aside, $reason")
-        if (type != SAMPLE) return Outcome(clean, moving)
+        app.db.events.add("info", (if (type == SAMPLE) "Overnight" else "Daytime") + " HRV sample at ${clock(ts)}${if (attempt > 0) " (retry $attempt)" else ""}: " + (if (clean) "RMSSD ${result.hrv.rmssdMs?.roundToInt()} ms, " +
+            "${result.hrBpm?.roundToInt()} bpm, breathing ${result.respiratoryRate ?: "–"}/min" else "set aside, $reason") +
+            if (day) "; recorded $recordedS s of up to $seconds" + when (ended) {
+                DayCheckGate.Verdict.ENOUGH -> ", stopped with enough clean beats"
+                DayCheckGate.Verdict.MOVING -> ", stopped after the scout"
+                DayCheckGate.Verdict.CANT_REACH -> ", stopped when $need s of clean beats was out of reach"
+                DayCheckGate.Verdict.CONTINUE -> ""
+            } else "")
+        if (type != SAMPLE) return Outcome(clean, moving, scoutMoving = scoutMoving && !clean)
         // The night's value: the median of its clean samples, stamped at the latest one.
         if (clean) storeNight(app.db, night, zone)
         status.value = "Asleep; sample taken at ${clock(ts)}"

@@ -19,7 +19,7 @@
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
-> **Status: 0.12.3.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
+> **Status: 0.13.0.** Built and used daily on one Amazfit GTR 2e (firmware V1.7.3.1) with a Samsung Galaxy S24 Ultra.
 > Other Huami/Zepp watches of the same generation (GTR 2, GTS 2, GTS 2e) speak a similar protocol but are untested.
 
 ## Highlights
@@ -113,7 +113,9 @@ microphone, and answers on the watch's own Alexa screens: text, cards, tables, a
   short, broken night is still a nap.
 - **Automatic HRV**: samples overnight while you sleep and during still moments in the day. A check that is recording
   can be stopped from the banner at any time; one gives way to a workout capture, and daytime checks pause during a
-  watch workout and for an hour after three that aren't clean.
+  watch workout and for an hour after three that aren't clean. A daytime check first watches your wrist for 20 s and
+  stops if it was still for under 6 s of them (trying again 10 minutes later), then records only until it has 50 s of
+  clean beats, or until that is out of reach.
 - **Heart rate** all day (per-minute history plus live readings), sleeping and awake resting heart rate, and zones.
 - **Sleep page**: the night's stages as rounded blocks on four rows (awake, REM, light, deep) with each one's total,
   touch for the stretch, heart rate and SpO2 at that minute; each stage against its typical range, heart rate and SpO2 while asleep,

@@ -62,14 +62,15 @@ minute whose heart rate the movement raised, while the watch averages the whole 
 The beat-to-beat evidence (6, 11) is direct, and RMSSD is what the check is for.
 
 The bigger lever for daytime checks is **when** they run, not the signal processing: the wrist moves most of a
-daytime check (median 83% of the time above 0.015 g). That is the follow-up, designed with Gemini and checked on these
-recordings, not built:
+daytime check (median 83% of the time above 0.015 g). That follow-up was designed with Gemini, checked on these
+recordings, and built in 0.13.0 (`DayCheckGate`, from the live result the app already works out each second):
 
 - **Short scouts, spaced out.** Open the stream for 20 s; if the wrist was still (≤ 0.015 g) for less than 6 s of it,
-  stop and try again 8–10 minutes later, instead of three 2-minute tries back to back inside the same bout of typing.
+  stop and try again 8–10 minutes later (built: 10 minutes, and a scout is not one of the three tries), instead of three
+  2-minute tries back to back inside the same bout of typing.
   On the 191 daytime checks this would have ended **131 after 20 s and lost 3 of the 29 that passed**.
-- **Stop when done.** Run until 50 s of clean beats (5 s spare over the 45 s rule), up to 3 minutes, and give up as soon
-  as the target can no longer be reached. The checks that passed reached 50 s at a median **74 s** (IQR 64–88), not
+- **Stop when done.** Run until 50 s of clean beats (5 s spare over the 45 s rule), up to the check's length (2 minutes
+  by default), and give up as soon as 45 s can no longer be reached. The checks that passed reached 50 s at a median **74 s** (IQR 64–88), not
   120 s.
 - Untested here, and needing the watch: whether the accelerometer can stream with the LED off (mask 0x01 alone), what
   continuous scouting costs the watch's battery, and whether the bout patterns of a whole desk day match these
@@ -117,7 +118,7 @@ of measurements (never personal data), asked to research and critique. What it s
   sampling mismatch (quiet subset vs a whole, partly moving minute), not a reason to keep the magnitude gate. Nights,
   where the gates agree, support that.
 - **Scheduling is the bigger lever** than more filtering: start a check after a few seconds of stillness and run it
-  until 45 s of clean beats are in, up to a cap. Not built here; see the follow-up.
+  until 45 s of clean beats are in, up to a cap. Built in 0.13.0; see the follow-up.
 - **SpO2 / red-IR**: no published or reverse-engineered evidence (Gadgetbridge, huami-token tooling) that Huami/Zepp
   watches stream red or IR samples; SpO2 arrives only as computed records. It suggested one more probe: raw streaming
   *while* an on-watch SpO2 spot measurement runs, in case the red/IR LEDs only feed the stream when lit. The overnight

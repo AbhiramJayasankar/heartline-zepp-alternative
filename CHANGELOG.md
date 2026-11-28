@@ -2,6 +2,13 @@
 
 Every Heartline release, newest first. Each entry is also the release's notes on GitHub, where its APK is.
 
+## 0.13.0 (2026-11-28)
+
+### Changed
+
+- **Daytime heart checks wait for a still wrist and stop when they have enough.** A daytime check now watches your wrist for its first 20 seconds and stops there if it was still for under 6 of them, trying again 10 minutes later. These short scouts don't count towards the three tries before the hour's pause, so a morning of typing costs a 20 s scout every 10 minutes instead of three 2-minute checks back to back. A check that goes on stops as soon as it has 50 seconds of clean beats, or as soon as the 45 it needs is out of reach. On 191 recorded daytime checks, the scout would have ended 131 after 20 s and lost 3 of the 29 that passed, and the checks that passed had enough beats at a median 74 s instead of 120. The first one on the phone stopped at 62 s with a clean reading. Overnight checks are unchanged.
+- **The event log says how long each daytime check recorded and why it ended**, and the app keeps both with the sample.
+
 ## 0.12.3 (2026-11-28)
 
 ### Fixed
