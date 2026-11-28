@@ -157,9 +157,10 @@ private fun span(min: Int) = if (min >= 60) "${min / 60}h ${"%02d".format(min % 
 private fun Color.lit(dark: Boolean) = lerp(this, Color.White, if (dark) 0.16f else 0.12f)
 
 /**
- * Draws the stretches in rows [top]..[top] + 4 * [rowH] between [x0] and [x1]: each change of stage is a soft ribbon
- * as wide as [connector], fading from one stage's colour to the next, then the stretches as solid rounded blocks over
- * it. Stretches other than [focus] fade when one is picked.
+ * Draws the stretches in rows [top]..[top] + 4 * [rowH] between [x0] and [x1]: the stretches as rounded blocks lit from
+ * above, and at each change of stage a bar as wide as [connector] running the blocks' full height, from the top of the
+ * upper block to the bottom of the lower, fading from one stage's colour to the next. Stretches other than [focus]
+ * fade when one is picked.
  */
 private fun DrawScope.stages(stretches: List<StageStretch>, start: Long, end: Long, x0: Float, x1: Float, top: Float, rowH: Float,
                              c: Palette, blockFrac: Float, connector: Dp, focus: StageStretch?) {
@@ -168,18 +169,6 @@ private fun DrawScope.stages(stretches: List<StageStretch>, start: Long, end: Lo
     val bh = rowH * blockFrac
     val fade = { s: StageStretch -> if (focus == null || focus == s) 1f else 0.25f }
     val cw = connector.toPx()
-    // Ribbons first, so the blocks sit over their ends. They start and end inside the blocks, so no edge shows.
-    stretches.zipWithNext().forEach { (a, b) ->
-        if (b.start - a.end > 300 || a.lane == b.lane) return@forEach
-        val xx = x(b.start) - cw / 2
-        val upper = if (a.lane < b.lane) a else b; val lower = if (upper === a) b else a
-        val y0 = cy(upper.lane); val y1 = cy(lower.lane)
-        val alpha = 0.6f * min(fade(a), fade(b))
-        // Strong where it meets each block, nearly gone between them: a change of stage reads as a glow, not a line.
-        val mid = lerp(c.stageColor(upper.lane), c.stageColor(lower.lane), 0.5f).copy(alpha = alpha * 0.18f)
-        drawRoundRect(Brush.verticalGradient(listOf(c.stageColor(upper.lane).copy(alpha = alpha), mid, c.stageColor(lower.lane).copy(alpha = alpha)), y0, y1),
-            Offset(xx, y0), Size(cw, y1 - y0), CornerRadius(cw / 2))
-    }
     val minW = max(cw, 3.dp.toPx())
     stretches.forEach { s ->
         val left = x(s.start); val w = max(minW, x(s.end) - left)
@@ -189,12 +178,23 @@ private fun DrawScope.stages(stretches: List<StageStretch>, start: Long, end: Lo
         val a = fade(s)
         drawRoundRect(Brush.verticalGradient(listOf(col.lit(c.isDark).copy(alpha = a), col.copy(alpha = a)), y, y + bh), Offset(left, y), Size(w, bh), CornerRadius(r))
     }
+    // Over the blocks' ends, from the upper block's top edge to the lower block's bottom edge.
+    stretches.zipWithNext().forEach { (a, b) ->
+        if (b.start - a.end > 300 || a.lane == b.lane) return@forEach
+        val xx = x(b.start) - cw / 2
+        val upper = if (a.lane < b.lane) a else b; val lower = if (upper === a) b else a
+        val y0 = cy(upper.lane) - bh / 2; val y1 = cy(lower.lane) + bh / 2
+        val alpha = 0.6f * min(fade(a), fade(b))
+        val mid = lerp(c.stageColor(upper.lane), c.stageColor(lower.lane), 0.5f).copy(alpha = alpha * 0.18f)
+        drawRoundRect(Brush.verticalGradient(listOf(c.stageColor(upper.lane).copy(alpha = alpha), mid, c.stageColor(lower.lane).copy(alpha = alpha)), y0, y1),
+            Offset(xx, y0), Size(cw, y1 - y0), CornerRadius(cw / 2))
+    }
 }
 
 /**
  * The night's sleep stages, after the way a watch shows them: a row per stage (awake, REM, light, deep) with its total
- * on the left, each stretch a rounded block in its stage's colour, a thin gradient line joining one stretch to the
- * next, and the time along the bottom. Touch or drag for the stretch at that moment, with heart rate and blood oxygen;
+ * on the left, each stretch a rounded block in its stage's colour, a bar down the blocks' sides joining one
+ * stretch to the next, and the time along the bottom. Touch or drag for the stretch at that moment, with heart rate and blood oxygen;
  * the rest of the night fades back while one is picked. [totals] are the night's minutes per row (awake, REM, light,
  * deep) as the rest of the page counts them; without them the rows are summed from [minutes].
  */

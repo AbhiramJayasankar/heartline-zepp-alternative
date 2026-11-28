@@ -2,6 +2,12 @@
 
 Every Heartline release, newest first. Each entry is also the release's notes on GitHub, where its APK is.
 
+## 0.12.1 (2026-11-28)
+
+### Changed
+
+- **The sleep stages chart is cleaner.** The soft glow between stages is gone. Each change of stage is now one bar that runs from the top of the upper block to the bottom of the lower one, fading from one stage's colour to the next, drawn over the blocks' ends so no seam shows.
+
 ## 0.12.0 (2026-11-28)
 
 ### Added
