@@ -2,6 +2,12 @@
 
 Every Heartline release, newest first. Each entry is also the release's notes on GitHub, where its APK is.
 
+## 0.12.2 (2026-11-28)
+
+### Changed
+
+- **Sleep stages are drawn as a watch draws them.** Each block now sits in a see-through rim of its colour, and the bar between two stages flows out of one rim into the next with curved joins. The blocks are a little slimmer, and touching a stretch lights its own rim and joins while the rest fade back.
+
 ## 0.12.1 (2026-11-28)
 
 ### Changed

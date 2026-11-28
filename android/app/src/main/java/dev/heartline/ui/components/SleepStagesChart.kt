@@ -26,9 +26,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
@@ -157,37 +163,89 @@ private fun span(min: Int) = if (min >= 60) "${min / 60}h ${"%02d".format(min % 
 private fun Color.lit(dark: Boolean) = lerp(this, Color.White, if (dark) 0.16f else 0.12f)
 
 /**
- * Draws the stretches in rows [top]..[top] + 4 * [rowH] between [x0] and [x1]: the stretches as rounded blocks lit from
- * above, and at each change of stage a bar as wide as [connector] running the blocks' full height, from the top of the
- * upper block to the bottom of the lower, fading from one stage's colour to the next. Stretches other than [focus]
- * fade when one is picked.
+ * Draws the stretches in rows [top]..[top] + 4 * [rowH] between [x0] and [x1], after the way a watch draws them: each
+ * stretch a solid rounded block lit from above, inside a see-through rim of its colour, and at each change of stage a bar twice the
+ * rim's width ([connector]) centred on the change, from the upper block's rim to the lower's. Inside a row the bar is
+ * lost in the rims; between rows it shades from one stage's colour to the next and widens into each rim with a curved
+ * fillet, so one block flows into the next. Stretches other than [focus] fade when one is picked.
  */
 private fun DrawScope.stages(stretches: List<StageStretch>, start: Long, end: Long, x0: Float, x1: Float, top: Float, rowH: Float,
                              c: Palette, blockFrac: Float, connector: Dp, focus: StageStretch?) {
     fun x(ts: Long) = x0 + (ts - start).toFloat() / max(1L, end - start) * (x1 - x0)
     fun cy(lane: Int) = top + rowH * (lane + 0.5f)
     val bh = rowH * blockFrac
-    val fade = { s: StageStretch -> if (focus == null || focus == s) 1f else 0.25f }
-    val cw = connector.toPx()
+    val cw = connector.toPx(); val h = cw / 2
     val minW = max(cw, 3.dp.toPx())
-    stretches.forEach { s ->
-        val left = x(s.start); val w = max(minW, x(s.end) - left)
-        val col = c.stageColor(s.lane)
-        val y = cy(s.lane) - bh / 2
-        val r = min(min(7.dp.toPx(), w / 2), bh / 2)
-        val a = fade(s)
-        drawRoundRect(Brush.verticalGradient(listOf(col.lit(c.isDark).copy(alpha = a), col.copy(alpha = a)), y, y + bh), Offset(left, y), Size(w, bh), CornerRadius(r))
+    val radius = bh * 0.2f
+    val fillet = bh * 0.16f
+    val blocks = stretches.map { s ->
+        val left = x(s.start); val w = max(minW, x(s.end) - left); val y = cy(s.lane) - bh / 2
+        RoundRect(left, y, left + w, y + bh, CornerRadius(min(radius, w / 2)))
     }
-    // Over the blocks' ends, from the upper block's top edge to the lower block's bottom edge.
-    stretches.zipWithNext().forEach { (a, b) ->
-        if (b.start - a.end > 300 || a.lane == b.lane) return@forEach
-        val xx = x(b.start) - cw / 2
-        val upper = if (a.lane < b.lane) a else b; val lower = if (upper === a) b else a
-        val y0 = cy(upper.lane) - bh / 2; val y1 = cy(lower.lane) + bh / 2
-        val alpha = 0.6f * min(fade(a), fade(b))
-        val mid = lerp(c.stageColor(upper.lane), c.stageColor(lower.lane), 0.5f).copy(alpha = alpha * 0.18f)
-        drawRoundRect(Brush.verticalGradient(listOf(c.stageColor(upper.lane).copy(alpha = alpha), mid, c.stageColor(lower.lane).copy(alpha = alpha)), y0, y1),
-            Offset(xx, y0), Size(cw, y1 - y0), CornerRadius(cw / 2))
+    val rims = blocks.map { r -> RoundRect(r.left - h, r.top - h, r.right + h, r.bottom + h, CornerRadius(r.topLeftCornerRadius.x + h)) }
+    val joins = (0 until stretches.size - 1).filter { i ->
+        val a = stretches[i]; val b = stretches[i + 1]
+        b.start - a.end <= 300 && a.lane != b.lane
+    }
+
+    // The bars and rims, drawn solid in a layer that's laid down see-through, so where they overlap they don't add up.
+    fun rimsAndBars(only: Set<Int>?, layerAlpha: Float) {
+        drawIntoCanvas { it.saveLayer(Rect(Offset.Zero, size), Paint().apply { alpha = layerAlpha }) }
+        for (i in joins) {
+            if (only != null && i !in only && i + 1 !in only) continue
+            val a = stretches[i]; val b = stretches[i + 1]
+            val bx = x(b.start)
+            val ui = if (a.lane < b.lane) i else i + 1; val li = if (ui == i) i + 1 else i
+            val ur = rims[ui]; val lr = rims[li]
+            // Which way from the bar each block lies: the earlier stretch on the left, the later on the right.
+            val uSide = if (ui == i) -1f else 1f; val lSide = -uSide
+            val bar = Path().apply {
+                // Between the rims only: past the near corners the rims carry it, and a bar to their far corners would
+                // poke out past their curve.
+                addRect(Rect(bx - h, ur.bottom - min(ur.topLeftCornerRadius.x, (ur.right - ur.left) / 2), bx + h,
+                    lr.top + min(lr.topLeftCornerRadius.x, (lr.right - lr.left) / 2)))
+                // Square off each rim's corner on the bar's side, so the bar meets a straight edge, then curve into it.
+                for ((rim, side, down) in listOf(Triple(ur, uSide, true), Triple(lr, lSide, false))) {
+                    val w = rim.right - rim.left
+                    val rc = min(rim.topLeftCornerRadius.x, w / 2)
+                    val outer = bx - side * h // the rim's edge on the bar's side
+                    val edgeY = if (down) rim.bottom else rim.top
+                    addRect(Rect(min(outer, outer + side * rc), if (down) edgeY - rc else edgeY, max(outer, outer + side * rc), if (down) edgeY else edgeY + rc))
+                    val f = min(fillet, max(0f, w - cw - rc))
+                    addPath(filletPath(bx + side * h, edgeY, side, if (down) 1f else -1f, f))
+                }
+            }
+            val span = lr.bottom - ur.top
+            val up = c.stageColor(stretches[ui].lane); val dn = c.stageColor(stretches[li].lane)
+            drawPath(bar, Brush.verticalGradient(0f to up, ((ur.bottom - ur.top) / span) to up, (1 - (lr.bottom - lr.top) / span) to dn, 1f to dn,
+                startY = ur.top, endY = lr.bottom))
+        }
+        rims.forEachIndexed { i, r -> if (only == null || i in only) drawPath(Path().apply { addRoundRect(r) }, c.stageColor(stretches[i].lane)) }
+        // Cut the blocks out, so a faded block doesn't show its rim through it.
+        blocks.forEach { r -> drawPath(Path().apply { addRoundRect(r) }, Color.Black, blendMode = BlendMode.Clear) }
+        drawIntoCanvas { it.restore() }
+    }
+    rimsAndBars(null, if (focus == null) 0.5f else 0.14f)
+    val fi = focus?.let { stretches.indexOf(it) } ?: -1
+    if (fi >= 0) rimsAndBars(setOf(fi), 0.5f)
+    stretches.forEachIndexed { i, s ->
+        val a = if (focus == null || focus == s) 1f else 0.25f
+        val col = c.stageColor(s.lane); val r = blocks[i]
+        drawPath(Path().apply { addRoundRect(r) }, Brush.verticalGradient(listOf(col.lit(c.isDark).copy(alpha = a), col.copy(alpha = a)), r.top, r.bottom))
+    }
+}
+
+/**
+ * A concave fillet in the corner at ([cx], [cy]) where a bar's side meets a block's edge: it reaches [f] along the edge
+ * (towards [dx]) and [f] along the bar (towards [dy]), its open side a quarter circle, so the bar curves into the block.
+ */
+private fun filletPath(cx: Float, cy: Float, dx: Float, dy: Float, f: Float): Path {
+    val k = 0.5523f // a cubic's handle length for a quarter circle
+    return Path().apply {
+        moveTo(cx, cy)
+        lineTo(cx, cy + dy * f)
+        cubicTo(cx, cy + dy * f * (1 - k), cx + dx * f * (1 - k), cy, cx + dx * f, cy)
+        close()
     }
 }
 
@@ -273,7 +331,7 @@ fun SleepStagesChart(minutes: List<MinuteUi>, start: Long, end: Long, modifier: 
             drawText(nameText, topLeft = Offset(0f, y))
             drawText(total, topLeft = Offset(0f, y + nameText.size.height))
         }
-        stages(stretches, start, end, x0, x1, 0f, rowH, c, blockFrac = 0.66f, connector = 6.dp, focus = focus)
+        stages(stretches, start, end, x0, x1, 0f, rowH, c, blockFrac = 0.6f, connector = 4.dp, focus = focus)
         // The time along the bottom: a dot every half hour, a bar at each end with its clock time under it.
         val ay = rowH * 4 + 9.dp.toPx()
         val firstHalf = (start / 1800 + 1) * 1800
@@ -312,7 +370,7 @@ fun SleepStagesMini(minutes: List<MinuteUi>, start: Long, end: Long, modifier: M
     val c = HL.colors
     val stretches = remember(minutes, start, end) { smoothStretches(stageStretches(minutes, start, end)) }
     Canvas(modifier.fillMaxWidth().height(height).semantics { contentDescription = "Sleep stages from ${clockAt(start)} to ${clockAt(end)}" }) {
-        stages(stretches, start, end, 0f, size.width, 0f, size.height / 4, c, blockFrac = 0.72f, connector = 3.dp, focus = null)
+        stages(stretches, start, end, 0f, size.width, 0f, size.height / 4, c, blockFrac = 0.64f, connector = 2.dp, focus = null)
     }
 }
 
